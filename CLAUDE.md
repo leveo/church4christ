@@ -22,7 +22,7 @@ do not create a second provisioning path or replace setup with raw seed commands
    takes `--locales en,zh --default-locale en` (`--locale x` alone = en+zh enabled, default x; `--locales` wins when both are given).
    Later changes go through **Settings → Languages**. Content and emails fall back requested →
    default → English; disabling a language hides it and never deletes content. To add or review
-   a language follow [docs/i18n.md](docs/i18n.md#add-a-language-checklist): registry entry
+   a language follow [docs/i18n.md](docs/i18n.md#add-or-translate-a-language): registry entry
    (`src/lib/locales.ts` + `config/locales.json`), dictionary with parity tests, glossary, fonts.
    Do not branch on `=== 'zh'`; use the registry helpers.
 5. Recommend **Website + Community / Cloudflare D1** to start. Workers and R2 are also

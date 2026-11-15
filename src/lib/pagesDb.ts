@@ -6,7 +6,7 @@
 // statement (INSERT ... ON CONFLICT(id) DO UPDATE) covers both create and
 // update — no RETURNING-id branch is needed.
 import type { AppDb } from './appDb';
-import type { Locale } from './locales';
+import { isSupportedLocale, type Locale, type SupportedLocale } from './locales';
 
 export type PageFormat = 'markdown' | 'builder';
 
@@ -27,6 +27,8 @@ export interface CustomPageDetail {
   format: PageFormat;
   layout_json: string | null;
   i18n: { en: { title: string; body_md: string }; zh: { title: string; body_md: string } };
+  /** Any other supported language that has a row (es, ja, ...). */
+  extra: Partial<Record<SupportedLocale, { title: string; body_md: string }>>;
 }
 
 export interface SaveCustomPageInput {
@@ -37,6 +39,8 @@ export interface SaveCustomPageInput {
   title_zh: string;
   body_en: string;
   body_zh: string;
+  /** Other supported languages (es, ja, ...): written beside the en/zh rows. */
+  extra?: Partial<Record<SupportedLocale, { title: string; body_md: string }>>;
   updatedBy: string;
 }
 
@@ -55,21 +59,28 @@ export async function listCustomPages(db: AppDb): Promise<CustomPageListRow[]> {
   return results.map((r) => ({ ...r, published: r.published === 1 }));
 }
 
-async function loadI18n(db: AppDb, pageId: string): Promise<CustomPageDetail['i18n']> {
+async function loadI18n(db: AppDb, pageId: string): Promise<Pick<CustomPageDetail, 'i18n' | 'extra'>> {
   const { results } = await db
     .prepare(`SELECT locale, title, body_md FROM custom_page_i18n WHERE page_id = ?1`)
     .bind(pageId)
     .all<{ locale: string; title: string; body_md: string }>();
   const byLocale = Object.fromEntries(results.map((r) => [r.locale, { title: r.title, body_md: r.body_md }]));
+  const extra: CustomPageDetail['extra'] = {};
+  for (const [code, text] of Object.entries(byLocale)) {
+    if (code !== 'en' && code !== 'zh' && isSupportedLocale(code)) extra[code] = text;
+  }
   return {
-    en: byLocale.en ?? { title: '', body_md: '' },
-    zh: byLocale.zh ?? { title: '', body_md: '' },
+    i18n: {
+      en: byLocale.en ?? { title: '', body_md: '' },
+      zh: byLocale.zh ?? { title: '', body_md: '' },
+    },
+    extra,
   };
 }
 
 function toDetail(
   page: { id: string; slug: string; published: number; format: PageFormat; layout_json: string | null },
-  i18n: CustomPageDetail['i18n'],
+  loaded: Pick<CustomPageDetail, 'i18n' | 'extra'>,
 ): CustomPageDetail {
   return {
     id: page.id,
@@ -77,7 +88,7 @@ function toDetail(
     published: page.published === 1,
     format: page.format,
     layout_json: page.layout_json,
-    i18n,
+    ...loaded,
   };
 }
 
@@ -130,6 +141,11 @@ export async function saveCustomPage(
     db.prepare(`DELETE FROM custom_page_i18n WHERE page_id = ?1`).bind(id),
     db.prepare(`INSERT INTO custom_page_i18n (page_id, locale, title, body_md) VALUES (?1, 'en', ?2, ?3)`).bind(id, input.title_en, input.body_en),
     db.prepare(`INSERT INTO custom_page_i18n (page_id, locale, title, body_md) VALUES (?1, 'zh', ?2, ?3)`).bind(id, input.title_zh, input.body_zh),
+    ...Object.entries(input.extra ?? {})
+      .filter((entry): entry is [SupportedLocale, { title: string; body_md: string }] => isSupportedLocale(entry[0]) && entry[0] !== 'en' && entry[0] !== 'zh' && Boolean(entry[1]))
+      .map(([locale, text]) =>
+        db.prepare(`INSERT INTO custom_page_i18n (page_id, locale, title, body_md) VALUES (?1, ?2, ?3, ?4)`).bind(id, locale, text.title, text.body_md),
+      ),
     db
       .prepare(`INSERT INTO revisions (entity, entity_id, snapshot_json, edited_by) VALUES ('custom_page', ?1, ?2, ?3)`)
       .bind(id, snapshotJson, updatedBy),

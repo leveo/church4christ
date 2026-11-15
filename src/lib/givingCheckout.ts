@@ -1,4 +1,4 @@
-import { isSupportedLocale } from './locales';
+import { isSupportedLocale, type SupportedLocale } from './locales';
 // Pure checkout-form parsing for the giving checkout endpoint — no Astro, no DB,
 // so it unit-tests without a request lifecycle. The endpoint stays thin: it reads
 // the raw form fields, runs them through here, and turns a rejection into a 303
@@ -43,7 +43,7 @@ export interface GivingCheckoutDigestInput {
   amountCents: number;
   currency: string;
   frequency: Frequency;
-  locale: 'en' | 'zh';
+  locale: SupportedLocale;
   personId: number | null;
   donorName: string;
   donorEmail: string;

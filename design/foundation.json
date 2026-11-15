@@ -24,6 +24,21 @@
     "tracking": {
       "display": "-0.015em",
       "caps": "0.08em"
+    },
+    "scriptFonts": {
+      "$comment": "System font stacks per script, applied through :lang(<code>) after the theme's own family. kind sans/serif follows each theme font's generic fallback. zh keeps the theme fallbacks.",
+      "ja": {
+        "sans": "'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic', 'Meiryo', 'Noto Sans JP'",
+        "serif": "'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP'"
+      },
+      "ko": {
+        "sans": "'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR'",
+        "serif": "'Nanum Myeongjo', 'Noto Serif KR'"
+      },
+      "hi": {
+        "sans": "'Kohinoor Devanagari', 'Noto Sans Devanagari', 'Nirmala UI'",
+        "serif": "'Kohinoor Devanagari', 'Noto Serif Devanagari', 'Nirmala UI'"
+      }
     }
   },
   "container": {

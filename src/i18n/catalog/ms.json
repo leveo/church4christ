@@ -1,0 +1,185 @@
+{
+  "capabilities": {
+    "bulletins": {
+      "label": "Buletin",
+      "description": "Bina dan terbitkan buletin kebaktian mingguan."
+    },
+    "sermons": {
+      "label": "Khutbah",
+      "description": "Terbitkan arkib khutbah yang boleh dicari."
+    },
+    "prayer-sheets": {
+      "label": "Lembaran Doa",
+      "description": "Sediakan dan terbitkan lembaran doa."
+    },
+    "prayer-wall": {
+      "label": "Dinding Doa",
+      "description": "Terima dan jaga permohonan doa."
+    },
+    "events": {
+      "label": "Acara",
+      "description": "Terbitkan acara dan pengumuman."
+    },
+    "serve": {
+      "label": "Penjadualan Sukarelawan",
+      "description": "Selaraskan pelayanan, pasukan, rancangan dan peringatan."
+    },
+    "gifts": {
+      "label": "Karunia Rohani",
+      "description": "Bantu orang menemui karunia dan padanan pelayanan."
+    },
+    "testimonies": {
+      "label": "Kesaksian",
+      "description": "Kumpulkan dan terbitkan kesaksian pelayanan."
+    },
+    "articles": {
+      "label": "Artikel",
+      "description": "Terbitkan artikel dwibahasa."
+    },
+    "fellowships": {
+      "label": "Persekutuan",
+      "description": "Terbitkan direktori persekutuan."
+    },
+    "groups": {
+      "label": "Kumpulan",
+      "description": "Urus keahlian kumpulan, acara, pendaftaran dan kehadiran."
+    },
+    "people": {
+      "label": "Orang & Isi Rumah",
+      "description": "Urus orang, isi rumah dan nota pastoral."
+    },
+    "children": {
+      "label": "Daftar Masuk Kanak-kanak",
+      "description": "Jalankan daftar masuk dan kehadiran kanak-kanak yang selamat."
+    },
+    "attendance": {
+      "label": "Kehadiran Kebaktian",
+      "description": "Rekodkan kehadiran kebaktian orang dewasa secara agregat dan laporkan daftar masuk kanak-kanak."
+    },
+    "newcomers": {
+      "label": "Susulan Pengunjung Baharu",
+      "description": "Terima kad pengunjung baharu dan selaraskan susulan peribadi."
+    },
+    "activity-score": {
+      "label": "Skor Aktiviti",
+      "description": "Pantau aktiviti ahli yang boleh dijelaskan dan penglibatan seluruh gereja."
+    },
+    "page-builder": {
+      "label": "Pembina Halaman",
+      "description": "Bina halaman dwibahasa tersuai dengan blok."
+    },
+    "portal": {
+      "label": "Portal Ahli",
+      "description": "Sediakan alat isi rumah, kumpulan, kalendar, doa dan penemuan peluang kepada ahli."
+    },
+    "giving": {
+      "label": "Pemberian",
+      "description": "Rekodkan pemberian dan terima pembayaran Stripe secara pilihan."
+    },
+    "registration": {
+      "label": "Pendaftaran",
+      "description": "Jalankan pendaftaran acara percuma atau berbayar."
+    },
+    "learning": {
+      "label": "Pembelajaran",
+      "description": "Teruskan kursus pelayanan melangkaui masa kelas."
+    },
+    "planning": {
+      "label": "Perancangan Kebaktian",
+      "description": "Rancang lembaran aturan acara, latihan, kesediaan dan kalendar untuk kebaktian dan acara."
+    }
+  },
+  "presets": {
+    "website": {
+      "label": "Laman Web",
+      "description": "Laman web awam yang fokus dan perkakas penerbitan."
+    },
+    "website-community": {
+      "label": "Laman Web + Komuniti",
+      "description": "Penerbitan laman web serta alat komuniti dan sukarelawan."
+    },
+    "full-church": {
+      "label": "Gereja Penuh",
+      "description": "Setiap keupayaan laman web, komuniti, portal, pemberian dan pendaftaran."
+    },
+    "checkin": {
+      "label": "Daftar Masuk Kanak-kanak",
+      "description": "Isi rumah, kiosk daftar masuk layan diri dan konsol pelayanan kanak-kanak."
+    },
+    "volunteer-scheduling": {
+      "label": "Penjadualan Sukarelawan",
+      "description": "Pelayanan, pasukan, jadual pelayanan, peringatan dan kuiz karunia rohani."
+    },
+    "small-groups": {
+      "label": "Kumpulan Kecil",
+      "description": "Kumpulan kecil dengan keahlian, acara dan kehadiran, serta direktori persekutuan."
+    }
+  },
+  "readiness": {
+    "identity": {
+      "title": "Identiti gereja",
+      "description": "Sahkan manifes pemasangan dan identiti gereja awam.",
+      "remediation": "Lengkapkan persediaan dan semak tetapan identiti."
+    },
+    "locales": {
+      "title": "Teks Inggeris dan Cina",
+      "description": "Semak teks awam dalam kedua-dua bahasa yang disokong.",
+      "remediation": "Semak tetapan dan halaman Inggeris dan Cina."
+    },
+    "service-times": {
+      "title": "Waktu kebaktian",
+      "description": "Sahkan waktu kebaktian terkini dalam kedua-dua bahasa.",
+      "remediation": "Kemas kini waktu kebaktian dalam Tetapan."
+    },
+    "admin-grants": {
+      "title": "Pemberian akses kakitangan",
+      "description": "Semak akses pentadbir terhad dan kakitangan berskop.",
+      "remediation": "Semak pemberian peranan dan kawasan dalam Orang."
+    },
+    "people-migration": {
+      "title": "Keputusan migrasi Orang",
+      "description": "Rekodkan sama ada data Orang diimport atau sengaja bermula kosong.",
+      "remediation": "Lengkapkan import atau akui keputusan tanpa import."
+    },
+    "newcomer-owner": {
+      "title": "Pemilik pengunjung baharu",
+      "description": "Tugaskan tanggungjawab untuk baris gilir pengunjung baharu.",
+      "remediation": "Pilih pemilik dan semak aliran kerja baris gilir."
+    },
+    "attendance-checkin-mapping": {
+      "title": "Pemetaan kehadiran dan daftar masuk",
+      "description": "Sahkan kehadiran kebaktian dipetakan kepada acara daftar masuk.",
+      "remediation": "Semak jenis kebaktian dan pautan daftar masuk."
+    },
+    "origin-domain-email": {
+      "title": "Asal, domain dan penghantaran",
+      "description": "Sahkan pengikatan runtime dan penghantaran pengeluaran di luar aplikasi.",
+      "remediation": "Sahkan domain, pengikatan, e-mel, storan dan mod pembayaran Stripe (ujian, atau langsung selepas senarai semak mula beroperasi)."
+    },
+    "routes-jobs": {
+      "title": "Laluan dan tugas berjadual",
+      "description": "Konfigurasi tidak membuktikan laluan atau tugas berjalan dengan jayanya.",
+      "remediation": "Uji laluan awam dan sahkan setiap tugas berjadual."
+    },
+    "learning-provider-operations": {
+      "title": "Operasi penyedia Pembelajaran",
+      "description": "Sahkan OAuth dan skop Google Classroom atau Canvas, pemberitahuan yang disahkan, penyegerakan manual, penyelenggaraan :15, penyelarasan :45, putaran bukti kelayakan, pemadaman penyahsambungan, pengekalan dan pemulihan yang sepadan.",
+      "remediation": "Ikuti buku panduan Pembelajaran dan rekodkan bukti pemetaan/penyegerakan penyedia, Pub/Sub atau Live Events bertandatangan, pembersihan, pengekalan/pemadaman dan pemulihan."
+    },
+    "database-schema": {
+      "title": "Skema pangkalan data",
+      "description": "Sahkan ketersambungan, migrasi dan jadual yang diperlukan.",
+      "remediation": "Gunakan migrasi ke hadapan dan jalankan semula doctor."
+    },
+    "backups": {
+      "title": "Sandaran",
+      "description": "Bukti kelayakan yang dikonfigurasikan tidak membuktikan sandaran yang boleh digunakan wujud.",
+      "remediation": "Jalankan sandaran dan sahkan destinasinya yang dilindungi."
+    },
+    "restore-drill": {
+      "title": "Latihan pemulihan",
+      "description": "Latihan pemulihan mesti diulang setiap 90 hari.",
+      "remediation": "Pulihkan sandaran secara terasing, sahkannya, kemudian akui semakan ini."
+    }
+  }
+}

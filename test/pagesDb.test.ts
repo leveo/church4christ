@@ -87,6 +87,7 @@ describe('getCustomPage / getCustomPageBySlug', () => {
         en: { title: 'About Us', body_md: 'We are a **church**.' },
         zh: { title: '关于我们', body_md: '我们是一间**教会**。' },
       },
+      extra: {},
     });
   });
 
@@ -138,6 +139,7 @@ describe('saveCustomPage — update', () => {
         en: { title: 'About Us (updated)', body_md: 'New body.' },
         zh: { title: '关于我们', body_md: '我们是一间**教会**。' },
       },
+      extra: {},
     });
 
     const { results: revs } = await env.DB
@@ -174,6 +176,7 @@ describe('toggleCustomPagePublished', () => {
         en: { title: 'About Us', body_md: 'We are a **church**.' },
         zh: { title: '关于我们', body_md: '我们是一间**教会**。' },
       },
+      extra: {},
     });
   });
 

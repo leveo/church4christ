@@ -1,4 +1,5 @@
-import { type Locale, pickByLocale } from '../lib/locales';
+import type { Locale } from '../lib/locales';
+import { designCopy } from '../lib/i18n';
 
 const en = {
   peopleEyebrow: 'PEOPLE & CONNECTIONS',
@@ -84,4 +85,6 @@ const zh: Record<keyof typeof en, string> = {
   prayerStages: '跳转到关怀阶段',
 };
 
-export const careCopy = (locale: Locale) => pickByLocale({ en, zh }, locale);
+export const careCopy = (locale: Locale) => designCopy('care', { en, zh }, locale);
+/** Source maps for the parity tooling (scripts/i18n). */
+export const careSource = { en, zh };

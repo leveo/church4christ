@@ -670,7 +670,7 @@ describe('buildCanonicalExportParts runtime source validation', () => {
 
   it.each([
     ['person membership status', (candidate: any) => { candidate.people[0].membershipStatus = null; }],
-    ['person language', (candidate: any) => { candidate.people[0].language = 'fr'; }],
+    ['person language', (candidate: any) => { candidate.people[0].language = 'xx'; }],
     ['person active flag', (candidate: any) => { candidate.people[0].active = 'true'; }],
     ['person stable key', (candidate: any) => { candidate.people[0].stableKey = []; }],
     ['person display name', (candidate: any) => { candidate.people[0].displayName = undefined; }],

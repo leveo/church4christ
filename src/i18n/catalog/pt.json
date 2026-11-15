@@ -1,0 +1,185 @@
+{
+  "capabilities": {
+    "bulletins": {
+      "label": "Boletins",
+      "description": "Crie e publique os boletins semanais dos cultos."
+    },
+    "sermons": {
+      "label": "Mensagens",
+      "description": "Publique um arquivo de mensagens com busca."
+    },
+    "prayer-sheets": {
+      "label": "Folhas de oração",
+      "description": "Prepare e publique folhas de oração."
+    },
+    "prayer-wall": {
+      "label": "Mural de oração",
+      "description": "Receba e cuide dos pedidos de oração."
+    },
+    "events": {
+      "label": "Eventos",
+      "description": "Publique eventos e avisos."
+    },
+    "serve": {
+      "label": "Escala de voluntários",
+      "description": "Coordene ministérios, equipes, escalas e lembretes."
+    },
+    "gifts": {
+      "label": "Dons espirituais",
+      "description": "Ajude as pessoas a descobrir seus dons e encontrar onde servir."
+    },
+    "testimonies": {
+      "label": "Testemunhos",
+      "description": "Colete e publique testemunhos de serviço."
+    },
+    "articles": {
+      "label": "Artigos",
+      "description": "Publique artigos bilíngues."
+    },
+    "fellowships": {
+      "label": "Comunhões",
+      "description": "Publique o diretório de comunhões."
+    },
+    "groups": {
+      "label": "Grupos",
+      "description": "Gerencie membros, eventos, inscrições e presença dos grupos."
+    },
+    "people": {
+      "label": "Pessoas e famílias",
+      "description": "Gerencie pessoas, famílias e notas pastorais."
+    },
+    "children": {
+      "label": "Check-in infantil",
+      "description": "Faça o check-in infantil seguro e controle a presença."
+    },
+    "attendance": {
+      "label": "Presença nos cultos",
+      "description": "Registre a presença agregada de adultos nos cultos e acompanhe os check-ins de crianças."
+    },
+    "newcomers": {
+      "label": "Acompanhamento de visitantes",
+      "description": "Receba os cartões de visitantes e coordene o acompanhamento pessoal."
+    },
+    "activity-score": {
+      "label": "Índice de atividade",
+      "description": "Acompanhe a atividade explicável dos membros e o engajamento de toda a igreja."
+    },
+    "page-builder": {
+      "label": "Editor de páginas",
+      "description": "Crie páginas bilíngues personalizadas com blocos."
+    },
+    "portal": {
+      "label": "Portal de membros",
+      "description": "Ofereça aos membros ferramentas de família, grupos, calendário, oração e descoberta de oportunidades."
+    },
+    "giving": {
+      "label": "Contribuições",
+      "description": "Registre contribuições e, se quiser, aceite pagamentos pelo Stripe."
+    },
+    "registration": {
+      "label": "Inscrições",
+      "description": "Realize inscrições em eventos gratuitas ou pagas."
+    },
+    "learning": {
+      "label": "Aprendizado",
+      "description": "Continue os cursos do ministério além do horário da aula."
+    },
+    "planning": {
+      "label": "Planejamento de cultos",
+      "description": "Planeje roteiros, ensaios, disponibilidade e calendários para cultos e eventos."
+    }
+  },
+  "presets": {
+    "website": {
+      "label": "Site",
+      "description": "Um site público objetivo e ferramentas de publicação."
+    },
+    "website-community": {
+      "label": "Site + comunidade",
+      "description": "Publicação do site mais ferramentas de comunidade e voluntariado."
+    },
+    "full-church": {
+      "label": "Igreja completa",
+      "description": "Todos os recursos de site, comunidade, portal, contribuições e inscrições."
+    },
+    "checkin": {
+      "label": "Check-in infantil",
+      "description": "Famílias, um totem de check-in de autoatendimento e um console do ministério infantil."
+    },
+    "volunteer-scheduling": {
+      "label": "Escala de voluntários",
+      "description": "Ministérios, equipes, escalas de serviço, lembretes e um questionário de dons espirituais."
+    },
+    "small-groups": {
+      "label": "Pequenos grupos",
+      "description": "Pequenos grupos com membros, eventos e presença, além de um diretório de comunhões."
+    }
+  },
+  "readiness": {
+    "identity": {
+      "title": "Identidade da igreja",
+      "description": "Confirme o manifesto da instalação e a identidade pública da igreja.",
+      "remediation": "Conclua a configuração e revise as configurações de identidade."
+    },
+    "locales": {
+      "title": "Textos em inglês e chinês",
+      "description": "Revise os textos públicos nos dois idiomas compatíveis.",
+      "remediation": "Revise as configurações e páginas em inglês e chinês."
+    },
+    "service-times": {
+      "title": "Horários dos cultos",
+      "description": "Confirme que os horários dos cultos estão atualizados nos dois idiomas.",
+      "remediation": "Atualize os horários dos cultos em Configurações."
+    },
+    "admin-grants": {
+      "title": "Permissões da equipe",
+      "description": "Revise o acesso de administradores limitados e da equipe com escopo.",
+      "remediation": "Revise as permissões de função e de área em Pessoas."
+    },
+    "people-migration": {
+      "title": "Decisão sobre a migração de Pessoas",
+      "description": "Registre se os dados de Pessoas foram importados ou se começam vazios de propósito.",
+      "remediation": "Conclua a importação ou confirme a decisão de não importar."
+    },
+    "newcomer-owner": {
+      "title": "Responsável pelos visitantes",
+      "description": "Atribua a responsabilidade pela fila de visitantes.",
+      "remediation": "Escolha um responsável e revise o fluxo da fila."
+    },
+    "attendance-checkin-mapping": {
+      "title": "Mapeamento de presença e check-in",
+      "description": "Confirme que a presença nos cultos corresponde aos eventos de check-in.",
+      "remediation": "Revise os tipos de culto e os vínculos de check-in."
+    },
+    "origin-domain-email": {
+      "title": "Origem, domínio e entrega",
+      "description": "Verifique os vínculos de execução e a entrega em produção fora do aplicativo.",
+      "remediation": "Verifique o domínio, os vínculos, o e-mail, o armazenamento e o modo de pagamento do Stripe (teste ou ao vivo, após o checklist de entrada em produção)."
+    },
+    "routes-jobs": {
+      "title": "Rotas e tarefas agendadas",
+      "description": "A configuração não prova que as rotas ou tarefas foram executadas com sucesso.",
+      "remediation": "Teste as rotas públicas e verifique todas as tarefas agendadas."
+    },
+    "learning-provider-operations": {
+      "title": "Operações do provedor de aprendizado",
+      "description": "Verifique o OAuth e os escopos do Google Classroom ou Canvas, as notificações autenticadas, a sincronização manual, a manutenção aos :15, a conciliação aos :45, a rotação de credenciais, a exclusão ao desconectar, a retenção e a restauração correspondente.",
+      "remediation": "Siga o runbook de Aprendizado e registre as evidências de mapeamento e sincronização do provedor, Pub/Sub ou Live Events assinados, limpeza, retenção e exclusão, e restauração."
+    },
+    "database-schema": {
+      "title": "Esquema do banco de dados",
+      "description": "Verifique a conectividade, as migrações e as tabelas necessárias.",
+      "remediation": "Aplique as migrações e execute o doctor novamente."
+    },
+    "backups": {
+      "title": "Backups",
+      "description": "Credenciais configuradas não provam que existe um backup utilizável.",
+      "remediation": "Execute um backup e verifique o destino protegido dele."
+    },
+    "restore-drill": {
+      "title": "Simulado de restauração",
+      "description": "Um simulado de restauração deve ser repetido a cada 90 dias.",
+      "remediation": "Restaure um backup de forma isolada, verifique-o e depois confirme esta verificação."
+    }
+  }
+}

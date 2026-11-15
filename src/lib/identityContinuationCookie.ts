@@ -1,4 +1,4 @@
-import { isSupportedLocale } from './locales';
+import { isSupportedLocale, type SupportedLocale } from './locales';
 import { hmacIdentityValue } from './identityAuth';
 
 export const IDENTITY_CONTINUATION_COOKIE = 'c4_identity_continuation';
@@ -8,7 +8,7 @@ type ContinuationCookie = Readonly<{
   operationId: string;
   publicId: string;
   kind: 'giving' | 'registration';
-  locale: 'en' | 'zh';
+  locale: SupportedLocale;
   returnPath: string;
 }>;
 

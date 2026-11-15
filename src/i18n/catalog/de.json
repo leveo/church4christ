@@ -1,0 +1,185 @@
+{
+  "capabilities": {
+    "bulletins": {
+      "label": "Gemeindebriefe",
+      "description": "Wöchentliche Gottesdienst-Gemeindebriefe erstellen und veröffentlichen."
+    },
+    "sermons": {
+      "label": "Predigten",
+      "description": "Ein durchsuchbares Predigtarchiv veröffentlichen."
+    },
+    "prayer-sheets": {
+      "label": "Gebetsblätter",
+      "description": "Gebetsblätter vorbereiten und veröffentlichen."
+    },
+    "prayer-wall": {
+      "label": "Gebetswand",
+      "description": "Gebetsanliegen entgegennehmen und begleiten."
+    },
+    "events": {
+      "label": "Veranstaltungen",
+      "description": "Veranstaltungen und Mitteilungen veröffentlichen."
+    },
+    "serve": {
+      "label": "Dienstplanung",
+      "description": "Dienstbereiche, Teams, Pläne und Erinnerungen koordinieren."
+    },
+    "gifts": {
+      "label": "Geistesgaben",
+      "description": "Menschen helfen, ihre Gaben und passende Dienste zu entdecken."
+    },
+    "testimonies": {
+      "label": "Zeugnisse",
+      "description": "Zeugnisse über den Dienst sammeln und veröffentlichen."
+    },
+    "articles": {
+      "label": "Artikel",
+      "description": "Zweisprachige Artikel veröffentlichen."
+    },
+    "fellowships": {
+      "label": "Gemeinschaften",
+      "description": "Das Verzeichnis der Gemeinschaften veröffentlichen."
+    },
+    "groups": {
+      "label": "Gruppen",
+      "description": "Gruppenmitgliedschaft, Veranstaltungen, Anmeldung und Anwesenheit verwalten."
+    },
+    "people": {
+      "label": "Personen & Haushalte",
+      "description": "Personen, Haushalte und Seelsorgenotizen verwalten."
+    },
+    "children": {
+      "label": "Kinder-Check-in",
+      "description": "Sicheres Kinder-Check-in und Anwesenheit durchführen."
+    },
+    "attendance": {
+      "label": "Gottesdienstbesuch",
+      "description": "Gesamtzahlen der Erwachsenen im Gottesdienst erfassen und Kinder-Check-ins auswerten."
+    },
+    "newcomers": {
+      "label": "Nachfassen bei Neuen",
+      "description": "Karten von Neuen entgegennehmen und das persönliche Nachfassen koordinieren."
+    },
+    "activity-score": {
+      "label": "Aktivitätswert",
+      "description": "Nachvollziehbare Mitgliederaktivität und die Beteiligung der ganzen Gemeinde beobachten."
+    },
+    "page-builder": {
+      "label": "Seiteneditor",
+      "description": "Eigene zweisprachige Seiten aus Bausteinen gestalten."
+    },
+    "portal": {
+      "label": "Mitgliederportal",
+      "description": "Mitgliedern Werkzeuge für Haushalt, Gruppen, Kalender, Gebet und das Entdecken von Möglichkeiten geben."
+    },
+    "giving": {
+      "label": "Spenden",
+      "description": "Spenden erfassen und optional Stripe-Zahlungen annehmen."
+    },
+    "registration": {
+      "label": "Anmeldung",
+      "description": "Kostenlose oder kostenpflichtige Veranstaltungsanmeldung durchführen."
+    },
+    "learning": {
+      "label": "Lernen",
+      "description": "Dienstkurse über die Unterrichtszeit hinaus weiterführen."
+    },
+    "planning": {
+      "label": "Gottesdienstplanung",
+      "description": "Ablaufpläne, Proben, Verfügbarkeit und Kalender für Gottesdienste und Veranstaltungen planen."
+    }
+  },
+  "presets": {
+    "website": {
+      "label": "Website",
+      "description": "Eine schlanke öffentliche Website mit Werkzeugen zum Veröffentlichen."
+    },
+    "website-community": {
+      "label": "Website + Gemeinschaft",
+      "description": "Website-Veröffentlichung plus Werkzeuge für Gemeinschaft und Ehrenamt."
+    },
+    "full-church": {
+      "label": "Komplette Gemeinde",
+      "description": "Alle Funktionen für Website, Gemeinschaft, Portal, Spenden und Anmeldung."
+    },
+    "checkin": {
+      "label": "Kinder-Check-in",
+      "description": "Haushalte, ein Selbstbedienungs-Kiosk für den Check-in und eine Konsole für die Kinderarbeit."
+    },
+    "volunteer-scheduling": {
+      "label": "Dienstplanung",
+      "description": "Dienstbereiche, Teams, Dienstpläne, Erinnerungen und ein Geistesgaben-Test."
+    },
+    "small-groups": {
+      "label": "Kleingruppen",
+      "description": "Kleingruppen mit Mitgliedschaft, Veranstaltungen und Anwesenheit sowie ein Verzeichnis der Gemeinschaften."
+    }
+  },
+  "readiness": {
+    "identity": {
+      "title": "Identität der Gemeinde",
+      "description": "Bestätige das Installationsmanifest und die öffentliche Identität der Gemeinde.",
+      "remediation": "Schließe die Einrichtung ab und prüfe die Identitätseinstellungen."
+    },
+    "locales": {
+      "title": "Englische und chinesische Texte",
+      "description": "Prüfe die öffentlichen Texte in beiden unterstützten Sprachen.",
+      "remediation": "Prüfe die englischen und chinesischen Einstellungen und Seiten."
+    },
+    "service-times": {
+      "title": "Gottesdienstzeiten",
+      "description": "Bestätige, dass die Gottesdienstzeiten in beiden Sprachen aktuell sind.",
+      "remediation": "Aktualisiere die Gottesdienstzeiten in den Einstellungen."
+    },
+    "admin-grants": {
+      "title": "Berechtigungen für Mitarbeitende",
+      "description": "Prüfe den Zugriff eingeschränkter Administratoren und bereichsbezogener Mitarbeitender.",
+      "remediation": "Prüfe die Rollen- und Bereichsberechtigungen unter Personen."
+    },
+    "people-migration": {
+      "title": "Entscheidung zur Personenmigration",
+      "description": "Halte fest, ob Personendaten importiert wurden oder bewusst leer starten.",
+      "remediation": "Schließe den Import ab oder bestätige die Entscheidung gegen einen Import."
+    },
+    "newcomer-owner": {
+      "title": "Verantwortliche für Neue",
+      "description": "Lege die Verantwortung für die Warteschlange der Neuen fest.",
+      "remediation": "Wähle eine verantwortliche Person und prüfe den Ablauf der Warteschlange."
+    },
+    "attendance-checkin-mapping": {
+      "title": "Zuordnung von Besuch und Check-in",
+      "description": "Bestätige, dass der Gottesdienstbesuch den Check-in-Veranstaltungen zugeordnet ist.",
+      "remediation": "Prüfe Gottesdienstarten und Check-in-Verknüpfungen."
+    },
+    "origin-domain-email": {
+      "title": "Herkunft, Domain und Zustellung",
+      "description": "Prüfe die Laufzeit-Bindungen und die Zustellung in der Produktion außerhalb der Anwendung.",
+      "remediation": "Prüfe Domain, Bindungen, E-Mail, Speicher und den Stripe-Zahlungsmodus (Test oder live nach der Go-live-Checkliste)."
+    },
+    "routes-jobs": {
+      "title": "Routen und geplante Aufgaben",
+      "description": "Die Konfiguration beweist nicht, dass Routen oder Aufgaben erfolgreich liefen.",
+      "remediation": "Rufe die öffentlichen Routen auf und prüfe jede geplante Aufgabe."
+    },
+    "learning-provider-operations": {
+      "title": "Betrieb der Lernplattform",
+      "description": "Prüfe Google-Classroom- oder Canvas-OAuth und Scopes, authentifizierte Benachrichtigungen, manuelle Synchronisierung, Wartung zur Minute :15, Abgleich zur Minute :45, Rotation von Zugangsdaten, Löschung beim Trennen, Aufbewahrung und passende Wiederherstellung.",
+      "remediation": "Folge dem Lernen-Runbook und halte Plattformzuordnung/-synchronisierung, Pub/Sub oder signierte Live Events, Bereinigung, Aufbewahrung/Löschung und Nachweise der Wiederherstellung fest."
+    },
+    "database-schema": {
+      "title": "Datenbankschema",
+      "description": "Prüfe Verbindung, Migrationen und erforderliche Tabellen.",
+      "remediation": "Wende die Vorwärtsmigrationen an und führe doctor erneut aus."
+    },
+    "backups": {
+      "title": "Sicherungen",
+      "description": "Eingerichtete Zugangsdaten beweisen nicht, dass eine nutzbare Sicherung existiert.",
+      "remediation": "Erstelle eine Sicherung und prüfe ihr geschütztes Ziel."
+    },
+    "restore-drill": {
+      "title": "Wiederherstellungsübung",
+      "description": "Eine Wiederherstellungsübung muss alle 90 Tage wiederholt werden.",
+      "remediation": "Stelle eine Sicherung isoliert wieder her, prüfe sie und bestätige dann diese Prüfung."
+    }
+  }
+}

@@ -1,13 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import localesConfig from '../../config/locales.json' with { type: 'json' };
 
 const PLAIN = (value) => value !== null && typeof value === 'object' && !Array.isArray(value) &&
   (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
 const ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const CODE = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/;
 const EXACT = (value, keys) => PLAIN(value) && Object.keys(value).sort().join('|') === [...keys].sort().join('|');
-const bilingual = (value) => EXACT(value, ['en', 'zh']) &&
-  typeof value.en === 'string' && value.en.trim() !== '' && typeof value.zh === 'string' && value.zh.trim() !== '';
+const SUPPORTED_CODES = new Set(localesConfig.supported.map((entry) => entry.code));
+const nonblank = (value) => typeof value === 'string' && value.trim() !== '';
+// `{ [locale]: text }`: en and zh are required; other keys must be supported language codes.
+// Other languages normally live in src/i18n/catalog/<code>.json (docs/i18n.md).
+const bilingual = (value) => PLAIN(value) && nonblank(value.en) && nonblank(value.zh) &&
+  Object.entries(value).every(([locale, text]) => locale === 'en' || locale === 'zh' || (SUPPORTED_CODES.has(locale) && nonblank(text)));
 
 export function validateReadinessCatalog(value) {
   if (!EXACT(value, ['schemaVersion', 'categories', 'checks']) || value.schemaVersion !== 1) throw new TypeError('readiness catalog root is invalid');

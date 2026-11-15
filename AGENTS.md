@@ -57,16 +57,17 @@ do not invent a second provisioning path or replace setup with raw seed commands
 | Generated deployment config template | `config/wrangler.template.jsonc` |
 | Feature behavior and visuals | `docs/features/` |
 | D1 / PostgreSQL forward migrations | `migrations/` / `migrations-supabase/` |
-| UI copy per language | `src/i18n/<code>.ts` (today `en`, `zh`) |
+| UI copy per language | `src/i18n/<code>.ts` (12 languages; status in `config/i18n-status.json`) |
 | Language registry and settings | `src/lib/locales.ts`, `src/lib/localeSettings.ts`, `config/locales.json` |
 | Design tokens | `design/`; see `docs/design-system.md` |
 
 ## Adding or reviewing a language
 
-Follow the checklist in [docs/i18n.md](docs/i18n.md#add-a-language-checklist): a registry
+Follow the checklist in [docs/i18n.md](docs/i18n.md#add-or-translate-a-language): a registry
 entry (`src/lib/locales.ts` and `config/locales.json`), a dictionary file with the same keys
-and `{placeholders}` as `en.ts` (including every `design*` dictionary), a checked-in church
-glossary, the `supported_locales` row once the database lookup lands, and fonts for scripts
+and `{placeholders}` as `en.ts` (including the `design` export for the `design*` copy and the
+`src/i18n/catalog/<code>.json` capability copy), a checked-in church
+glossary (`docs/i18n/glossary.md`), the `supported_locales` row once the database lookup lands, and fonts for scripts
 the system fonts miss. Do not branch on `=== 'zh'` for general localization; use the registry
 and helpers (`localeMeta`, `pickByLocale`, `pickPair`, `fallbackChain`). Reviewers run the parity
 tests, check that new copy is not left in English, and label non-English/Chinese translations

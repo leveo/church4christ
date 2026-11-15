@@ -1,4 +1,4 @@
-import { isSupportedLocale } from './locales';
+import { isSupportedLocale, type SupportedLocale } from './locales';
 import type { AppDb, AppStatement } from './appDb';
 import { sha256Utf8 } from './stripeWebhookInbox';
 
@@ -35,7 +35,7 @@ export interface RegistrationCheckoutRequestInput {
   currency: string;
   answers: Array<[number, string]>;
   eventTitle: string;
-  locale: 'en' | 'zh';
+  locale: SupportedLocale;
   appOrigin: string;
 }
 
@@ -221,7 +221,7 @@ export function canonicalAppOrigin(value: string): string {
 
 export function registrationCheckoutCancelUrl(
   originValue: string,
-  locale: 'en' | 'zh',
+  locale: SupportedLocale,
   eventId: number,
   requestIdValue: string,
 ): string {

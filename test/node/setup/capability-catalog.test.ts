@@ -269,6 +269,15 @@ describe('capability catalog validation', () => {
     expectInvalid(mutate, /(?:label|description).*(?:en|zh)/i);
   });
 
+  test('accepts optional supported-language copy and rejects unsupported or blank keys', () => {
+    const ok = cloneCatalog();
+    ok.capabilities.bulletins.labels.es = 'Boletines';
+    ok.presets.website.descriptions.ja = 'ウェブサイト';
+    expect(() => validateCapabilityCatalog(ok)).not.toThrow();
+    expectInvalid((c: any) => (c.capabilities.bulletins.labels.xx = 'Nope'), /bulletins\.labels\.xx is not a supported language/);
+    expectInvalid((c: any) => (c.capabilities.bulletins.labels.fr = ' '), /bulletins\.labels\.fr must be a nonblank string/);
+  });
+
   test.each([
     ['unknown group', (c: any) => (c.capabilities.bulletins.group = 'mystery')],
     ['unknown provider', (c: any) => (c.capabilities.bulletins.requiresBackend = 'sqlite')],

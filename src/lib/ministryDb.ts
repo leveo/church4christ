@@ -15,6 +15,37 @@ import { i18nJoin, type Locale } from './db';
 import { addDays, nextWeekday, todayInTz } from './dates';
 import { ensureWeeklyPlans, setPlanPosition } from './planDb';
 import type { SessionUser } from './types';
+import { fallbackChain, type SupportedLocale } from './locales';
+import { EXTRA_LOCALES, loadExtraI18n, saveExtraI18n, type ExtraTexts } from './i18nExtras';
+
+/** Names and introductions for the languages beyond the en/zh pair (es, ja, ...). A key
+ *  holding '' removes that language's row (update only); absent keys are left untouched. */
+export interface ExtraMinistryText {
+  names?: Partial<Record<SupportedLocale, string>>;
+  intros?: Partial<Record<SupportedLocale, string>>;
+}
+
+/** The first non-empty name across every language, the English row's last-resort value. */
+function anyName(first: string, second: string, extra?: Partial<Record<SupportedLocale, string>>): string {
+  return first || second || EXTRA_LOCALES.map((code) => extra?.[code]).find(Boolean) || '';
+}
+
+/** `{ code: text }` as `{ code: { name: text } }` for saveExtraI18n. */
+function extraNameTexts(names: Partial<Record<SupportedLocale, string>> | undefined): Partial<Record<SupportedLocale, Record<string, string>>> {
+  return Object.fromEntries(Object.entries(names ?? {}).filter(([, name]) => name).map(([code, name]) => [code, { name }]));
+}
+
+/** Write the extra-language rows of a ministry (names, optionally intros). */
+async function saveExtraMinistryText(db: AppDb, id: number, extra: ExtraMinistryText | undefined): Promise<void> {
+  if (!extra) return;
+  const texts: Partial<Record<SupportedLocale, Record<string, string>>> = {};
+  for (const code of EXTRA_LOCALES) {
+    const name = extra.names?.[code];
+    if (name === undefined) continue;
+    texts[code] = extra.intros?.[code] !== undefined ? { name, intro: extra.intros[code] as string } : { name };
+  }
+  await saveExtraI18n(db, 'ministry_i18n', 'ministry_id', id, texts, 'name');
+}
 
 const TZ = 'America/Chicago';
 
@@ -165,9 +196,10 @@ export interface TestimonyCardRow {
 }
 
 /**
- * Approved (status='A'), non-deleted testimonies for the serve strip. English
- * pages include English submissions only; Chinese pages include both languages,
- * with Chinese first. Within each group the newest published_at wins.
+ * Approved (status='A'), non-deleted testimonies for the serve strip. Chinese pages
+ * include every language, Chinese first; any other language includes submissions written
+ * in a language along its fallback chain (requested, default, en), its own first.
+ * Within each group the newest published_at wins.
  */
 export async function listPublishedTestimonies(
   db: AppDb,
@@ -178,7 +210,7 @@ export async function listPublishedTestimonies(
     .prepare(
       `SELECT author_name AS "authorName", title, body, locale, published_at AS "publishedAt"
        FROM testimonies
-       WHERE status = 'A' AND deleted_at IS NULL AND (?1 = 'zh' OR locale = 'en')
+       WHERE status = 'A' AND deleted_at IS NULL AND (?1 = 'zh' OR locale IN (${fallbackChain(locale).map((code) => `'${code}'`).join(', ')}))
        ORDER BY (CASE WHEN locale = ?1 THEN 0 ELSE 1 END), published_at DESC, id DESC
        LIMIT ?2`,
     )
@@ -247,6 +279,8 @@ export interface MinistryEditRow {
   category: string;
   icon: string;
   leader_person_id: number | null;
+  /** Other languages (es, ja, ...), keyed by locale: `{ name, intro }`. */
+  extra: ExtraTexts;
 }
 
 /** Both-locale names/intros + basics for every non-deleted ministry (edit forms). */
@@ -262,8 +296,9 @@ export async function listMinistryEditRows(db: AppDb): Promise<MinistryEditRow[]
        WHERE m.deleted_at IS NULL
        ORDER BY m.sort, m.id`,
     )
-    .all<MinistryEditRow>();
-  return results;
+    .all<Omit<MinistryEditRow, 'extra'>>();
+  const extras = await loadExtraI18n(db, 'ministry_i18n', 'ministry_id', ['name', 'intro']);
+  return results.map((row) => ({ ...row, extra: extras.get(String(row.id)) ?? {} }));
 }
 
 /** True if the user may manage this ministry (admin, its named leader, or leads one of its teams). */
@@ -319,6 +354,7 @@ export interface MinistryBasics {
   intro_en: string | null;
   intro_zh: string | null;
   leader_person_id: number | null;
+  extra?: ExtraMinistryText;
 }
 
 /** Update a ministry's editable basics (used by the Ministries-tab inline edit). */
@@ -327,8 +363,9 @@ export async function updateMinistryBasics(db: AppDb, id: number, b: MinistryBas
     .prepare(`UPDATE ministries SET category = ?1, icon = ?2, leader_person_id = ?3 WHERE id = ?4`)
     .bind(b.category, b.icon || '📋', b.leader_person_id, id)
     .run();
-  await upsertI18n(db, 'ministry_i18n', 'ministry_id', id, 'en', { name: b.name_en || b.name_zh, intro: b.intro_en ?? '' });
+  await upsertI18n(db, 'ministry_i18n', 'ministry_id', id, 'en', { name: anyName(b.name_en, b.name_zh, b.extra?.names), intro: b.intro_en ?? '' });
   if (b.name_zh) await upsertI18n(db, 'ministry_i18n', 'ministry_id', id, 'zh', { name: b.name_zh, intro: b.intro_zh ?? '' });
+  await saveExtraMinistryText(db, id, b.extra);
 }
 
 /** Upsert a companion-table i18n row (columns validated by the caller's literals). */
@@ -369,6 +406,7 @@ export interface MinistryWizardInput {
   leader_person_id: number | null;
   meeting_time: string | null;
   positions: WizardPosition[];
+  extra?: ExtraMinistryText;
   frequency: 'sun' | 'sat' | 'biweekly' | 'monthly' | 'irregular';
   autoGenerate: boolean;
 }
@@ -408,8 +446,8 @@ export async function createMinistryFromWizard(
   input: MinistryWizardInput,
   now: Date = new Date(),
 ): Promise<number> {
-  const enName = input.name_en || input.name_zh;
-  const slug = await uniqueSlug(db, slugify(input.name_en || input.name_zh));
+  const enName = anyName(input.name_en, input.name_zh, input.extra?.names);
+  const slug = await uniqueSlug(db, slugify(enName));
 
   const ministry = await db
     .prepare(
@@ -423,6 +461,7 @@ export async function createMinistryFromWizard(
 
   await upsertI18n(db, 'ministry_i18n', 'ministry_id', ministryId, 'en', { name: enName, intro: input.intro_en ?? '' });
   if (input.name_zh) await upsertI18n(db, 'ministry_i18n', 'ministry_id', ministryId, 'zh', { name: input.name_zh, intro: input.intro_zh ?? '' });
+  await saveExtraMinistryText(db, ministryId, input.extra);
 
   const team = await db
     .prepare(`INSERT INTO teams (ministry_id, sort) VALUES (?1, 0) RETURNING id`)
@@ -431,6 +470,7 @@ export async function createMinistryFromWizard(
   const teamId = team!.id;
   await upsertI18n(db, 'team_i18n', 'team_id', teamId, 'en', { name: enName });
   if (input.name_zh) await upsertI18n(db, 'team_i18n', 'team_id', teamId, 'zh', { name: input.name_zh });
+  await saveExtraI18n(db, 'team_i18n', 'team_id', teamId, extraNameTexts(input.extra?.names), 'name');
 
   // The ministry's named leader becomes a team leader automatically.
   if (input.leader_person_id) {
@@ -462,6 +502,7 @@ export async function createMinistryFromWizard(
     const serviceTypeId = serviceType!.id;
     await upsertI18n(db, 'service_type_i18n', 'service_type_id', serviceTypeId, 'en', { name: enName });
     if (input.name_zh) await upsertI18n(db, 'service_type_i18n', 'service_type_id', serviceTypeId, 'zh', { name: input.name_zh });
+    await saveExtraI18n(db, 'service_type_i18n', 'service_type_id', serviceTypeId, extraNameTexts(input.extra?.names), 'name');
 
     // 8 occurrences: the next `weekday` through 7 weeks later, inclusive.
     const first = nextWeekday(todayInTz(TZ, now), weekday);

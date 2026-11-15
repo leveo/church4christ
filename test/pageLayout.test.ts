@@ -119,7 +119,7 @@ describe('parseLocaleText / pickLocaleText', () => {
   it('rejects unknown keys and over-long values, copies the rest', () => {
     expect(parseLocaleText({ en: 'a', zh: 'b' }, 5)).toEqual({ en: 'a', zh: 'b' });
     expect(parseLocaleText({ en: 'abcdef' }, 5)).toBeNull();
-    expect(parseLocaleText({ fr: 'x' }, 5)).toBeNull();
+    expect(parseLocaleText({ xx: 'x' }, 5)).toBeNull();
     expect(parseLocaleText(null, 5)).toBeNull();
   });
   it('falls back along the chain and skips empty values', () => {

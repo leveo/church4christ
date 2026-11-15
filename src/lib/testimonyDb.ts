@@ -1,4 +1,4 @@
-import { pickByLocale } from './locales';
+import { pickByLocale, type SupportedLocale } from './locales';
 // Testimonies with a light review workflow. Status: P pending → A approved
 // (public) / R returned. A visitor submits in the current page locale (single
 // localized title/body + the row's `locale`); a reviewer approves (which stamps
@@ -14,7 +14,7 @@ import type { AppDb } from './appDb';
 export interface TestimonyInput {
   person_id: number | null;
   author_name: string;
-  locale: 'en' | 'zh';
+  locale: SupportedLocale;
   title: string;
   body: string;
   category: string | null;
@@ -39,7 +39,7 @@ export interface PendingTestimonyRow {
   id: number;
   person_id: number | null;
   author_name: string;
-  locale: 'en' | 'zh';
+  locale: SupportedLocale;
   title: string;
   body: string;
   category: string | null;

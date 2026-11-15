@@ -14,6 +14,7 @@ import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
 import { operationsCopy } from '../../../i18n/designOperations';
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
+import { extraLocaleTexts, extraLocaleTextsFromForm } from '../../../lib/i18nExtras';
 import { BUILTIN_NAV, NAV_SETTING_KEY, parseNavItems, resolveNav, serializeNavItems, type NavItem } from '../../../lib/nav';
 import { deleteSetting, getSetting, setSetting } from '../../../lib/settings';
 import { listCustomPages } from '../../../lib/pagesDb';
@@ -96,11 +97,12 @@ if (Astro.request.method === 'POST') {
       const url = String(fd.get('url') ?? '').trim();
       const labelEn = String(fd.get('label_en') ?? '').trim();
       const labelZh = String(fd.get('label_zh') ?? '').trim();
+      const labelExtra = extraLocaleTextsFromForm(fd, 'label');
       const errs: Record<string, string> = {};
       if (!isHttpUrl(url) && !url.startsWith('/')) errs.url = 'admin.navigation.urlInvalid';
-      if (!labelEn && !labelZh) errs.label = 'admin.navigation.labelRequired';
+      if (!labelEn && !labelZh && !Object.keys(labelExtra).length) errs.label = 'admin.navigation.labelRequired';
       if (Object.keys(errs).length === 0) {
-        items.push({ type: 'link', url, label: { en: labelEn, zh: labelZh } });
+        items.push({ type: 'link', url, label: { en: labelEn, zh: labelZh, ...labelExtra } });
         await setSetting(db, NAV_SETTING_KEY, serializeNavItems(items));
         return Astro.redirect('/admin/navigation?saved=1', 303);
       }
@@ -286,7 +288,7 @@ const h2 = 'font-display text-heading-sm font-bold';
           <p class="mt-1 text-xs text-ink-subtle">{t(lang, 'admin.navigation.linkUrlHint')}</p>
           {errors.url && <span class={errorText}>{t(lang, errors.url)}</span>}
         </label>
-        <LocaleFields name="label" label={t(lang, 'admin.navigation.linkLabelEn')} values={{ en: g('label_en'), zh: g('label_zh') }} lang={lang} />
+        <LocaleFields name="label" label={t(lang, 'admin.navigation.linkLabelEn')} values={{ en: g('label_en'), zh: g('label_zh'), ...extraLocaleTexts(g, 'label') }} lang={lang} />
         {errors.label && <p class={`sm:col-span-3 ${errorText}`}>{t(lang, errors.label)}</p>}
         <div class="sm:col-span-3">
           <button type="submit" class={btn}>

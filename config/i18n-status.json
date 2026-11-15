@@ -1,0 +1,4 @@
+{
+  "$comment": "Locales whose translation is still being written. A listed locale may omit keys (the app falls back to English) and skips the completeness gates in test/i18n*.test.ts. When a language is finished, delete its line here and run: node scripts/i18n/check.mjs --locale <code>. See docs/i18n.md.",
+  "inProgress": []
+}

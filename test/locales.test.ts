@@ -9,8 +9,8 @@ import {
 } from '../src/lib/locales';
 
 describe('locale constants', () => {
-  it('exposes en + zh with en as the default', () => {
-    expect(LOCALES).toEqual(['en', 'zh']);
+  it('exposes the 12 supported languages with en as the default', () => {
+    expect(LOCALES).toEqual(['en', 'zh', 'es', 'pt', 'fr', 'de', 'ja', 'ko', 'ms', 'id', 'vi', 'hi']);
     expect(DEFAULT_LOCALE).toBe('en');
   });
 });
@@ -22,7 +22,7 @@ describe('parseLocale', () => {
   });
 
   it('rejects unknown / empty segments', () => {
-    expect(parseLocale('fr')).toBeNull();
+    expect(parseLocale('xx')).toBeNull();
     expect(parseLocale('')).toBeNull();
     expect(parseLocale('EN')).toBeNull();
     expect(parseLocale('sermons')).toBeNull();
@@ -78,7 +78,7 @@ describe('pickLocaleFromHeader', () => {
 
   it('defaults to en for wildcard, unknown, or missing headers', () => {
     expect(pickLocaleFromHeader('*')).toBe('en');
-    expect(pickLocaleFromHeader('fr-FR,de;q=0.8')).toBe('en');
+    expect(pickLocaleFromHeader('sw-KE,th;q=0.8')).toBe('en');
     expect(pickLocaleFromHeader('')).toBe('en');
     expect(pickLocaleFromHeader(null)).toBe('en');
   });
@@ -98,8 +98,12 @@ import {
 } from '../src/lib/locales';
 
 describe('locale registry', () => {
-  it('describes en and zh with BCP-47, hreflang, Intl and script metadata', () => {
-    expect(SUPPORTED_LOCALES).toEqual(['en', 'zh']);
+  it('describes every language with BCP-47, hreflang, Intl and script metadata', () => {
+    expect(SUPPORTED_LOCALES).toEqual(['en', 'zh', 'es', 'pt', 'fr', 'de', 'ja', 'ko', 'ms', 'id', 'vi', 'hi']);
+    expect(LOCALE_REGISTRY.pt).toMatchObject({ bcp47: 'pt-BR', hreflang: 'pt-BR', intl: 'pt-BR', ogLocale: 'pt_BR', script: 'latin' });
+    expect(LOCALE_REGISTRY.ja).toMatchObject({ script: 'kana', cjk: true });
+    expect(LOCALE_REGISTRY.ko).toMatchObject({ script: 'hangul', cjk: true });
+    expect(LOCALE_REGISTRY.hi).toMatchObject({ script: 'devanagari', cjk: false });
     expect(LOCALE_REGISTRY.en).toMatchObject({ bcp47: 'en', hreflang: 'en', intl: 'en-US', script: 'latin', cjk: false });
     expect(LOCALE_REGISTRY.zh).toMatchObject({ bcp47: 'zh-Hans', hreflang: 'zh-Hans', intl: 'zh-CN', script: 'han', cjk: true });
     for (const code of SUPPORTED_LOCALES) {
@@ -110,9 +114,10 @@ describe('locale registry', () => {
 
   it('narrows unknown codes without throwing', () => {
     expect(isSupportedLocale('zh')).toBe(true);
-    expect(isSupportedLocale('fr')).toBe(false);
+    expect(isSupportedLocale('fr')).toBe(true);
+    expect(isSupportedLocale('xx')).toBe(false);
     expect(isSupportedLocale(null)).toBe(false);
-    expect(localeMeta('fr').code).toBe(FALLBACK_LOCALE);
+    expect(localeMeta('xx').code).toBe(FALLBACK_LOCALE);
     expect(isChinese('zh')).toBe(true);
     expect(isChinese('en')).toBe(false);
   });
@@ -127,8 +132,9 @@ describe('fallbackChain', () => {
   });
 
   it('drops unsupported codes and always ends in en', () => {
-    expect(fallbackChain('fr', 'zh')).toEqual(['zh', 'en']);
-    expect(fallbackChain('fr', 'de')).toEqual(['en']);
+    expect(fallbackChain('xx', 'zh')).toEqual(['zh', 'en']);
+    expect(fallbackChain('xx', 'yy')).toEqual(['en']);
+    expect(fallbackChain('fr', 'zh')).toEqual(['fr', 'zh', 'en']);
   });
 });
 

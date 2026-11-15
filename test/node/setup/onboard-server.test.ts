@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -32,6 +33,17 @@ describe('onboarding local HTTP boundary', () => {
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(await response.json()).toMatchObject({ preferences: null, existingInstallation: false, defaults: { setup: { demoData: true } } });
     expect(await readdir(s.root)).toEqual([]);
+  });
+
+  it('offers every supported language by native name and reports translation status from config', async () => {
+    const s = await session();
+    const state = await (await fetch(`${s.origin}/api/state`, { headers: s.headers })).json() as { locales: { code: string; nativeName: string; inProgress: boolean }[] };
+    expect(state.locales.map((entry) => entry.code)).toEqual(['en', 'zh', 'es', 'pt', 'fr', 'de', 'ja', 'ko', 'ms', 'id', 'vi', 'hi']);
+    // inProgress mirrors config/i18n-status.json; every language is complete today.
+    const inProgress = JSON.parse(readFileSync('config/i18n-status.json', 'utf8')).inProgress as string[];
+    expect(state.locales.find((entry) => entry.code === 'ja')).toMatchObject({ nativeName: '日本語', inProgress: inProgress.includes('ja') });
+    expect(state.locales.find((entry) => entry.code === 'en')?.inProgress).toBe(false);
+    expect(state.locales.find((entry) => entry.code === 'zh')?.inProgress).toBe(false);
   });
 
   it('saves a validated plan, reopens it, and never starts provisioning', async () => {

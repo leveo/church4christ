@@ -1,6 +1,26 @@
+import localesConfig from '../../config/locales.json' with { type: 'json' };
+
+const SUPPORTED_CODES = new Set(localesConfig.supported.map((entry) => entry.code));
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const isNonblank = (value) => typeof value === 'string' && value.trim().length > 0;
 const SAFE_CAPABILITY_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** Localized copy is `{ [locale]: text }`: en and zh are required; any other key must be
+ *  a supported language code with a nonblank string. Translations of the remaining
+ *  languages normally live in src/i18n/catalog/<code>.json instead (docs/i18n.md). */
+function localizedProblems(value, name) {
+  if (!isObject(value)) return [`${name}.en is required`, `${name}.zh is required`];
+  const problems = [];
+  for (const locale of ['en', 'zh']) {
+    if (!isNonblank(value[locale])) problems.push(`${name}.${locale} is required`);
+  }
+  for (const [locale, text] of Object.entries(value)) {
+    if (locale === 'en' || locale === 'zh') continue;
+    if (!SUPPORTED_CODES.has(locale)) problems.push(`${name}.${locale} is not a supported language`);
+    else if (!isNonblank(text)) problems.push(`${name}.${locale} must be a nonblank string`);
+  }
+  return problems;
+}
 
 export function validateCapabilityCatalog(input) {
   if (!isObject(input)) throw new Error('capability catalog must be an object');
@@ -79,12 +99,7 @@ export function validateCapabilityCatalog(input) {
   const exactOwners = new Map();
   for (const key of keys) {
     const def = objectField(capabilities[key], `capability ${key}`);
-    for (const locale of ['en', 'zh']) {
-      if (!isNonblank(def.labels?.[locale])) fail(`${key}.labels.${locale} is required`);
-      if (!isNonblank(def.descriptions?.[locale])) {
-        fail(`${key}.descriptions.${locale} is required`);
-      }
-    }
+    for (const problem of [...localizedProblems(def.labels, `${key}.labels`), ...localizedProblems(def.descriptions, `${key}.descriptions`)]) fail(problem);
 
     if (!Number.isInteger(def.order) || def.order < 1) {
       fail(`${key}.order must be a positive integer`);
@@ -154,12 +169,7 @@ export function validateCapabilityCatalog(input) {
 
   for (const [preset, rawDef] of Object.entries(presetsObject)) {
     const def = objectField(rawDef, `preset ${preset}`);
-    for (const locale of ['en', 'zh']) {
-      if (!isNonblank(def.labels?.[locale])) fail(`preset ${preset}.labels.${locale} is required`);
-      if (!isNonblank(def.descriptions?.[locale])) {
-        fail(`preset ${preset}.descriptions.${locale} is required`);
-      }
-    }
+    for (const problem of [...localizedProblems(def.labels, `preset ${preset}.labels`), ...localizedProblems(def.descriptions, `preset ${preset}.descriptions`)]) fail(problem);
     const modules = arrayField(def.modules, `preset ${preset}.modules`);
     if (new Set(modules).size !== modules.length) {
       fail(`preset ${preset} contains duplicate capabilities`);

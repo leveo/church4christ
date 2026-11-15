@@ -7,7 +7,7 @@
 import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { get, post, ORIGIN } from './helpers';
-import { LOCALES } from '../../src/lib/locales';
+import { LEGACY_ENABLED_LOCALES as LOCALES } from '../../src/lib/locales';
 
 // Seeded slugs (content collections + DB) referenced by the §6 route map.
 const STAFF_SLUG = 'david-chen';
@@ -38,6 +38,8 @@ const PUBLIC_PATHS = [
   '/serve',
 ];
 
+// A fresh installation serves English and Chinese; the other supported languages redirect until
+// an administrator enables them (see localeFields.e2e.test.ts for the enabled case).
 describe('public routes render 200 in both locales', () => {
   for (const locale of LOCALES) {
     for (const path of PUBLIC_PATHS) {

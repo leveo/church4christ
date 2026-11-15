@@ -1,4 +1,4 @@
-import { toSupportedLocale } from './locales';
+import { toSupportedLocale, type SupportedLocale } from './locales';
 import { isValidDateStr } from './dates';
 
 const UTF8 = new TextEncoder();
@@ -61,7 +61,7 @@ export interface ValidatedNewcomerIntake {
   name: string;
   email: string | null;
   phone: string | null;
-  locale: 'en' | 'zh';
+  locale: SupportedLocale;
   visitDate: string;
   serviceTypeId: number | null;
   contactConsent: boolean;

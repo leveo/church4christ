@@ -4,7 +4,7 @@ import Icon from '../../../components/ui/Icon.astro';
 import { operationsCopy } from '../../../i18n/designOperations';
 import Admin from '../../../layouts/Admin.astro';
 import { btn, card } from '../../../lib/adminUi';
-import { t } from '../../../lib/i18n';
+import { catalogText, t } from '../../../lib/i18n';
 import type { Locale } from '../../../lib/locales';
 import {
   acknowledgeOnboardingCheckForUser,
@@ -32,7 +32,8 @@ if (Astro.request.method === 'POST') {
 }
 
 const checks = await listOnboardingReadinessForUser(db, user, Astro.locals.modules);
-const copy = (value: { en: string; zh: string }) => value[lang];
+const copy = (check: { checkId: string }, field: 'title' | 'description' | 'remediation', value: { en: string; zh: string }) =>
+  catalogText('readiness', check.checkId, field, value, lang);
 const statusLabel = (status: string) => t(lang, `admin.onboarding.${status === 'not_applicable' ? 'notApplicable' : status === 'action_required' ? 'actionRequired' : status}`);
 ---
 
@@ -47,12 +48,12 @@ const statusLabel = (status: string) => t(lang, `admin.onboarding.${status === '
           <span class="check-number" aria-hidden="true">{check.status === 'pass' ? <Icon name="check" /> : String(index + 1).padStart(2, '0')}</span>
           <div>
           <div class="flex items-start justify-between gap-4">
-            <div><h2 class="font-display text-heading-sm font-bold">{copy(check.title)}</h2><p class="mt-1 text-sm text-ink-muted">{copy(check.description)}</p></div>
+            <div><h2 class="font-display text-heading-sm font-bold">{copy(check, 'title', check.title)}</h2><p class="mt-1 text-sm text-ink-muted">{copy(check, 'description', check.description)}</p></div>
             <span class="rounded-full border border-border px-2 py-1 text-xs font-semibold">{statusLabel(check.status)}</span>
           </div>
-          {check.status !== 'pass' && check.status !== 'not_applicable' && <p class="mt-3 text-sm">{copy(check.remediation)}</p>}
+          {check.status !== 'pass' && check.status !== 'not_applicable' && <p class="mt-3 text-sm">{copy(check, 'remediation', check.remediation)}</p>}
           <div class="mt-4 flex items-center gap-3">
-            {check.adminPath && <a class="text-sm font-semibold text-primary hover:underline" href={check.adminPath}>{copy(check.title)}</a>}
+            {check.adminPath && <a class="text-sm font-semibold text-primary hover:underline" href={check.adminPath}>{copy(check, 'title', check.title)}</a>}
             {user.isSuperAdmin && check.status === 'manual' && <form method="post"><input type="hidden" name="check_id" value={check.checkId} /><button class={btn} type="submit">{t(lang, 'admin.onboarding.acknowledge')}</button></form>}
             {check.acknowledged && <span class="text-sm text-ink-muted">{t(lang, 'admin.onboarding.acknowledged')}</span>}
           </div>

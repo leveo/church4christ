@@ -1,4 +1,4 @@
-import { isChinese } from './locales';
+import { fallbackChain, isChinese } from './locales';
 // Public-site read queries that are DB-driven but not content-collection backed:
 // the announcement ticker, the upcoming-events strip, and the latest sermon. Each
 // applies the visibility rules from the spec — announcements/events are windowed
@@ -8,7 +8,7 @@ import { isChinese } from './locales';
 // missing translation transparently falls back to English.
 import type { AppDb } from './appDb';
 import { i18nJoin, type Locale } from './db';
-import { isEnglishEditorialText } from './editorialLocale';
+import { editorialEligible, hidesHanRows, isEnglishEditorialText } from './editorialLocale';
 import { parseJsonArray } from './json';
 
 export interface AnnouncementRow {
@@ -87,12 +87,12 @@ type SermonContent = Pick<LatestSermonRow, 'title' | 'scripture' | 'series'>;
 // editorial content, never speaker names, and does not rewrite stored text.
 // Explicit source-language metadata can replace this heuristic in a future schema.
 function sermonMatchesLocale(sermon: SermonContent, locale: Locale): boolean {
-  return isChinese(locale) || isEnglishEditorialText(sermon.title, sermon.scripture, sermon.series);
+  return editorialEligible(locale, sermon.title, sermon.scripture, sermon.series);
 }
 
 /** The most recent visible sermon. Search beyond newer Chinese rows for en. */
 export async function latestPublishedSermon(db: AppDb, locale: Locale): Promise<LatestSermonRow | null> {
-  const pageSize = locale === 'en' ? 100 : 1;
+  const pageSize = hidesHanRows(locale) ? 100 : 1;
   for (let offset = 0; ; offset += pageSize) {
     const { results } = await db
       .prepare(
@@ -262,7 +262,7 @@ async function* eligibleBulletinPages(
        LIMIT ?${params.length + 1} OFFSET ?${params.length + 2}`,
     ).bind(...params, pageSize, offset).all<BulletinCandidate>();
 
-    if (isChinese(locale)) {
+    if (!hidesHanRows(locale)) {
       yield results;
     } else {
       const candidates = results.filter(bulletinEditorialIsEnglish);
@@ -292,7 +292,7 @@ function bulletinRow({ service_type_sort: _sort, ...bulletin }: BulletinCandidat
 
 /** Latest eligible published bulletin per service type, ordered by type sort. */
 export async function latestBulletins(db: AppDb, locale: Locale): Promise<BulletinRow[]> {
-  if (locale === 'en') {
+  if (hidesHanRows(locale)) {
     const { results: services } = await db.prepare(
       `SELECT DISTINCT b.service_type_id FROM bulletins b WHERE ${published('b')}`,
     ).all<{ service_type_id: number }>();
@@ -416,26 +416,37 @@ export async function bulletinRoster(
   return groups;
 }
 
+/**
+ * Prayer sheets carry an explicit locale, so no heuristic is needed: Chinese pages keep every
+ * published sheet (both languages, as before); any other language shows the sheets written in a
+ * language along its fallback chain (requested, installation default, en). The codes come from
+ * the supported registry, never from request input.
+ */
+function sheetLocaleFilter(locale: Locale): string {
+  if (isChinese(locale)) return '';
+  return `AND ps.locale IN (${fallbackChain(locale).map((code) => `'${code}'`).join(', ')})`;
+}
+
 /** The most recent published prayer sheet visible in the requested locale. */
 export async function latestPrayerSheet(db: AppDb, locale: Locale): Promise<PrayerSheetRow | null> {
   return db
     .prepare(
       `SELECT ps.id AS id, ps.sheet_date AS sheet_date, ps.sections_json AS sections_json
        FROM prayer_sheets ps
-       WHERE ${published('ps')} ${locale === 'en' ? "AND ps.locale = 'en'" : ''}
+       WHERE ${published('ps')} ${sheetLocaleFilter(locale)}
        ORDER BY ps.sheet_date DESC, ps.id DESC
        LIMIT 1`,
     )
     .first<PrayerSheetRow>();
 }
 
-/** A published prayer sheet by date, excluding non-English sheets for en. */
+/** A published prayer sheet by date, limited to the sheets this language can show. */
 export async function getPrayerSheet(db: AppDb, date: string, locale: Locale): Promise<PrayerSheetRow | null> {
   return db
     .prepare(
       `SELECT ps.id AS id, ps.sheet_date AS sheet_date, ps.sections_json AS sections_json
        FROM prayer_sheets ps WHERE ps.sheet_date = ?1 AND ${published('ps')}
-         ${locale === 'en' ? "AND ps.locale = 'en'" : ''}`,
+         ${sheetLocaleFilter(locale)}`,
     )
     .bind(date)
     .first<PrayerSheetRow>();
@@ -446,7 +457,7 @@ export async function listPrayerSheetDates(db: AppDb, locale: Locale): Promise<s
   const { results } = await db
     .prepare(
       `SELECT ps.sheet_date AS sheet_date FROM prayer_sheets ps WHERE ${published('ps')}
-       ${locale === 'en' ? "AND ps.locale = 'en'" : ''} ORDER BY ps.sheet_date DESC LIMIT 52`,
+       ${sheetLocaleFilter(locale)} ORDER BY ps.sheet_date DESC LIMIT 52`,
     )
     .all<{ sheet_date: string }>();
   return results.map((r) => r.sheet_date);

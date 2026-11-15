@@ -13,6 +13,7 @@ import {
   registrationCheckoutCancelUrl,
   type StripeCheckoutParams,
 } from './stripeCheckoutRequests';
+import type { SupportedLocale } from './locales';
 
 export type StripeEnv = {
   STRIPE_MODE?: string;
@@ -707,7 +708,7 @@ export async function createRegistrationCheckout(
       },
     ],
     success_url: `${origin}/${args.locale}/register/done?ok=1&paid=1`,
-    cancel_url: registrationCheckoutCancelUrl(origin, args.locale as 'en' | 'zh', args.eventId, requestId),
+    cancel_url: registrationCheckoutCancelUrl(origin, args.locale as SupportedLocale, args.eventId, requestId),
     customer_email: args.email,
     metadata,
     payment_intent_data: { metadata },

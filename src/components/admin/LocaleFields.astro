@@ -27,11 +27,17 @@ interface Props {
   error?: string;
   /** Admin UI language, for the tab hints and error text. */
   lang: SupportedLocale;
+  /** Restrict the tabs to these languages: for editors backed by an `*_en` / `*_zh`
+   *  column pair, where a third language could not be stored. */
+  only?: readonly SupportedLocale[];
 }
-const { name, label, values = {}, multiline = false, rows = 3, maxlength, controlClass = '', error, lang } = Astro.props;
+const { name, label, values = {}, multiline = false, rows = 3, maxlength, controlClass = '', error, lang, only } = Astro.props;
 const { enabled, default: defaultLocale } = Astro.locals.locales;
-const ordered = [defaultLocale, ...enabled.filter((code) => code !== defaultLocale)];
-const hidden = SUPPORTED_LOCALES.filter((code) => !enabled.includes(code));
+const scope = (code: SupportedLocale) => !only || only.includes(code);
+const scoped = [defaultLocale, ...enabled.filter((code) => code !== defaultLocale)].filter(scope);
+// A pair-backed editor must always show its pair, even when neither language is enabled.
+const ordered = scoped.length ? scoped : [...(only ?? [])];
+const hidden = SUPPORTED_LOCALES.filter((code) => scope(code) && !enabled.includes(code));
 const groupLabel = label.replace(/\s*[（(][^）)]*[）)]\s*$/u, '');
 const uid = `lf-${name.replace(/[^a-z0-9]/gi, '')}-${Math.random().toString(36).slice(2, 8)}`;
 ---

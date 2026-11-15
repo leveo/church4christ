@@ -16,6 +16,7 @@ import { listAnnouncements, saveAnnouncement, deleteAnnouncement, toggleAnnounce
 import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
+import { extraLocaleTexts, loadExtraI18n, localeValues } from '../../../lib/i18nExtras';
 
 const user = Astro.locals.user;
 if (!user || !(user.isEditor || hasAreaAccess(user, 'events'))) return new Response(null, { status: 403 });
@@ -69,6 +70,11 @@ const editId = failedId !== null ? failedId : editParam && /^\d+$/.test(editPara
 const editingRow = editId ? (rows.find((r) => String(r.id) === editId) ?? null) : null;
 
 const g = (n: string) => String(fd?.get(n) ?? '');
+// Languages beyond the en/zh columns live only in announcement_i18n: load them so the tabs show them.
+const extras = await loadExtraI18n(db, 'announcement_i18n', 'announcement_id', ['title']);
+const titleValues = fd && failedId !== null
+  ? { en: g('title_en'), zh: g('title_zh'), ...extraLocaleTexts(g, 'title') }
+  : localeValues({ en: editingRow?.title_en, zh: editingRow?.title_zh }, editingRow ? extras.get(String(editingRow.id)) : undefined, 'title');
 const v =
   fd && failedId !== null
     ? { titleEn: g('title_en'), titleZh: g('title_zh'), url: g('url'), sort: g('sort'), active: fd.get('active') !== null, startsAt: g('starts_at'), endsAt: g('ends_at') }
@@ -96,7 +102,7 @@ const h2 = 'font-display text-heading-sm font-bold';
       <input type="hidden" name="action" value="save" />
       {editId && <input type="hidden" name="id" value={editId} />}
       {hasErrors && <p class={noticeErr}>{t(lang, 'admin.form.fixErrors')}</p>}
-      <LocaleFields name="title" label={t(lang, 'admin.announcements.titleEn')} values={{ en: v.titleEn, zh: v.titleZh }} lang={lang} />
+      <LocaleFields name="title" label={t(lang, 'admin.announcements.titleEn')} values={titleValues} lang={lang} />
       {errors.title && <span class={errorText}>{t(lang, errors.title)}</span>}
       <p class="text-xs text-ink-subtle">{t(lang, 'admin.announcements.hint')}</p>
       <label class="block">

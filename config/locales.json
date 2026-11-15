@@ -2,6 +2,16 @@
   "defaultLocale": "en",
   "supported": [
     { "code": "en", "nativeName": "English" },
-    { "code": "zh", "nativeName": "中文" }
+    { "code": "zh", "nativeName": "中文" },
+    { "code": "es", "nativeName": "Español" },
+    { "code": "pt", "nativeName": "Português (Brasil)" },
+    { "code": "fr", "nativeName": "Français" },
+    { "code": "de", "nativeName": "Deutsch" },
+    { "code": "ja", "nativeName": "日本語" },
+    { "code": "ko", "nativeName": "한국어" },
+    { "code": "ms", "nativeName": "Bahasa Melayu" },
+    { "code": "id", "nativeName": "Bahasa Indonesia" },
+    { "code": "vi", "nativeName": "Tiếng Việt" },
+    { "code": "hi", "nativeName": "हिन्दी" }
   ]
 }

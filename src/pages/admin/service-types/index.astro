@@ -8,6 +8,7 @@ import { ministryCopy } from '../../../i18n/designMinistry';
 // they are created and retired (soft delete). Ported from the reference stack.
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
+import { extraLocalePosted, localeValues } from '../../../lib/i18nExtras';
 import { pickPair, type Locale } from '../../../lib/locales';
 import { listServiceTypesAdmin, saveServiceType, softDeleteServiceType } from '../../../lib/teamDb';
 import { card, tin, lab, btn, btnDanger, th, td } from '../../../lib/adminUi';
@@ -28,13 +29,17 @@ if (Astro.request.method === 'POST') {
     if (id) await softDeleteServiceType(db, id);
     return Astro.redirect('/admin/service-types', 303);
   }
-  const nameEn = String(fd.get('name_en') ?? '').trim();
+  const nameZh = String(fd.get('name_zh') ?? '').trim();
+  const extraNames = extraLocalePosted(fd, 'name');
+  // The English row is the final fallback: use the first language that has a name.
+  const nameEn = String(fd.get('name_en') ?? '').trim() || nameZh || Object.values(extraNames).find(Boolean) || '';
   if (!nameEn) {
     errKey = 'errors.required';
   } else {
     await saveServiceType(db, action === 'save' ? idOf(fd.get('id')) : null, {
       nameEn,
-      nameZh: String(fd.get('name_zh') ?? '').trim() || null,
+      nameZh: nameZh || null,
+      extraNames,
       startTime: timeOf(fd.get('start_time')),
       endTime: timeOf(fd.get('end_time')),
       sort: Number(String(fd.get('sort') ?? '0')) || 0,
@@ -61,7 +66,7 @@ const copy = ministryCopy(lang);
       <summary class="flex flex-wrap items-center justify-between gap-3"><span>{pickPair(lang, st.name_en, st.name_zh) || copy.serviceDetails}</span><span class="text-sm font-normal text-ink-muted tabular-nums">{st.start_time}{st.end_time ? `–${st.end_time}` : ''}</span></summary>
       <form method="post" class="mw-disclosure-content flex flex-wrap items-end gap-3">
         <input type="hidden" name="id" value={st.id} />
-        <div class="flex-1 basis-60 min-w-40"><LocaleFields name="name" label={t(lang, 'admin.serviceTypes.nameEn')} values={{ en: st.name_en, zh: st.name_zh }} lang={lang} /></div>
+        <div class="flex-1 basis-60 min-w-40"><LocaleFields name="name" label={t(lang, 'admin.serviceTypes.nameEn')} values={localeValues({ en: st.name_en, zh: st.name_zh }, st.extra, 'name')} lang={lang} /></div>
         <label><span class={lab}>{t(lang, 'admin.serviceTypes.start')}</span><input type="time" name="start_time" value={st.start_time ?? ''} class={tin} /></label>
         <label><span class={lab}>{t(lang, 'admin.serviceTypes.end')}</span><input type="time" name="end_time" value={st.end_time ?? ''} class={tin} /></label>
         <label class="w-20"><span class={lab}>{t(lang, 'admin.serviceTypes.sort')}</span><input name="sort" type="number" inputmode="numeric" value={st.sort} class={tin} /></label>

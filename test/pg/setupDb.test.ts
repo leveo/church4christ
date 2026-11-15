@@ -89,7 +89,7 @@ describe.skipIf(!hasPg)('setup database operations on Postgres', () => {
     const before = await sql.unsafe("SELECT count(*)::int AS count FROM people WHERE email LIKE '%@setup.test'");
     await expect(bootstrapFirstAdmin(db, { email: 'bad', displayName: 'Admin', locale: 'en' }))
       .rejects.toThrow(/email/i);
-    await expect(bootstrapFirstAdmin(db, { email: 'a@setup.test', displayName: 'Admin', locale: 'fr' as never }))
+    await expect(bootstrapFirstAdmin(db, { email: 'a@setup.test', displayName: 'Admin', locale: 'xx' as never }))
       .rejects.toThrow(/locale/i);
     expect(await sql.unsafe("SELECT count(*)::int AS count FROM people WHERE email LIKE '%@setup.test'"))
       .toEqual(before);

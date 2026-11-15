@@ -34,7 +34,13 @@ from those sources; direct edits to either output are temporary.
 
 `design/foundation.json` contains values that do not vary by theme: the typography scale,
 line heights (including CJK leading), letter spacing, container widths, z-index layers,
-and motion durations/easing. It does not currently contain a spacing group, and themes
+and motion durations/easing. It also lists system font stacks per script
+(`type.scriptFonts`: Japanese, Korean, Devanagari). The token build emits them per theme as
+`:root[data-theme="<name>"]:lang(ja|ko|hi)` overrides of `--font-display` and `--font-body`,
+placed between the theme's own family and its fallback (serif or sans, following the theme
+font's generic family); Chinese keeps the theme fallbacks. `base.css` gives `ja` and `ko` the
+same roomy `--leading-cjk` as `zh`. To cover another script, add its stacks there rather than
+writing a font-family in a component. It does not currently contain a spacing group, and themes
 may not override its values.
 
 Each `design/themes/*.json` file owns `version`, `name`, `label`, `defaultMode`, fonts,

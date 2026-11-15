@@ -23,7 +23,7 @@ import { THEME_META } from '../../../lib/themeMeta.generated';
 import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
 import { mediaPath } from '../../../lib/mediaRef';
 import { tin, lab, card, errorText, btn, noticeOk, noticeErr } from '../../../lib/adminUi';
-import { SUPPORTED_LOCALES, localeMeta, type Locale } from '../../../lib/locales';
+import { SUPPORTED_LOCALES, isSupportedLocale, localeMeta, type Locale } from '../../../lib/locales';
 import { LOCALE_DEFAULT_KEY, LOCALE_ENABLED_KEY, getLocaleSettings, saveLocaleSettings } from '../../../lib/localeSettings';
 
 export const prerender = false;
@@ -35,8 +35,7 @@ const db = Astro.locals.db;
 const media = (env as unknown as { MEDIA: MediaBucket }).MEDIA;
 
 const KEYS = [
-  'site.name.en', 'site.name.zh', 'site.tagline.en', 'site.tagline.zh',
-  'site.service_times.en', 'site.service_times.zh',
+  ...SUPPORTED_LOCALES.flatMap((code) => [`site.name.${code}`, `site.tagline.${code}`, `site.service_times.${code}`]),
   'site.address', 'site.email', 'site.phone', 'site.map_url', 'site.giving_url', 'site.youtube_url', 'site.hero_image_key',
   'site.logo_image_key',
   'theme.name', 'theme.default_mode',
@@ -147,6 +146,15 @@ const g = (key: string): string => (fd ? String(fd.get(key) ?? '') : (cur[key] ?
 const selectedTheme = g('theme.name') || 'sanctuary';
 const selectedMode = g('theme.default_mode') || 'light';
 const selectedLocale = (fd ? String(fd.get('locale.default') ?? '') : '') || localeSettings.default;
+// Identity fields: one input per ENABLED language (default first). A disabled language's stored
+// text is simply not posted, and a settings save only writes the keys it receives.
+const stripSuffix = (label: string): string => label.replace(/\s*[（(][^）)]*[）)]\s*$/u, '');
+const identityFields = [
+  { key: 'name', label: stripSuffix(t(lang, 'admin.settings.nameEn')), wide: false },
+  { key: 'tagline', label: stripSuffix(t(lang, 'admin.settings.taglineEn')), wide: false },
+  { key: 'service_times', label: stripSuffix(t(lang, 'admin.settings.serviceTimesEn')), wide: true },
+];
+const localeOrder = [selectedLocale, ...enabledNow.filter((code) => code !== selectedLocale)].filter(isSupportedLocale);
 const heroImageKey = cur['site.hero_image_key'] ?? '';
 const heroImage = mediaPath(heroImageKey);
 const logoImageKey = cur['site.logo_image_key'] ?? '';
@@ -177,30 +185,14 @@ const moduleGroups = MODULE_GROUPS;
     <section id="settings-identity" class={`${card} space-y-4`}>
       <h2 class={h2}>{t(lang, 'admin.settings.identityTitle')}</h2>
       <div class="grid gap-4 sm:grid-cols-2">
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.settings.nameEn')}</span>
-          <input name="site.name.en" value={g('site.name.en')} class={tin} />
-        </label>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.settings.nameZh')}</span>
-          <input name="site.name.zh" value={g('site.name.zh')} class={tin} />
-        </label>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.settings.taglineEn')}</span>
-          <input name="site.tagline.en" value={g('site.tagline.en')} class={tin} />
-        </label>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.settings.taglineZh')}</span>
-          <input name="site.tagline.zh" value={g('site.tagline.zh')} class={tin} />
-        </label>
-        <label class="block sm:col-span-2">
-          <span class={lab}>{t(lang, 'admin.settings.serviceTimesEn')}</span>
-          <input name="site.service_times.en" value={g('site.service_times.en')} class={tin} />
-        </label>
-        <label class="block sm:col-span-2">
-          <span class={lab}>{t(lang, 'admin.settings.serviceTimesZh')}</span>
-          <input name="site.service_times.zh" value={g('site.service_times.zh')} class={tin} />
-        </label>
+        {identityFields.map((field) => (
+          localeOrder.map((code) => (
+            <label class={`block${field.wide ? ' sm:col-span-2' : ''}`}>
+              <span class={lab}>{field.label} · {localeMeta(code).nativeName}</span>
+              <input name={`site.${field.key}.${code}`} value={g(`site.${field.key}.${code}`)} lang={localeMeta(code).bcp47} class={tin} />
+            </label>
+          ))
+        ))}
       </div>
     </section>
 

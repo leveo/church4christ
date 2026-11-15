@@ -31,7 +31,7 @@ describe('locale-free token page presentation', () => {
   });
 
   it('uses the site default for missing or unsupported language preferences', () => {
-    for (const language of [undefined, 'fr-FR,de;q=0.8', '*']) {
+    for (const language of [undefined, 'sw-KE,th;q=0.8', '*']) {
       expect(tokenPagePresentation(request(language), 'auth', 'error').locale).toBe('en');
     }
   });

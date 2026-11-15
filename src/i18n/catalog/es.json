@@ -1,0 +1,49 @@
+{
+  "capabilities": {
+    "bulletins": { "label": "Boletines", "description": "Crea y publica los boletines semanales del culto." },
+    "sermons": { "label": "Sermones", "description": "Publica un archivo de sermones con búsqueda." },
+    "prayer-sheets": { "label": "Hojas de oración", "description": "Prepara y publica hojas de oración." },
+    "prayer-wall": { "label": "Muro de oración", "description": "Recibe y cuida las peticiones de oración." },
+    "events": { "label": "Eventos", "description": "Publica eventos y anuncios." },
+    "serve": { "label": "Programación de voluntarios", "description": "Coordina ministerios, equipos, planes y recordatorios." },
+    "gifts": { "label": "Dones espirituales", "description": "Ayuda a las personas a descubrir sus dones y dónde servir." },
+    "testimonies": { "label": "Testimonios", "description": "Recoge y publica testimonios de servicio." },
+    "articles": { "label": "Artículos", "description": "Publica artículos bilingües." },
+    "fellowships": { "label": "Compañerismos", "description": "Publica el directorio de compañerismos." },
+    "groups": { "label": "Grupos", "description": "Administra la membresía, los eventos, las inscripciones y la asistencia de los grupos." },
+    "people": { "label": "Personas y familias", "description": "Administra personas, familias y notas pastorales." },
+    "children": { "label": "Registro de niños", "description": "Gestiona el registro seguro de niños y su asistencia." },
+    "attendance": { "label": "Asistencia al culto", "description": "Registra la asistencia total de adultos al culto e informa los registros de niños." },
+    "newcomers": { "label": "Seguimiento de visitantes", "description": "Recibe tarjetas de visitantes y coordina el seguimiento personal." },
+    "activity-score": { "label": "Puntaje de actividad", "description": "Supervisa la actividad explicable de los miembros y la participación de toda la iglesia." },
+    "page-builder": { "label": "Editor de páginas", "description": "Crea páginas bilingües personalizadas con bloques." },
+    "portal": { "label": "Portal de miembros", "description": "Ofrece a los miembros herramientas de familia, grupos, calendario, oración y descubrimiento de oportunidades." },
+    "giving": { "label": "Donaciones", "description": "Registra donaciones y, opcionalmente, acepta pagos con Stripe." },
+    "registration": { "label": "Inscripciones", "description": "Gestiona inscripciones a eventos gratuitas o de pago." },
+    "learning": { "label": "Aprendizaje", "description": "Continúa los cursos del ministerio más allá del horario de clase." },
+    "planning": { "label": "Planificación de cultos", "description": "Planifica guiones, ensayos, disponibilidad y calendarios de cultos y eventos." }
+  },
+  "presets": {
+    "website": { "label": "Sitio web", "description": "Un sitio web público enfocado y herramientas de publicación." },
+    "website-community": { "label": "Sitio web + Comunidad", "description": "Publicación web más herramientas de comunidad y voluntarios." },
+    "full-church": { "label": "Iglesia completa", "description": "Todas las funciones de sitio web, comunidad, portal, donaciones e inscripciones." },
+    "checkin": { "label": "Registro de niños", "description": "Familias, un quiosco de registro de autoservicio y una consola del ministerio infantil." },
+    "volunteer-scheduling": { "label": "Programación de voluntarios", "description": "Ministerios, equipos, horarios de servicio, recordatorios y un cuestionario de dones espirituales." },
+    "small-groups": { "label": "Grupos pequeños", "description": "Grupos pequeños con membresía, eventos y asistencia, más un directorio de compañerismos." }
+  },
+  "readiness": {
+    "identity": { "title": "Identidad de la iglesia", "description": "Confirma el manifiesto de instalación y la identidad pública de la iglesia.", "remediation": "Completa la configuración y revisa los ajustes de identidad." },
+    "locales": { "title": "Textos en inglés y chino", "description": "Revisa los textos públicos en los dos idiomas compatibles.", "remediation": "Revisa los ajustes y las páginas en inglés y chino." },
+    "service-times": { "title": "Horarios de culto", "description": "Confirma que los horarios de culto estén al día en ambos idiomas.", "remediation": "Actualiza los horarios de culto en Ajustes." },
+    "admin-grants": { "title": "Permisos del personal", "description": "Revisa el acceso de administradores limitados y de personal con alcance restringido.", "remediation": "Revisa los permisos de rol y de área en Personas." },
+    "people-migration": { "title": "Decisión sobre la migración de Personas", "description": "Registra si los datos de Personas se importaron o si se empieza vacío a propósito.", "remediation": "Completa la importación o confirma la decisión de no importar." },
+    "newcomer-owner": { "title": "Responsable de visitantes", "description": "Asigna la responsabilidad de la cola de visitantes.", "remediation": "Elige un responsable y revisa el flujo de la cola." },
+    "attendance-checkin-mapping": { "title": "Vínculo entre asistencia y registro", "description": "Confirma que la asistencia al culto esté vinculada a los eventos de registro.", "remediation": "Revisa los tipos de culto y los vínculos de registro." },
+    "origin-domain-email": { "title": "Origen, dominio y entrega", "description": "Verifica los enlaces de ejecución y la entrega en producción fuera de la aplicación.", "remediation": "Verifica el dominio, los enlaces, el correo, el almacenamiento y el modo de pago de Stripe (prueba, o en vivo tras la lista de verificación de salida a producción)." },
+    "routes-jobs": { "title": "Rutas y tareas programadas", "description": "La configuración no demuestra que las rutas o las tareas se ejecutaron correctamente.", "remediation": "Prueba las rutas públicas y verifica cada tarea programada." },
+    "learning-provider-operations": { "title": "Operaciones del proveedor de Aprendizaje", "description": "Verifica OAuth y permisos de Google Classroom o Canvas, notificaciones autenticadas, sincronización manual, mantenimiento :15, conciliación :45, rotación de credenciales, eliminación al desconectar, retención y restauración equivalente.", "remediation": "Sigue el manual de Aprendizaje y registra evidencia de asignación y sincronización del proveedor, Pub/Sub o Live Events firmados, limpieza, retención y eliminación, y restauración." },
+    "database-schema": { "title": "Esquema de la base de datos", "description": "Verifica la conectividad, las migraciones y las tablas requeridas.", "remediation": "Aplica las migraciones hacia adelante y vuelve a ejecutar doctor." },
+    "backups": { "title": "Copias de seguridad", "description": "Las credenciales configuradas no demuestran que exista una copia de seguridad utilizable.", "remediation": "Ejecuta una copia de seguridad y verifica su destino protegido." },
+    "restore-drill": { "title": "Simulacro de restauración", "description": "El simulacro de restauración debe repetirse cada 90 días.", "remediation": "Restaura una copia de seguridad de forma aislada, verifícala y luego confirma esta comprobación." }
+  }
+}

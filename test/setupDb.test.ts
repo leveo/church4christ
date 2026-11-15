@@ -108,7 +108,7 @@ describe('setup database operations on D1', () => {
     }
     await expect(bootstrapFirstAdmin(db, { email: 'a@setup.test', displayName: ' ', locale: 'en' }))
       .rejects.toThrow(/display name/i);
-    await expect(bootstrapFirstAdmin(db, { email: 'a@setup.test', displayName: 'Admin', locale: 'fr' as never }))
+    await expect(bootstrapFirstAdmin(db, { email: 'a@setup.test', displayName: 'Admin', locale: 'xx' as never }))
       .rejects.toThrow(/locale/i);
     expect(prepare).not.toHaveBeenCalled();
   });

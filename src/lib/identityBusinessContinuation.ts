@@ -1,4 +1,4 @@
-import { isSupportedLocale } from './locales';
+import { isSupportedLocale, type SupportedLocale } from './locales';
 import type { AppDb } from './appDb';
 import { getFund } from './fundDb';
 import {
@@ -26,7 +26,7 @@ import { sha256Utf8 } from './stripeWebhookInbox';
 import { newCheckoutRequestId, parseCheckoutRequestId } from './stripeCheckoutRequests';
 
 export type IdentityBusinessContinuationEnv = IdentityAuthEnv & IdentitySourceKeyEnv & StripeEnv;
-export type ContinuationLocale = 'en' | 'zh';
+export type ContinuationLocale = SupportedLocale;
 
 export type RawGivingContinuationInput = {
   fundId: number;

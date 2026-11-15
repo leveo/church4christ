@@ -7,7 +7,7 @@
 //
 // Data + original bilingual copy live in src/data/gift-questions.json.
 import data from '../data/gift-questions.json';
-import type { Locale } from './locales';
+import { pickByLocale, type Locale } from './locales';
 
 export interface GiftMeta {
   code: string;
@@ -95,5 +95,5 @@ export function giftMeta(code: string): GiftMeta | undefined {
 
 /** Localized label for a gift code, falling back to the raw code if unknown. */
 export function giftLabel(code: string, locale: Locale): string {
-  return giftMeta(code)?.label[locale] ?? code;
+  return (() => { const meta = giftMeta(code); return meta ? pickByLocale(meta.label, locale) : code; })();
 }

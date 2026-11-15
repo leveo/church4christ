@@ -1,4 +1,5 @@
 import type { GrantableArea } from './adminAreas';
+import type { SupportedLocale } from './locales';
 
 // The authenticated request context exposed as `Astro.locals.user`. The row is
 // reloaded from `people` (+ team memberships) on every request by the middleware
@@ -16,7 +17,7 @@ export type SessionUser = {
   finance: number;
   memberTeamIds: number[];
   leaderTeamIds: number[];
-  lang: 'en' | 'zh' | null;
+  lang: SupportedLocale | null;
   // Validated grants loaded from people.admin_areas. Admins may carry any
   // GrantableArea; member/editor scoped staff may carry only `newcomers`.
   // Legacy area strings are removed from non-admin sessions and cannot confer

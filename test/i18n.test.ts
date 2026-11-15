@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import en from '../src/i18n/en';
 import zh from '../src/i18n/zh';
 import { isDictLoaded, loadDict, t } from '../src/lib/i18n';
+import { SUPPORTED_LOCALES } from '../src/lib/locales';
+import { IN_PROGRESS_LOCALES, checkCatalog, checkDesign, checkDictionary, isComplete } from '../scripts/i18n/lib.mjs';
+import { catalogBase, catalogs, designSources, designs, dicts as allDicts } from './helpers/i18nData';
 import {
   ATTENDANCE_FORM_ERROR_CODES,
   type AttendanceFormErrorCode,
@@ -189,7 +192,7 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     expect(t('zh', 'locale.zh')).toBe('中文');
   });
 
-  it('has a non-empty string for every key in both locales', () => {
+  it('has a non-empty string for every key in en and zh', () => {
     for (const locale of ['en', 'zh'] as const) {
       for (const [key, value] of Object.entries(dicts[locale])) {
         expect(value.trim(), `${locale}:${key}`).not.toBe('');
@@ -451,6 +454,50 @@ describe('dictionaries (parity, ported from the reference stack)', () => {
     expect(en['admin.peopleImport.previewError']).toMatch(/no (?:database )?(?:changes|writes)/i);
     expect(zh['admin.peopleImport.previewError']).toContain('预览');
     expect(zh['admin.peopleImport.previewError']).toMatch(/没有更改数据库|没有写入|未写入/);
+  });
+});
+
+// Every registered language is held to the same gates. A language is either COMPLETE
+// (all keys; same placeholders and tags; nothing left in English; right script) or listed
+// in config/i18n-status.json `inProgress`, where it may omit keys but must still be
+// structurally sound. See docs/i18n.md.
+describe.each([...SUPPORTED_LOCALES].filter((code) => code !== 'en'))('translation quality: %s', (code) => {
+  const complete = isComplete(code);
+  it(complete ? 'is complete: every key, placeholder, tag, and script rule holds' : 'is in progress: whatever it supplies is sound', () => {
+    expect(checkDictionary(code, allDicts.en, allDicts[code] ?? {}).errors.slice(0, 20)).toEqual([]);
+  });
+
+  it('has design copy that matches the English sections', () => {
+    const overrides = code === 'zh' ? undefined : designs[code];
+    expect(checkDesign(code, designSources, overrides).errors.slice(0, 20)).toEqual([]);
+  });
+
+  it('has capability, preset, and readiness copy', () => {
+    expect(checkCatalog(code, catalogBase, catalogs[code] as never).errors.slice(0, 20)).toEqual([]);
+  });
+});
+
+describe('in-progress registry', () => {
+  it('lists only supported languages, never en or zh', () => {
+    for (const code of IN_PROGRESS_LOCALES) {
+      expect(SUPPORTED_LOCALES as readonly string[]).toContain(code);
+      expect(['en', 'zh']).not.toContain(code);
+    }
+  });
+
+  it('keeps a loadable dictionary file for every supported language', async () => {
+    for (const code of SUPPORTED_LOCALES) {
+      await loadDict(code);
+      expect(isDictLoaded(code), code).toBe(true);
+      expect(allDicts[code], code).toBeDefined();
+    }
+  });
+
+  it('uses a completed language once loaded and falls back to English for keys it lacks', async () => {
+    await loadDict('es');
+    expect(t('es', 'nav.sermons')).not.toBe(t('en', 'nav.sermons'));
+    // A key the Spanish dictionary does not carry still resolves along the chain.
+    expect(t('es', '__missing_test_key__' as never)).toBe('__missing_test_key__');
   });
 });
 

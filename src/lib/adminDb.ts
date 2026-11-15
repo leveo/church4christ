@@ -17,7 +17,7 @@ import type {
   AnnouncementInput,
   EventInput,
 } from './validate';
-import { LOCALES, type Locale } from './locales';
+import { LOCALES, type Locale, type SupportedLocale } from './locales';
 import { parseAdminAreasForRole } from './adminAreas';
 import { normalizeEmail } from './identityNormalize';
 import { hasRecentStepUp, type SessionAssurance } from './sessionAssurance';
@@ -44,7 +44,7 @@ export interface PersonListRow {
 
 /** Full row for the edit form. */
 export interface AdminPersonRow extends PersonListRow {
-  lang: 'en' | 'zh' | null;
+  lang: SupportedLocale | null;
   avatar_url: string | null;
   birthday: string | null;
   address: string | null;
