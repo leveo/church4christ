@@ -713,7 +713,30 @@ describe('final D1 schema parser', () => {
       parseFinalD1Schema([
         'CREATE TABLE example (id INTEGER PRIMARY KEY); ALTER TABLE example DROP COLUMN id;',
       ]),
-    ).toThrow(/unsupported schema DDL.*DROP COLUMN/i);
+    ).toThrow(/cannot drop key column example\.id/i);
+  });
+
+  it('models the column replacement used by the locale lookup migration', () => {
+    const schema = parseFinalD1Schema([
+      [
+        'CREATE TABLE supported_locales (code TEXT PRIMARY KEY);',
+        "CREATE TABLE person (id INTEGER PRIMARY KEY, lang TEXT CHECK (lang IN ('en','zh')), name TEXT);",
+        'CREATE TABLE _locale_bak_person AS SELECT id, lang FROM person WHERE lang IS NOT NULL;',
+        'ALTER TABLE person DROP COLUMN lang;',
+        'ALTER TABLE person ADD COLUMN lang TEXT REFERENCES supported_locales(code);',
+        'DROP TABLE _locale_bak_person;',
+      ].join('\n'),
+    ]);
+    expect([...schema.tables.keys()]).toEqual(['supported_locales', 'person']);
+    expect(schema.tables.get('person')?.constraints).toContainEqual(
+      expect.objectContaining({ kind: 'foreign', columns: ['lang'], foreignTable: 'supported_locales' }),
+    );
+  });
+
+  it('refuses to drop a missing column', () => {
+    expect(() =>
+      parseFinalD1Schema(['CREATE TABLE example (id INTEGER PRIMARY KEY); ALTER TABLE example DROP COLUMN nope;']),
+    ).toThrow(/cannot drop missing column example\.nope/i);
   });
 
   it('applies DROP INDEX and DROP INDEX IF EXISTS in migration order', () => {

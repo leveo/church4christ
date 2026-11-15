@@ -420,7 +420,9 @@ No preset changes, so an installation's recorded module list stays valid.
 
 ## Unreleased: language settings
 
-- **No migration.** Language support adds no database change.
+- **No migration for the settings themselves.** Choosing languages stores two settings rows; the
+  database change that lets more languages be stored is described in
+  [Unreleased: language lookup migrations](#unreleased-language-lookup-migrations).
 - **Upgraded installations keep English and Chinese, with English as the default,** until an
   administrator saves **Settings → Languages**. Nothing new appears and no behavior changes
   before then.
@@ -433,3 +435,37 @@ No preset changes, so an installation's recorded module list stays valid.
   `schemaVersion: 2`; version 1 files are still read.
 - **Disabling a language never deletes content.** It only hides the language; translations stay
   stored and reappear when it is enabled again.
+
+## Unreleased: language lookup migrations
+
+Every locale column used a hard-coded `CHECK (locale IN ('en','zh'))`. A new `supported_locales`
+table now holds the allowed language codes (seeded with `en`, `zh`, `es`, `pt`, `fr`, `de`, `ja`,
+`ko`, `ms`, `id`, `vi`, `hi`) and the locale columns reference it, so adding a language later is
+an `INSERT`, not a schema change. The application still offers only English and Chinese until a
+language is added to the registry (see [docs/i18n.md](i18n.md)). **No data changes, no new
+binding or secret, and no behavior changes** for existing content.
+
+- **D1: nine forward migrations, `0041` to `0049`.** `0041_supported_locales.sql` creates and
+  seeds the table. `0042` replaces the `people.lang` constraint in place; `0043` to `0049` rebuild
+  the `*_i18n`, `testimonies`, `prayer_sheets`, `email_templates`, newcomer, recovery notification,
+  and giving/registration continuation tables (SQLite cannot alter a `CHECK`), recreating every
+  index and trigger unchanged. Each file is one transaction, so a failure leaves the database as
+  it was and the migration can simply be re-run. **Back up first** (section 2 above) and apply
+  with the normal migration step before deploying the new code:
+
+  ```sh
+  npx wrangler d1 migrations apply DB --remote --config <staging-or-production-config>
+  ```
+
+  Rebuilds copy every row once, so the time grows with table size. For a typical church the
+  largest rebuilt table (`newcomer_submissions`) holds a few thousand rows and each file is
+  expected to finish quickly; time it on a staging copy first. `people` is not rebuilt (its column is replaced in place), and rows in
+  tables that reference the rebuilt ones are untouched.
+- **Supabase/PostgreSQL: one migration, `0041_supported_locales.sql`.** It creates and seeds the
+  table, then drops each unnamed locale `CHECK` and adds a named foreign key
+  `<table>_<column>_locale_fk`. No table is rewritten; PostgreSQL validates the existing rows,
+  which are all `en` or `zh`. Apply it with `npm run db:migrate:supabase`.
+- **Order.** Apply the migrations before enabling any additional language. Code that still
+  writes only `en`/`zh` works against either schema.
+- **Recovery.** There is no down migration. Restore the pre-upgrade backup as in section 5 if you
+  must go back.

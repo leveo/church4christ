@@ -63,6 +63,7 @@ const SUPABASE_MIGRATIONS = [
   '0038_community_workflows.sql',
   '0039_giving_production.sql',
   '0040_service_planning.sql',
+  '0041_supported_locales.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });
