@@ -361,9 +361,10 @@ function requireStoredParams(raw: string, row: CheckoutRequestRow): StripeChecko
 
   const success = safeApplicationUrl(parsed.success_url);
   const cancel = safeApplicationUrl(parsed.cancel_url);
-  const successMatch = success.pathname.match(/^\/(en|zh)\/register\/done$/);
+  const successMatch = success.pathname.match(/^\/([^/]+)\/register\/done$/);
   if (
     !successMatch
+    || !isSupportedLocale(successMatch[1])
     || success.search !== '?ok=1&paid=1'
     || success.hash
     || cancel.origin !== success.origin

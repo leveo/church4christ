@@ -115,6 +115,16 @@ describe('groupNavLinks', () => {
     ]);
   });
 
+  it('groups built-in links in every supported language, not only English and Chinese', () => {
+    for (const locale of ['ja', 'es', 'hi'] as const) {
+      const groups = groupNavLinks(
+        BUILTIN_NAV.map((item) => ({ label: t(locale, item.key), href: localePath(locale, item.path) })),
+        locale,
+      );
+      expect(groups.map(({ key }) => key)).toEqual(['welcome', 'explore', 'connect', 'participate']);
+    }
+  });
+
   it('keeps custom links in order under a localized More group and omits empty groups', () => {
     expect(groupNavLinks([
       { label: 'Our Story', href: '/zh/p/our-story' },

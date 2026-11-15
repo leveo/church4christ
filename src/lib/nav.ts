@@ -2,7 +2,7 @@
 // settings key `nav.items`; when unset or unparsable the hardcoded default
 // (the pre-customization menu) is used, so a bad save can never blank the nav.
 import type { AppDb } from './appDb';
-import { localePath, type Locale, parseLocaleText, pickLocaleText, type LocaleText } from './locales';
+import { localePath, type Locale, parseLocale, parseLocaleText, pickLocaleText, type LocaleText } from './locales';
 import { t } from './i18n';
 import { MODULE_KEYS, MODULES } from './modules';
 import { getSetting } from './settings';
@@ -94,9 +94,9 @@ const NAV_GROUPS: readonly {
 ] as const;
 
 function navPath(href: string): string | null {
-  const match = href.match(/^\/(?:en|zh)(\/[^?#]*)?(?:[?#]|$)/u);
-  if (!match) return null;
-  const path = match[1] || '/';
+  const match = href.match(/^\/([^/?#]+)(\/[^?#]*)?(?:[?#]|$)/u);
+  if (!match || parseLocale(match[1]) === null) return null;
+  const path = match[2] || '/';
   return path.length > 1 ? path.replace(/\/$/u, '') : path;
 }
 
