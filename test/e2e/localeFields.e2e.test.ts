@@ -63,6 +63,61 @@ describe('LocaleFields in admin editors', () => {
   });
 });
 
+describe('a third language end to end (es, ja)', () => {
+  it('serves pages in an enabled new language with <html lang>, falling back to English copy', async () => {
+    await saveLanguages(['en', 'zh', 'es', 'ja'], 'en');
+    for (const [code, tag] of [['es', 'es'], ['ja', 'ja']] as const) {
+      const res = await get(`/${code}/about/`);
+      expect(res.status, code).toBe(200);
+      const html = await res.text();
+      expect(html).toContain(`<html lang="${tag}"`);
+      expect(html).toContain('hreflang="es"');
+    }
+  });
+
+  it('shows a tab per enabled language and keeps text typed in a language beyond en/zh', async () => {
+    await saveLanguages(['en', 'zh', 'es'], 'en');
+    const cookie = await editorCookie();
+    const form = new FormData();
+    form.set('action', 'save');
+    form.set('title_en', 'Spanish Event');
+    form.set('title_es', 'Evento en español');
+    form.set('blurb_es', 'Todos son bienvenidos');
+    form.set('sort', '0');
+    form.set('active', 'on');
+    form.set('image_key', '');
+    const saved = await SELF.fetch(`${ORIGIN}/admin/events`, { method: 'POST', headers: { origin: ORIGIN, cookie }, body: form, redirect: 'manual' });
+    expect(saved.status).toBe(303);
+    const row = await env.DB.prepare("SELECT event_id AS id FROM event_i18n WHERE title = 'Spanish Event'").first<{ id: number }>();
+    const rows = await env.DB.prepare('SELECT locale, title, blurb FROM event_i18n WHERE event_id = ?1 ORDER BY locale').bind(row!.id).all<{ locale: string; title: string; blurb: string }>();
+    expect(rows.results.map((r) => `${r.locale}:${r.title}`)).toEqual(['en:Spanish Event', 'es:Evento en español']);
+
+    const html = await (await get(`/admin/events?edit=${row!.id}`, { cookie })).text();
+    expect(html).toMatch(/class="lf-tab"[^>]*>\s*Español/);
+    expect(html).toContain('Evento en español');
+    expect(html).toContain('Todos son bienvenidos');
+  });
+
+  it('keeps a disabled language\'s text in a hidden input so a save never deletes it', async () => {
+    await saveLanguages(['en', 'zh', 'es'], 'en');
+    const cookie = await editorCookie();
+    const row = await env.DB.prepare("SELECT event_id AS id FROM event_i18n WHERE title = 'Spanish Event'").first<{ id: number }>();
+    await saveLanguages(['en', 'zh'], 'en');
+    const html = await (await get(`/admin/events?edit=${row!.id}`, { cookie })).text();
+    expect(html).not.toMatch(/class="lf-tab"[^>]*>\s*Español/);
+    expect(html).toMatch(/<input type="hidden" name="title_es" value="Evento en español"/);
+  });
+
+  it('offers an identity input per enabled language in Settings', async () => {
+    await saveLanguages(['en', 'zh', 'es'], 'en');
+    const html = await (await get('/admin/settings', { cookie: await adminCookie() })).text();
+    expect(html).toContain('name="site.name.es"');
+    expect(html).toContain('name="site.tagline.es"');
+    expect(html).toContain('name="site.service_times.es"');
+    expect(html).not.toContain('name="site.name.ja"');
+  });
+});
+
 describe('language routing on the built worker', () => {
   it('negotiates the bare root with Vary, and the switcher cookie wins over Accept-Language', async () => {
     const zh = await get('/', { 'accept-language': 'zh-CN,zh;q=0.9' });
