@@ -237,7 +237,7 @@ describe('newcomer foundation schema (D1)', () => {
     await reject("INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial) VALUES (97,'bad-key','open',97,1,0)");
     await reject(`INSERT INTO newcomer_statuses (id,key,category,sort,active,is_initial)
       VALUES (98,'${'a'.repeat(65)}','open',98,1,0)`);
-    await reject("INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES (1,'fr','Nouveau')");
+    await reject("INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES (1,'xx','Nouveau')");
     await reject("INSERT INTO newcomer_status_i18n (status_id,locale,label) VALUES (1,'en','')");
   });
 
@@ -325,7 +325,7 @@ describe('newcomer foundation schema (D1)', () => {
       base('10000000-0000-4000-8000-000000000028', { email: "'é@example.test'" }),
       base('10000000-0000-4000-8000-000000000004', { phone: "' +13125550100'" }),
       base('10000000-0000-4000-8000-000000000029', { phone: "'+03125550100'" }),
-      base('10000000-0000-4000-8000-000000000005', { locale: "'fr'" }),
+      base('10000000-0000-4000-8000-000000000005', { locale: "'xx'" }),
       base('10000000-0000-4000-8000-000000000006', { visitDate: "'2026-02-30'" }),
       base('10000000-0000-4000-8000-000000000007', { visitDate: "'0000-01-01'" }),
       base('10000000-0000-4000-8000-000000000008', { followUp: "'abcd-01-01'" }),

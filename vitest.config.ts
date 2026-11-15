@@ -14,6 +14,7 @@ const NODE_ONLY = [
   'test/node/designAssets.test.ts',
   'test/node/editions.test.ts',
   'test/node/i18nKeysUsed.test.ts',
+  'test/node/localeLookupMigration.test.ts',
   'test/node/portalMigrationDefault.test.ts',
   'test/themeMeta.test.ts',
   'test/portalMediaSeed.test.ts',
