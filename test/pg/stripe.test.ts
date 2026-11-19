@@ -851,6 +851,27 @@ describe('createRegistrationCheckoutFromParams', () => {
     expect(bodyEntries(calls[0]).expires_at).toBeUndefined();
   });
 
+  it('sends quantity = party size and checks the session total as unit amount times quantity', async () => {
+    const partyParams = buildRegistrationCheckoutParams({
+      requestId: REQUEST_ID, registrationId: 88, eventId: 12, personId: null, name: 'Ada', email: 'reg@example.com',
+      amountCents: 2500, currency: 'usd', answers: [], eventTitle: 'Summer Retreat', locale: 'en', appOrigin: 'https://church.example',
+      party: { phone: null, attendees: [{ name: 'Ada', personId: null }, { name: 'Bob', personId: null }, { name: 'Cy', personId: null }] },
+    });
+    expect(partyParams.line_items[0].quantity).toBe(3);
+    const session = (total: number) => checkoutJson({
+      id: 'cs_test_party', url: 'https://checkout.stripe.com/c/pay/cs_test_party', status: 'open',
+      payment_status: 'unpaid', amount_total: total, currency: 'usd', metadata: partyParams.metadata,
+    });
+    const { fn, calls } = mockFetch(session(7500));
+    expect((await createRegistrationCheckoutFromParams(ENV, partyParams, { fetcher: fn, requestId: REQUEST_ID })).id).toBe('cs_test_party');
+    expect(bodyEntries(calls[0])['line_items[0][quantity]']).toBe('3');
+    expect(bodyEntries(calls[0])['line_items[0][price_data][unit_amount]']).toBe('2500');
+    // a session charging the single-person total is rejected
+    const wrong = mockFetch(session(2500));
+    await expect(createRegistrationCheckoutFromParams(ENV, partyParams, { fetcher: wrong.fn, requestId: REQUEST_ID }))
+      .rejects.toMatchObject({ stage: 'response' });
+  });
+
   it('rejects response identity or payment fields that do not match the saved pair', async () => {
     for (const overrides of [
       { metadata: { ...params.metadata, request_id: '00000000-0000-4000-8000-000000000999' } },

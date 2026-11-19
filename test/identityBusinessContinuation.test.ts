@@ -5,6 +5,7 @@ import { identityTrustedRequestContext } from '../src/lib/identityAuth';
 import { claimSignupSessionDelivery } from '../src/lib/identityAccount';
 import { IDENTITY_CONTINUATION_COOKIE, sealIdentityContinuationCookie } from '../src/lib/identityContinuationCookie';
 import * as continuation from '../src/lib/identityBusinessContinuation';
+import { findRegistrationByToken } from '../src/lib/regManage';
 import { POST as completeContinuationRoute } from '../src/pages/api/identity/continuation/complete';
 import {
   beginRegistrationContinuation,
@@ -154,6 +155,52 @@ describe('identity business continuations', () => {
     expect(saved).toMatchObject({ event_id: eventId, status: 'confirmed', child_state: 'consumed', intent_state: 'consumed' });
     expect(saved?.business_record_key).toBe(String(saved?.registration_id));
     expect(saved?.receipt_key).toBe(String(saved?.registration_id));
+  });
+
+  it('carries a guest party through the continuation: digest, immutable party_json, N attendees, phone, locale and a one-time manage token', async () => {
+    const eventId = 810_090;
+    const intentId = crypto.randomUUID();
+    await createD1RegistrationSchema(eventId, 5);
+    await env.DB.prepare('UPDATE reg_events SET max_party_size = 4 WHERE id = ?1').bind(eventId).run();
+    const party = { phone: '555 0100', attendees: [{ name: 'Free Guest' }, { name: 'Bob' }, { name: 'Cy' }] };
+    const start = (extra: Record<string, unknown>) => beginRegistrationContinuation(env.DB, continuationEnv, {
+      campusId: 1, intentId, event: { ...freeEvent(eventId), max_party_size: 4 }, name: `Free ${intentId}`,
+      email: `party-${intentId}@example.test`, locale: 'zh', answers: [], now: '2032-01-01 00:00:00',
+      requestContext: identityTrustedRequestContext(new Headers({ 'CF-Connecting-IP': '203.0.113.121' }), intentId),
+      ...extra,
+    });
+    // more people than the event allows is refused before anything is stored
+    await expect(start({ party: { phone: null, attendees: Array.from({ length: 5 }, (_, i) => ({ name: `P${i}` })) } }))
+      .rejects.toThrow('identity_continuation_party_invalid');
+    const begun = await start({ party });
+    expect(begun.status).toBe('verification_required');
+    if (begun.status !== 'verification_required') return;
+    // the party is part of the payload digest: the same intent with another party drifts
+    await expect(start({ party: { ...party, attendees: party.attendees.slice(0, 2) } }))
+      .rejects.toThrow('identity_source_payload_drift');
+    const stored = await env.DB.prepare('SELECT party_json FROM identity_registration_continuations WHERE intent_id = ?1')
+      .bind(intentId).first<{ party_json: string }>();
+    expect(JSON.parse(stored!.party_json)).toEqual(party);
+    await expect(env.DB.prepare(`UPDATE identity_registration_continuations SET party_json = '{}' WHERE intent_id = ?1`).bind(intentId).run())
+      .rejects.toThrow('identity_business_continuation_immutable');
+
+    const result = await completeRegistrationContinuation(env.DB, continuationEnv, {
+      campusId: 1, intentId, publicId: begun.delivery.publicId, code: begun.delivery.code,
+      appOrigin: 'https://church.example', now: '2032-01-01 00:01:00',
+    });
+    expect(result.status).toBe('done');
+    expect(result.manageToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const registration = await env.DB.prepare(
+      'SELECT id, person_id, party_size, phone, locale, status, manage_token_hash FROM registrations WHERE id = ?1',
+    ).bind(result.registrationId).first<Record<string, unknown>>();
+    expect(registration).toMatchObject({ party_size: 3, phone: '555 0100', locale: 'zh', status: 'confirmed' });
+    expect(registration?.manage_token_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(await findRegistrationByToken(env.DB, result.manageToken)).toMatchObject({ id: result.registrationId, event_id: eventId, locale: 'zh' });
+    const attendees = await env.DB.prepare('SELECT name, person_id, sort FROM reg_attendees WHERE registration_id = ?1 ORDER BY sort')
+      .bind(result.registrationId).all<{ name: string; person_id: number | null; sort: number }>();
+    expect(attendees.results.map((a) => a.name)).toEqual(['Free Guest', 'Bob', 'Cy']);
+    expect(attendees.results[0].person_id).toBe(registration?.person_id);
+    expect(attendees.results.slice(1).every((a) => a.person_id === null)).toBe(true);
   });
 
   it('waitlists a free guest registration when the event filled up first, and replays the waitlist outcome', async () => {
@@ -779,5 +826,17 @@ describe('identity business continuations', () => {
     });
     expect(one).toEqual(two);
     expect(await continuationPayloadDigest(one)).toMatch(/^[0-9a-f]{64}$/);
+    // no party: the payload (and so its digest) is exactly what it was before the party flow
+    expect(Object.keys(one)).not.toContain('party');
+    const partied = await normalizeRegistrationContinuationInput({
+      eventId: 9, name: 'Ada', email: 'ada@example.test', amountCents: 0, currency: 'usd',
+      locale: 'zh', answers: [[1, 'a'], [3, 'b']], party: { phone: ' 555 ', attendees: [{ name: ' Ada ' }, { name: 'Bob' }] },
+    });
+    expect(partied.party).toEqual({ phone: '555', attendees: [{ name: 'Ada' }, { name: 'Bob' }] });
+    expect(await continuationPayloadDigest(partied)).not.toBe(await continuationPayloadDigest(one));
+    await expect(normalizeRegistrationContinuationInput({
+      eventId: 9, name: 'Ada', email: 'ada@example.test', amountCents: 0, currency: 'usd', locale: 'zh', answers: [],
+      party: { phone: null, attendees: [] },
+    })).rejects.toThrow('identity_continuation_party_invalid');
   });
 });

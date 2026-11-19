@@ -50,6 +50,12 @@ export interface RegEvent {
   waitlist_enabled: number;
   confirmation_prefix: string | null;
   poster: string | null;
+  /** Localized event notes shown to registrants (requested -> default -> en). */
+  notes: string | null;
+  /** The most people one registration may cover (1-20). */
+  max_party_size: number;
+  /** 1 = registrants may edit/cancel through their manage link while the event is open or in preview. */
+  allow_self_edit: number;
   /** Seats held by confirmed registrations (SUM(party_size)). */
   confirmed_count: number;
   /** Seats held by pending + review + confirmed registrations (SUM(party_size)). */
@@ -102,7 +108,7 @@ export const EVENT_LOCK_AND_NUMBER_SQL =
 // default), so callers bind their own parameters from ?1. Seat counts sum
 // party_size (see SEAT_STATUSES).
 function eventSelect(locale: Locale): string {
-  const { select, joins } = i18nJoin('reg_event_i18n', 'e', 'event_id', ['title', 'description'], locale);
+  const { select, joins } = i18nJoin('reg_event_i18n', 'e', 'event_id', ['title', 'description', 'notes'], locale);
   return `
   SELECT e.id AS id,
          ${select},
@@ -111,6 +117,7 @@ function eventSelect(locale: Locale): string {
          e.opens_at AS opens_at, e.closes_at AS closes_at, e.active AS active,
          e.visible_from AS visible_from, e.waitlist_enabled AS waitlist_enabled,
          e.confirmation_prefix AS confirmation_prefix, e.poster AS poster,
+         e.max_party_size AS max_party_size, e.allow_self_edit AS allow_self_edit,
          (SELECT COALESCE(SUM(r.party_size), 0) FROM registrations r WHERE r.event_id = e.id AND r.status = 'confirmed') AS confirmed_count,
          ${seatsTakenSql('e.id')} AS taken_count,
          (SELECT COALESCE(SUM(r.party_size), 0) FROM registrations r WHERE r.event_id = e.id AND r.status = 'waitlist') AS waitlist_count
@@ -118,7 +125,7 @@ function eventSelect(locale: Locale): string {
   ${joins}`;
 }
 
-type EventRow = Omit<RegEvent, 'title'> & { title: string | null };
+type EventRow = Omit<RegEvent, 'title' | 'notes'> & { title: string | null; notes: string | null };
 const toEvent = (row: EventRow): RegEvent => ({ ...row, title: row.title ?? '' });
 
 // A registration is OPEN when it is active, visible, its sign-up window has
@@ -321,43 +328,50 @@ export function validateAnswers(
 ): Array<[number, string]> {
   const out: Array<[number, string]> = [];
   for (const q of questions) {
-    const raw = form[String(q.id)];
-    const options = q.options ?? [];
-
-    if (q.type === 'checkbox') {
-      const values = (raw === undefined ? [] : Array.isArray(raw) ? raw : [raw]).filter((v) => v !== '');
-      if (q.required && values.length === 0) throw new Error('missing_required');
-      for (const v of values) if (!options.includes(v)) throw new Error('bad_answer');
-      if (values.length > 0) out.push([q.id, JSON.stringify(values)]);
-      continue;
-    }
-
-    const value = (Array.isArray(raw) ? (raw[0] ?? '') : (raw ?? '')).trim();
-    if (value === '') {
-      if (q.required) throw new Error('missing_required');
-      continue;
-    }
-    if (q.type === 'select') {
-      if (!options.includes(value)) throw new Error('bad_answer');
-      out.push([q.id, value]);
-    } else if (q.type === 'yesno') {
-      const v = value.toLowerCase();
-      const norm = ['yes', 'y', 'true', '1', 'on'].includes(v)
-        ? 'yes'
-        : ['no', 'n', 'false', '0', 'off'].includes(v)
-          ? 'no'
-          : null;
-      if (norm === null) throw new Error('bad_answer');
-      out.push([q.id, norm]);
-    } else {
-      // text / textarea — the trimmed value, non-empty by the guard above.
-      out.push([q.id, value]);
-    }
+    const checked = checkAnswer(q, form[String(q.id)]);
+    if ('code' in checked) throw new Error(checked.code);
+    if (checked.value !== null) out.push([q.id, checked.value]);
   }
   return out;
 }
 
+export type AnswerErrorCode = 'missing_required' | 'bad_answer';
+
+/** Check ONE question's raw form value: the normalized value to store (null =
+ *  nothing to store), or the error code. Shared by validateAnswers (throws the
+ *  first error) and validateSubmission (collects every error). */
+export function checkAnswer(
+  q: RegQuestion,
+  raw: string | string[] | undefined,
+): { value: string | null } | { code: AnswerErrorCode } {
+  const options = q.options ?? [];
+
+  if (q.type === 'checkbox') {
+    const values = (raw === undefined ? [] : Array.isArray(raw) ? raw : [raw]).filter((v) => v !== '');
+    if (q.required && values.length === 0) return { code: 'missing_required' };
+    for (const v of values) if (!options.includes(v)) return { code: 'bad_answer' };
+    return { value: values.length > 0 ? JSON.stringify(values) : null };
+  }
+
+  const value = (Array.isArray(raw) ? (raw[0] ?? '') : (raw ?? '')).trim();
+  if (value === '') return q.required ? { code: 'missing_required' } : { value: null };
+  if (q.type === 'select') return options.includes(value) ? { value } : { code: 'bad_answer' };
+  if (q.type === 'yesno') {
+    const v = value.toLowerCase();
+    if (['yes', 'y', 'true', '1', 'on'].includes(v)) return { value: 'yes' };
+    if (['no', 'n', 'false', '0', 'off'].includes(v)) return { value: 'no' };
+    return { code: 'bad_answer' };
+  }
+  // text / textarea — the trimmed value, non-empty by the guard above.
+  return { value };
+}
+
 // ── Registration writer ──────────────────────────────────────────────────────
+
+export interface RegAttendeeInput {
+  name: string;
+  personId?: number | null;
+}
 
 export interface RegistrationInsertInput {
   /** Pre-allocated registration id (the guest continuation path); omit to auto-assign. */
@@ -372,7 +386,17 @@ export interface RegistrationInsertInput {
   currency: string;
   /** Idempotency key, unique per event. */
   submissionKey: string;
+  /** Seats the registration takes. Ignored when `attendees` is given (then it is attendees.length). */
   partySize?: number;
+  /** The people covered, in order (1..max_party_size, validated by the caller through
+   *  validateSubmission). Omitted: one attendee, the contact. For the first row an
+   *  undefined personId inherits `personId`; every other row's undefined means no person. */
+  attendees?: RegAttendeeInput[];
+  /** The registrant's language, for later emails (null = unknown). */
+  locale?: string | null;
+  phone?: string | null;
+  /** SHA-256 hex of the manage-link token (see generateManageToken). */
+  manageTokenHash?: string | null;
   /** When the event is full: true + waitlist_enabled inserts a 'waitlist' row; otherwise nothing is inserted. */
   allowWaitlist: boolean;
   answers: Array<[number, string]>;
@@ -391,15 +415,19 @@ export const REGISTRATION_INSERT_INDEX = 1;
  *       waitlist decision is made in SQL against the committed seat count (SUM of
  *       party_size over SEAT_STATUSES), so a full event with no waitlist inserts
  *       NOTHING (no row returned) and never an oversold or compensating row;
- *   [2] the single reg_attendees row, [3..] the reg_answers rows, both selected back
+ *   [2..] one reg_attendees row per person (sort 0..N-1), then the reg_answers rows, all selected back
  *       through (event_id, submission_key) - no currval, nothing to thread.
  * Read the outcome with readRegistrationInsert(results).
  */
 export function registrationInsertStatements(db: AppDb, input: RegistrationInsertInput): AppStatement[] {
-  const partySize = input.partySize ?? 1;
+  const attendees: RegAttendeeInput[] = input.attendees?.length
+    ? input.attendees
+    : [{ name: input.name, personId: input.personId }];
+  const partySize = input.attendees?.length ? input.attendees.length : (input.partySize ?? 1);
   const binds: unknown[] = [
     input.eventId, input.personId, input.name, input.email, input.status, input.amountCents,
     input.currency, input.submissionKey, partySize, input.allowWaitlist ? 1 : 0,
+    input.locale ?? null, input.phone ?? null, input.manageTokenHash ?? null,
   ];
   // Optional pieces take the next free placeholder number, so every placeholder a
   // statement mentions is bound and nothing else is (Postgres rejects both gaps
@@ -423,10 +451,12 @@ export function registrationInsertStatements(db: AppDb, input: RegistrationInser
     db
       .prepare(
         `INSERT INTO registrations
-           (${idColumn}event_id, person_id, name, email, status, amount_cents, currency, submission_key, confirmation_no, party_size)
+           (${idColumn}event_id, person_id, name, email, status, amount_cents, currency, submission_key, confirmation_no, party_size,
+            locale, phone, manage_token_hash)
          SELECT ${idValue}e.id, CAST(?2 AS INTEGER), CAST(?3 AS TEXT), CAST(?4 AS TEXT),
                 CASE WHEN e.capacity IS NULL OR h.taken + CAST(?9 AS INTEGER) <= e.capacity THEN CAST(?5 AS TEXT) ELSE 'waitlist' END,
-                CAST(?6 AS INTEGER), CAST(?7 AS TEXT), CAST(?8 AS TEXT), ${confirmationNoSql('e')}, CAST(?9 AS INTEGER)
+                CAST(?6 AS INTEGER), CAST(?7 AS TEXT), CAST(?8 AS TEXT), ${confirmationNoSql('e')}, CAST(?9 AS INTEGER),
+                CAST(?11 AS TEXT), CAST(?12 AS TEXT), CAST(?13 AS TEXT)
          FROM reg_events e
          CROSS JOIN (
            SELECT COALESCE(SUM(r.party_size), 0) AS taken
@@ -438,15 +468,20 @@ export function registrationInsertStatements(db: AppDb, input: RegistrationInser
          RETURNING id, status, confirmation_no`,
       )
       .bind(...binds),
-    db
-      .prepare(
-        `INSERT INTO reg_attendees (registration_id, sort, name, person_id)
-         SELECT r.id, 0, r.name, r.person_id FROM registrations r
-         WHERE r.event_id = ?1 AND r.submission_key = ?2
-           AND NOT EXISTS (SELECT 1 FROM reg_attendees a WHERE a.registration_id = r.id)`,
-      )
-      .bind(input.eventId, input.submissionKey),
   ];
+  attendees.forEach((attendee, index) => {
+    const personId = attendee.personId === undefined ? (index === 0 ? input.personId : null) : attendee.personId;
+    stmts.push(
+      db
+        .prepare(
+          `INSERT INTO reg_attendees (registration_id, sort, name, person_id)
+           SELECT r.id, CAST(?3 AS INTEGER), CAST(?4 AS TEXT), CAST(?5 AS INTEGER) FROM registrations r
+           WHERE r.event_id = ?1 AND r.submission_key = ?2
+             AND NOT EXISTS (SELECT 1 FROM reg_attendees a WHERE a.registration_id = r.id AND a.sort = CAST(?3 AS INTEGER))`,
+        )
+        .bind(input.eventId, input.submissionKey, index, attendee.name, personId),
+    );
+  });
   for (const [questionId, value] of input.answers) {
     stmts.push(
       db
@@ -466,15 +501,44 @@ export interface CreatedRegistration {
   id: number;
   status: RegStatus;
   confirmationNo: string | null;
+  /** The plaintext manage-link token, present ONLY on the call that created the row
+   *  (only its SHA-256 is stored, so a repeat or re-read returns null). */
+  manageToken?: string | null;
 }
 
+// ── Manage-link token ───────────────────────────────────────────────────────
+
+const MANAGE_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
+
+function toBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '');
+}
+
+/** SHA-256 of a manage token as lowercase hex (what registrations.manage_token_hash stores). */
+export async function hashManageToken(token: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)));
+  return Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** A fresh manage token (32 random bytes, base64url, 43 characters) and its stored hash. */
+export async function generateManageToken(): Promise<{ token: string; hash: string }> {
+  const token = toBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+  return { token, hash: await hashManageToken(token) };
+}
+
+/** True for a string shaped like a manage token (checked before any database read). */
+export const isManageTokenShape = (value: unknown): value is string => typeof value === 'string' && MANAGE_TOKEN_RE.test(value);
+
 /** The registration a registrationInsertStatements batch created, or null when the
- *  capacity predicate excluded it (event full and no waitlist). */
-export function readRegistrationInsert(results: AppDbResult[]): CreatedRegistration | null {
+ *  capacity predicate excluded it (event full and no waitlist). `manageToken` is the
+ *  plaintext the caller generated for this batch; it is echoed back on success. */
+export function readRegistrationInsert(results: AppDbResult[], manageToken: string | null = null): CreatedRegistration | null {
   const row = results[REGISTRATION_INSERT_INDEX]?.results?.[0] as
     | { id: number; status: RegStatus; confirmation_no: string | null }
     | undefined;
-  return row ? { id: row.id, status: row.status, confirmationNo: row.confirmation_no } : null;
+  return row ? { id: row.id, status: row.status, confirmationNo: row.confirmation_no, manageToken } : null;
 }
 
 /** A unique-constraint violation on either backend (Postgres 23505, SQLite message). */
@@ -522,13 +586,18 @@ export async function createRegistration(
     answers: Array<[number, string]>;
     submissionKey?: string;
     partySize?: number;
+    /** The people covered (see RegistrationInsertInput.attendees); party_size = its length. */
+    attendees?: RegAttendeeInput[];
+    locale?: string | null;
+    phone?: string | null;
     allowWaitlist?: boolean;
   },
 ): Promise<CreatedRegistration> {
   const submissionKey = input.submissionKey ?? newSubmissionKey();
   const existing = await findBySubmissionKey(db, input.eventId, submissionKey);
-  if (existing) return existing;
+  if (existing) return { ...existing, manageToken: null };
 
+  const manage = await generateManageToken();
   const stmts = registrationInsertStatements(db, {
     eventId: input.eventId,
     personId: input.personId,
@@ -539,6 +608,10 @@ export async function createRegistration(
     currency: input.currency,
     submissionKey,
     partySize: input.partySize,
+    attendees: input.attendees,
+    locale: input.locale ?? null,
+    phone: input.phone ?? null,
+    manageTokenHash: manage.hash,
     allowWaitlist: input.amountCents === 0 && input.allowWaitlist !== false,
     answers: input.answers,
   });
@@ -548,11 +621,11 @@ export async function createRegistration(
   } catch (error) {
     if (isUniqueViolation(error)) {
       const winner = await findBySubmissionKey(db, input.eventId, submissionKey);
-      if (winner) return winner;
+      if (winner) return { ...winner, manageToken: null };
     }
     throw error;
   }
-  const created = readRegistrationInsert(results);
+  const created = readRegistrationInsert(results, manage.token);
   if (created) return created;
   if (results[0].meta.changes === 0) throw new Error('event_not_found');
   throw new Error('event_full');
@@ -978,14 +1051,94 @@ export async function cancelClaimedRegistrationCheckoutRequest(
 /**
  * Cancel a registration by id (admin action, or the createRegistration backstop's
  * compensating undo) — any status becomes 'cancelled'. Idempotent: an
- * already-cancelled row does not move and returns false.
+ * already-cancelled row does not move and returns false. On a FREE event the
+ * released seats go to the waitlist (promoteWaitlist); the promoted registration
+ * ids are in `promoted` for the caller to email.
  */
 export async function cancelRegistration(db: AppDb, id: number): Promise<boolean> {
-  const r = await db
-    .prepare(`UPDATE registrations SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?1 AND status != 'cancelled'`)
-    .bind(id)
-    .run();
-  return r.meta.changes > 0;
+  return (await cancelRegistrationPromoting(db, id)).cancelled;
+}
+
+/** cancelRegistration plus the waitlist registrations it promoted. */
+export async function cancelRegistrationPromoting(
+  db: AppDb,
+  id: number,
+): Promise<{ cancelled: boolean; promoted: number[] }> {
+  const event = await db.prepare(`SELECT event_id FROM registrations WHERE id = ?1`).bind(id).first<{ event_id: number }>();
+  if (!event) return { cancelled: false, promoted: [] };
+  const results = await db.batch([
+    // Serializes with every other seat-changing batch on this event.
+    db.prepare(`UPDATE reg_events SET updated_at = updated_at WHERE id = ?1`).bind(event.event_id),
+    db
+      .prepare(
+        `UPDATE registrations SET status = 'cancelled', cancelled_at = datetime('now'), updated_at = datetime('now')
+         WHERE id = ?1 AND status != 'cancelled'`,
+      )
+      .bind(id),
+    // Everyone on a cancelled registration is cancelled too.
+    db
+      .prepare(
+        `UPDATE reg_attendees SET status = 'cancelled', updated_at = datetime('now')
+         WHERE registration_id = ?1 AND status = 'active'
+           AND EXISTS (SELECT 1 FROM registrations r WHERE r.id = ?1 AND r.status = 'cancelled')`,
+      )
+      .bind(id),
+  ]);
+  if (results[1].meta.changes === 0) return { cancelled: false, promoted: [] };
+  return { cancelled: true, promoted: await promoteWaitlist(db, event.event_id) };
+}
+
+/**
+ * Move waitlisted registrations onto freed seats, FREE events only (a paid event
+ * never waitlists, and its seats are released by Stripe session expiry instead).
+ * Runs after any seat is released. Candidates are read first (oldest first:
+ * created_at, id), then ONE batch runs: a row lock on the event (so two
+ * concurrent releases serialize and each candidate is promoted once), then one
+ * guarded UPDATE per candidate - still waitlisted AND the whole party fits in the
+ * seats left. Later statements in the batch see earlier promotions, so a party
+ * that does not fit is skipped and a smaller later one may take the seats; a
+ * skipped party stays first in line for the next release. Returns the promoted
+ * registration ids in promotion order.
+ */
+export async function promoteWaitlist(db: AppDb, eventId: number): Promise<number[]> {
+  const event = await db
+    .prepare(`SELECT price_cents FROM reg_events WHERE id = ?1`)
+    .bind(eventId)
+    .first<{ price_cents: number | null }>();
+  if (!event || (event.price_cents ?? 0) > 0) return [];
+  const { results: candidates } = await db
+    .prepare(`SELECT id FROM registrations WHERE event_id = ?1 AND status = 'waitlist' ORDER BY created_at, id`)
+    .bind(eventId)
+    .all<{ id: number }>();
+  if (candidates.length === 0) return [];
+  const stmts: AppStatement[] = [
+    // The lock only; it must not take a confirmation number.
+    db.prepare(`UPDATE reg_events SET updated_at = updated_at WHERE id = ?1`).bind(eventId),
+  ];
+  for (const candidate of candidates) {
+    stmts.push(
+      db
+        .prepare(
+          `UPDATE registrations SET status = 'confirmed', updated_at = datetime('now')
+           WHERE id = ?1 AND event_id = ?2 AND status = 'waitlist'
+             AND EXISTS (
+               SELECT 1 FROM reg_events e
+               WHERE e.id = ?2 AND COALESCE(e.price_cents, 0) = 0
+                 AND (e.capacity IS NULL
+                      OR ${seatsTakenSql('e.id')} + registrations.party_size <= e.capacity)
+             )
+           RETURNING id`,
+        )
+        .bind(candidate.id, eventId),
+    );
+  }
+  const results = await db.batch(stmts);
+  const promoted: number[] = [];
+  for (let i = 1; i < results.length; i++) {
+    const row = results[i].results?.[0] as { id: number } | undefined;
+    if (row) promoted.push(row.id);
+  }
+  return promoted;
 }
 
 // ── Admin ────────────────────────────────────────────────────────────────────
@@ -1025,6 +1178,10 @@ export interface RegEventAdmin {
   confirmation_prefix: string | null;
   next_confirmation: number;
   poster: string | null;
+  max_party_size: number;
+  allow_self_edit: number;
+  /** Per-language notes shown to registrants (only languages that have a row/notes). */
+  notes: Partial<Record<Locale, string | null>>;
   confirmed_count: number;
   taken_count: number;
   waitlist_count: number;
@@ -1038,26 +1195,28 @@ const ADMIN_EVENT_SELECT = `
          e.opens_at AS opens_at, e.closes_at AS closes_at, e.active AS active,
          e.visible_from AS visible_from, e.waitlist_enabled AS waitlist_enabled,
          e.confirmation_prefix AS confirmation_prefix, e.next_confirmation AS next_confirmation,
-         e.poster AS poster,
+         e.poster AS poster, e.max_party_size AS max_party_size, e.allow_self_edit AS allow_self_edit,
          (SELECT COALESCE(SUM(r.party_size), 0) FROM registrations r WHERE r.event_id = e.id AND r.status = 'confirmed') AS confirmed_count,
          ${seatsTakenSql('e.id')} AS taken_count,
          (SELECT COALESCE(SUM(r.party_size), 0) FROM registrations r WHERE r.event_id = e.id AND r.status = 'waitlist') AS waitlist_count
   FROM reg_events e`;
 
-type AdminEventRow = Omit<RegEventAdmin, 'titles' | 'descriptions' | 'title_en' | 'title_zh' | 'description_en' | 'description_zh' | 'phase'>;
+type AdminEventRow = Omit<RegEventAdmin, 'titles' | 'descriptions' | 'notes' | 'title_en' | 'title_zh' | 'description_en' | 'description_zh' | 'phase'>;
 
 async function withEventTexts(db: AppDb, rows: AdminEventRow[], now: string): Promise<RegEventAdmin[]> {
   if (rows.length === 0) return [];
   const { results } = await db
-    .prepare(`SELECT event_id, locale, title, description FROM reg_event_i18n`)
-    .all<{ event_id: number; locale: string; title: string; description: string | null }>();
+    .prepare(`SELECT event_id, locale, title, description, notes FROM reg_event_i18n`)
+    .all<{ event_id: number; locale: string; title: string; description: string | null; notes: string | null }>();
   const ids = new Set(rows.map((r) => r.id));
   const titles = new Map<number, Partial<Record<Locale, string>>>();
   const descriptions = new Map<number, Partial<Record<Locale, string | null>>>();
+  const notes = new Map<number, Partial<Record<Locale, string | null>>>();
   for (const t of results) {
     if (!ids.has(t.event_id) || !isSupportedLocale(t.locale)) continue;
     (titles.get(t.event_id) ?? titles.set(t.event_id, {}).get(t.event_id)!)[t.locale] = t.title;
     (descriptions.get(t.event_id) ?? descriptions.set(t.event_id, {}).get(t.event_id)!)[t.locale] = t.description;
+    (notes.get(t.event_id) ?? notes.set(t.event_id, {}).get(t.event_id)!)[t.locale] = t.notes;
   }
   return rows.map((r) => {
     const tt = titles.get(r.id) ?? {};
@@ -1066,6 +1225,7 @@ async function withEventTexts(db: AppDb, rows: AdminEventRow[], now: string): Pr
       ...r,
       titles: tt,
       descriptions: dd,
+      notes: notes.get(r.id) ?? {},
       title_en: tt.en ?? '',
       title_zh: tt.zh ?? null,
       description_en: dd.en ?? null,
@@ -1092,7 +1252,8 @@ export async function getEventAdmin(db: AppDb, id: number, now: string = toUtcSq
 /** A confirmation prefix is 1-6 characters of A-Z / 0-9 (matches the column CHECK). */
 export const CONFIRMATION_PREFIX_RE = /^[A-Z0-9]{1,6}$/;
 
-export type LocalizedEventTexts = Partial<Record<Locale, { title: string; description?: string | null }>>;
+/** `notes` undefined leaves the stored notes untouched; null or blank clears them. */
+export type LocalizedEventTexts = Partial<Record<Locale, { title: string; description?: string | null; notes?: string | null }>>;
 
 export interface RegEventSaveInput {
   id?: number;
@@ -1118,20 +1279,28 @@ export interface RegEventSaveInput {
   waitlist_enabled?: number;
   confirmation_prefix?: string | null;
   poster?: string | null;
+  /** 1-20 people per registration (default 1 on insert; undefined leaves it unchanged on update). */
+  max_party_size?: number;
+  /** 1/0: registrants may edit or cancel through their manage link (default 1). */
+  allow_self_edit?: number;
   /** The installation's default language (default: the runtime default). */
   defaultLocale?: Locale;
 }
 
-function collectEventTexts(input: RegEventSaveInput): Map<Locale, { title: string; description: string | null }> {
+function collectEventTexts(input: RegEventSaveInput): Map<Locale, { title: string; description: string | null; notes: string | null | undefined }> {
   const merged: LocalizedEventTexts = {};
   if (input.title_en !== undefined) merged.en = { title: input.title_en, description: input.description_en };
   if (input.title_zh !== undefined) merged.zh = { title: input.title_zh, description: input.description_zh };
   Object.assign(merged, input.titles ?? {});
-  const out = new Map<Locale, { title: string; description: string | null }>();
+  const out = new Map<Locale, { title: string; description: string | null; notes: string | null | undefined }>();
   for (const [locale, text] of Object.entries(merged)) {
     if (!isSupportedLocale(locale)) throw new Error('locale_unsupported');
     if (!text) continue;
-    out.set(locale, { title: text.title.trim(), description: (text.description ?? '').trim() || null });
+    out.set(locale, {
+      title: text.title.trim(),
+      description: (text.description ?? '').trim() || null,
+      notes: text.notes === undefined ? undefined : (text.notes ?? '').trim() || null,
+    });
   }
   return out;
 }
@@ -1156,6 +1325,12 @@ export async function saveEvent(db: AppDb, input: RegEventSaveInput): Promise<nu
   if (input.waitlist_enabled !== undefined && input.waitlist_enabled !== 0 && input.waitlist_enabled !== 1) {
     throw new Error('waitlist_enabled_invalid');
   }
+  if (input.max_party_size !== undefined && !(Number.isInteger(input.max_party_size) && input.max_party_size >= 1 && input.max_party_size <= 20)) {
+    throw new Error('max_party_size_invalid');
+  }
+  if (input.allow_self_edit !== undefined && input.allow_self_edit !== 0 && input.allow_self_edit !== 1) {
+    throw new Error('allow_self_edit_invalid');
+  }
 
   let eventId: number;
   if (input.id != null) {
@@ -1172,6 +1347,8 @@ export async function saveEvent(db: AppDb, input: RegEventSaveInput): Promise<nu
       ['waitlist_enabled', input.waitlist_enabled],
       ['confirmation_prefix', input.confirmation_prefix],
       ['poster', input.poster],
+      ['max_party_size', input.max_party_size],
+      ['allow_self_edit', input.allow_self_edit],
     ];
     for (const [column, value] of optional) {
       if (value === undefined) continue;
@@ -1189,13 +1366,14 @@ export async function saveEvent(db: AppDb, input: RegEventSaveInput): Promise<nu
     const created = await db
       .prepare(
         `INSERT INTO reg_events (starts_at, ends_at, location, capacity, price_cents, opens_at, closes_at, active,
-                                 visible_from, waitlist_enabled, confirmation_prefix, poster)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) RETURNING id`,
+                                 visible_from, waitlist_enabled, confirmation_prefix, poster, max_party_size, allow_self_edit)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) RETURNING id`,
       )
       .bind(
         input.starts_at, input.ends_at ?? null, input.location ?? null, input.capacity ?? null,
         input.price_cents ?? null, input.opens_at ?? null, input.closes_at ?? null, input.active,
         input.visible_from ?? null, input.waitlist_enabled ?? 1, input.confirmation_prefix ?? null, input.poster ?? null,
+        input.max_party_size ?? 1, input.allow_self_edit ?? 1,
       )
       .first<{ id: number }>();
     eventId = created!.id;
@@ -1207,10 +1385,13 @@ export async function saveEvent(db: AppDb, input: RegEventSaveInput): Promise<nu
       text.title
         ? db
             .prepare(
-              `INSERT INTO reg_event_i18n (event_id, locale, title, description) VALUES (?1, ?2, ?3, ?4)
-               ON CONFLICT (event_id, locale) DO UPDATE SET title = excluded.title, description = excluded.description`,
+              text.notes === undefined
+                ? `INSERT INTO reg_event_i18n (event_id, locale, title, description) VALUES (?1, ?2, ?3, ?4)
+                   ON CONFLICT (event_id, locale) DO UPDATE SET title = excluded.title, description = excluded.description`
+                : `INSERT INTO reg_event_i18n (event_id, locale, title, description, notes) VALUES (?1, ?2, ?3, ?4, ?5)
+                   ON CONFLICT (event_id, locale) DO UPDATE SET title = excluded.title, description = excluded.description, notes = excluded.notes`,
             )
-            .bind(eventId, locale, text.title, text.description)
+            .bind(...(text.notes === undefined ? [eventId, locale, text.title, text.description] : [eventId, locale, text.title, text.description, text.notes]))
         : db.prepare(`DELETE FROM reg_event_i18n WHERE event_id = ?1 AND locale = ?2`).bind(eventId, locale),
     );
   }
@@ -1291,9 +1472,11 @@ export async function cloneEvent(db: AppDb, id: number): Promise<number> {
   const created = await db
     .prepare(
       `INSERT INTO reg_events (starts_at, ends_at, location, capacity, price_cents, currency, opens_at, closes_at,
-                               active, visible_from, waitlist_enabled, confirmation_prefix, next_confirmation, poster)
+                               active, visible_from, waitlist_enabled, confirmation_prefix, next_confirmation, poster,
+                               max_party_size, allow_self_edit)
        SELECT starts_at, ends_at, location, capacity, price_cents, currency, opens_at, closes_at,
-              0, visible_from, waitlist_enabled, confirmation_prefix, 1, poster
+              0, visible_from, waitlist_enabled, confirmation_prefix, 1, poster,
+              max_party_size, allow_self_edit
        FROM reg_events WHERE id = ?1
        RETURNING id`,
     )
@@ -1311,8 +1494,8 @@ export async function cloneEvent(db: AppDb, id: number): Promise<number> {
     db.prepare(`UPDATE reg_events SET updated_at = updated_at WHERE id = ?1`).bind(newId),
     db
       .prepare(
-        `INSERT INTO reg_event_i18n (event_id, locale, title, description)
-         SELECT CAST(?1 AS INTEGER), locale, title, description FROM reg_event_i18n WHERE event_id = ?2`,
+        `INSERT INTO reg_event_i18n (event_id, locale, title, description, notes)
+         SELECT CAST(?1 AS INTEGER), locale, title, description, notes FROM reg_event_i18n WHERE event_id = ?2`,
       )
       .bind(newId, id),
   ];

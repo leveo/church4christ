@@ -101,7 +101,8 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
           registrationId: resolution.registrationId,
           sessionId: session.id,
           sessionUrl: session.url,
-          amountCents: price.unit_amount,
+          // The registration's amount is the whole party's: unit price times quantity.
+          amountCents: price.unit_amount * resolution.requestJson.line_items[0].quantity,
           currency: price.currency,
         });
         if (attached) return redirect(session.url);

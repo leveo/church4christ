@@ -23,8 +23,23 @@ import {
   saveEvent,
   saveQuestions,
   setEventLifecycle,
+  generateManageToken,
+  hashManageToken,
+  cancelRegistration,
+  promoteWaitlist,
   type RegQuestion,
 } from '../../src/lib/regDb';
+import {
+  cancelAttendee,
+  cancelRegistrationSelf,
+  findRegistrationByToken,
+  findRegistrationForPerson,
+  issueManageToken,
+  registrationSummary,
+  restrictAttendeePersons,
+  updateRegistrationSelf,
+  validateSubmission,
+} from '../../src/lib/regManage';
 
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
@@ -138,7 +153,7 @@ export function defineRegCoreCases(label: string, getDb: () => AppDb): void {
       const submissionKey = key();
       const first = await register(id, { submissionKey });
       const again = await register(id, { submissionKey, name: 'Someone else' });
-      expect(again).toEqual(first);
+      expect(again).toEqual({ ...first, manageToken: null }); // the plaintext token is shown once
       expect(await regCount(id)).toBe(1);
       expect(await count(
         `SELECT count(*) AS n FROM reg_attendees WHERE registration_id = ?1`, first.id,
@@ -152,7 +167,7 @@ export function defineRegCoreCases(label: string, getDb: () => AppDb): void {
       const waiting = await register(id, { submissionKey });
       expect(waiting.status).toBe('waitlist');
       await getDb().prepare(`UPDATE registrations SET status = 'cancelled' WHERE id = ?1`).bind(seat.id).run();
-      expect(await register(id, { submissionKey })).toEqual(waiting);
+      expect(await register(id, { submissionKey })).toEqual({ ...waiting, manageToken: null });
     });
 
     it('a duplicate key inside one batch is a unique violation that rolls the whole batch back (counter included)', async () => {
@@ -192,7 +207,7 @@ export function defineRegCoreCases(label: string, getDb: () => AppDb): void {
         amountCents: 0, currency: 'usd', answers: [], submissionKey,
       });
       expect(blinded).toBe(true);
-      expect(loser).toEqual(winner);
+      expect(loser).toEqual({ ...winner, manageToken: null });
       expect(await regCount(id)).toBe(1);
     });
 
@@ -535,6 +550,387 @@ export function defineRegCoreCases(label: string, getDb: () => AppDb): void {
       await register(id);
       const row = (await listEventsAdmin(getDb())).find((e) => e.id === id)!;
       expect([row.phase, row.confirmed_count, row.taken_count, row.waitlist_count]).toEqual(['open', 1, 1, 1]);
+    });
+
+    // ── Party flow ─────────────────────────────────────────────────────────────
+    const party = (...names: string[]) => names.map((name) => ({ name }));
+    const attendeeRows = async (registrationId: number) =>
+      (await getDb()
+        .prepare(`SELECT name, status, sort, person_id FROM reg_attendees WHERE registration_id = ?1 ORDER BY sort`)
+        .bind(registrationId)
+        .all<{ name: string; status: string; sort: number; person_id: number | null }>()).results;
+    const field = async (registrationId: number) =>
+      (await getDb()
+        .prepare(`SELECT status, party_size, phone, locale, cancelled_at, manage_token_hash FROM registrations WHERE id = ?1`)
+        .bind(registrationId)
+        .first<{ status: string; party_size: number; phone: string | null; locale: string | null; cancelled_at: string | null; manage_token_hash: string | null }>())!;
+
+    describe('party registration', () => {
+      it('writes one attendee row per person, party_size, phone and locale, and takes that many seats', async () => {
+        const id = await newEvent({ capacity: 5, max_party_size: 4 });
+        const r = await register(id, { attendees: party('Ada', 'Bob', 'Cy'), phone: '555-0100', locale: 'zh' });
+        expect(r.status).toBe('confirmed');
+        expect(await attendeeRows(r.id)).toEqual([
+          { name: 'Ada', status: 'active', sort: 0, person_id: null },
+          { name: 'Bob', status: 'active', sort: 1, person_id: null },
+          { name: 'Cy', status: 'active', sort: 2, person_id: null },
+        ]);
+        const row = await field(r.id);
+        expect([row.party_size, row.phone, row.locale]).toEqual([3, '555-0100', 'zh']);
+        expect((await getOpenEvent(getDb(), 'en', id))!.taken_count).toBe(3);
+      });
+
+      it('a party that does not fit goes to the waitlist whole, and a smaller one still fits', async () => {
+        const id = await newEvent({ capacity: 4, max_party_size: 4 });
+        expect((await register(id, { attendees: party('A', 'B', 'C') })).status).toBe('confirmed');
+        const big = await register(id, { attendees: party('D', 'E') });
+        expect(big.status).toBe('waitlist');
+        expect((await register(id, { attendees: party('F') })).status).toBe('confirmed');
+        const event = (await getOpenEvent(getDb(), 'en', id))!;
+        expect([event.taken_count, event.waitlist_count]).toEqual([4, 2]);
+      });
+
+      it('the first attendee inherits the contact person id; later ones take their own', async () => {
+        const id = await newEvent({ max_party_size: 3 });
+        const personId = (await getDb().prepare(`SELECT id FROM people ORDER BY id LIMIT 1`).first<{ id: number }>())?.id ?? null;
+        if (personId === null) return; // no people on this database
+        const r = await register(id, { personId, attendees: [{ name: 'Me' }, { name: 'Other', personId: null }] });
+        expect((await attendeeRows(r.id)).map((a) => a.person_id)).toEqual([personId, null]);
+      });
+
+      it('a single-person registration keeps its old shape (party of 1, contact as the only attendee)', async () => {
+        const id = await newEvent();
+        const r = await register(id, { name: 'Solo' });
+        expect(await attendeeRows(r.id)).toEqual([{ name: 'Solo', status: 'active', sort: 0, person_id: null }]);
+        expect((await field(r.id)).party_size).toBe(1);
+      });
+    });
+
+    // ── Manage token ───────────────────────────────────────────────────────────
+    describe('manage token', () => {
+      it('is returned once, only its SHA-256 is stored, and a wrong or garbled token finds nothing', async () => {
+        const id = await newEvent();
+        const r = await register(id);
+        expect(r.manageToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+        const stored = (await field(r.id)).manage_token_hash;
+        expect(stored).toBe(await hashManageToken(r.manageToken!));
+        expect(stored).toMatch(/^[0-9a-f]{64}$/);
+        expect(stored).not.toContain(r.manageToken!);
+        expect(await findRegistrationByToken(getDb(), r.manageToken!)).toEqual({ id: r.id, event_id: id, locale: null });
+        expect(await findRegistrationByToken(getDb(), (await generateManageToken()).token)).toBeNull();
+        for (const bad of ['', 'short', r.manageToken! + 'x', r.manageToken!.slice(1), `${r.manageToken!.slice(0, 42)}!`, stored!, null, 5, undefined]) {
+          expect(await findRegistrationByToken(getDb(), bad)).toBeNull();
+        }
+        const again = await register(id, { submissionKey: 'fixed-' + r.id });
+        const replay = await register(id, { submissionKey: 'fixed-' + r.id });
+        expect(again.manageToken).not.toBeNull();
+        expect(replay.manageToken).toBeNull();
+      });
+
+      it('issueManageToken rotates: the old link stops working and the new one works', async () => {
+        const id = await newEvent();
+        const r = await register(id);
+        const fresh = (await issueManageToken(getDb(), r.id))!;
+        expect(fresh).not.toBe(r.manageToken);
+        expect(await findRegistrationByToken(getDb(), r.manageToken!)).toBeNull();
+        expect((await findRegistrationByToken(getDb(), fresh))?.id).toBe(r.id);
+        expect(await issueManageToken(getDb(), 987654321)).toBeNull();
+      });
+    });
+
+    // ── validateSubmission ─────────────────────────────────────────────────────
+    describe('validateSubmission', () => {
+      const questions: RegQuestion[] = [
+        { id: 11, sort: 0, type: 'text', required: 1, options: null, label: 'Diet' },
+        { id: 12, sort: 1, type: 'select', required: 0, options: ['S', 'M'], label: 'Size' },
+      ];
+      const ok = { contact: { name: ' Ada ', email: ' ADA@Example.com ', phone: ' 555 0100 ' }, answers: { '11': ' none ' } };
+
+      it('returns trimmed, normalized values and the answer pairs', () => {
+        const result = validateSubmission({ max_party_size: 3 }, questions, ok);
+        expect(result).toEqual({
+          ok: true,
+          value: {
+            contact: { name: 'Ada', email: 'ada@example.com', phone: '555 0100' },
+            attendees: [{ name: 'Ada', personId: null }],
+            answers: [[11, 'none']],
+          },
+        });
+      });
+
+      it('drops blank extra rows, keeps order, and defaults row 0 to the contact', () => {
+        const result = validateSubmission({ max_party_size: 4 }, questions, {
+          ...ok, attendees: [{ name: '' }, { name: '  ' }, { name: 'Bob', personId: 7 }, { name: '' }, { name: 'Cy', personId: 'x' }],
+        });
+        expect(result.ok && result.value.attendees).toEqual([
+          { name: 'Ada', personId: null }, { name: 'Bob', personId: 7 }, { name: 'Cy', personId: null },
+        ]);
+      });
+
+      it('collects every error with its field path', () => {
+        const result = validateSubmission({ max_party_size: 2 }, questions, {
+          contact: { name: '', email: 'nope', phone: 'call me' },
+          attendees: [{ name: '' }, { name: 'x'.repeat(121) }, { name: 'Third' }],
+          answers: { '12': 'XL' },
+        });
+        expect(result.ok).toBe(false);
+        const errors = !result.ok ? result.errors : [];
+        expect(errors).toEqual(expect.arrayContaining([
+          { path: 'contact.name', code: 'required' },
+          { path: 'contact.email', code: 'invalid' },
+          { path: 'contact.phone', code: 'invalid' },
+          { path: 'attendees.1.name', code: 'too_long' },
+          { path: 'q.11', code: 'missing_required' },
+          { path: 'q.12', code: 'bad_answer' },
+        ]));
+      });
+
+      it('enforces max_party_size and the length limits', () => {
+        const three = { ...ok, attendees: party('A', 'B', 'C') };
+        expect(validateSubmission({ max_party_size: 2 }, questions, three)).toEqual({ ok: false, errors: [{ path: 'attendees', code: 'too_many' }] });
+        expect(validateSubmission({ max_party_size: 3 }, questions, three).ok).toBe(true);
+        expect(validateSubmission({ max_party_size: 1 }, questions, { ...ok, attendees: party('A', 'B') }).ok).toBe(false);
+        const longPhone = validateSubmission({ max_party_size: 1 }, questions, { ...ok, contact: { ...ok.contact, phone: '1'.repeat(41) } });
+        expect(!longPhone.ok && longPhone.errors).toEqual([{ path: 'contact.phone', code: 'too_long' }]);
+        const longName = validateSubmission({ max_party_size: 1 }, questions, { ...ok, contact: { ...ok.contact, name: 'n'.repeat(121) } });
+        expect(!longName.ok && longName.errors).toEqual([{ path: 'contact.name', code: 'too_long' }]);
+        expect(validateSubmission({ max_party_size: 1 }, questions, { ...ok, contact: { ...ok.contact, phone: '+1 (555) 010-0100 x12' } }).ok).toBe(true);
+        expect(validateSubmission({ max_party_size: 1 }, questions, { ...ok, contact: { ...ok.contact, phone: '' } }).ok).toBe(true);
+      });
+    });
+
+    // ── Summary and self-service rules ─────────────────────────────────────────
+    describe('registration summary and self-service', () => {
+      const withQuestion = async (over: Partial<Parameters<typeof saveEvent>[1]> = {}) => {
+        const id = await newEvent({ max_party_size: 4, ...over });
+        await saveQuestions(getDb(), id, [{ sort: 0, type: 'text', required: 0, labels: { en: 'Diet', zh: '饮食' } }]);
+        const [q] = await listQuestions(getDb(), 'en', id);
+        return { id, q };
+      };
+
+      it('builds one summary: localized event and labels, attendees, answers, flags', async () => {
+        const { id, q } = await withQuestion({
+          titles: { en: { title: 'Retreat', notes: 'Bring a Bible' }, zh: { title: '退修会', notes: '请带圣经' } },
+          location: 'Hall',
+        });
+        const r = await register(id, { attendees: party('Ada', 'Bob'), phone: '555 0100', locale: 'zh', answers: [[q.id, 'Vegetarian']] });
+        const en = (await registrationSummary(getDb(), r.id, 'en'))!;
+        expect(en.event).toMatchObject({ id, title: 'Retreat', notes: 'Bring a Bible', location: 'Hall', phase: 'open', max_party_size: 4 });
+        expect(en.registration).toMatchObject({
+          id: r.id, confirmation_no: r.confirmationNo, status: 'confirmed', name: 'Ada', email: 'ada@example.com',
+          phone: '555 0100', locale: 'zh', party_size: 2, amount_cents: 0, cancelled_at: null,
+        });
+        expect(en.attendees.map((a) => [a.name, a.status])).toEqual([['Ada', 'active'], ['Bob', 'active']]);
+        expect(en.answers).toEqual([{ question_id: q.id, label: 'Diet', value: 'Vegetarian' }]);
+        expect([en.canEdit, en.canCancel]).toEqual([true, true]);
+        const zh = (await registrationSummary(getDb(), r.id, 'zh'))!;
+        expect([zh.event.title, zh.event.notes, zh.answers[0].label]).toEqual(['退修会', '请带圣经', '饮食']);
+        expect(await registrationSummary(getDb(), 987654321, 'en')).toBeNull();
+      });
+
+      it('canEdit / canCancel follow the event phase, allow_self_edit and the registration status', async () => {
+        const open = await newEvent();
+        const preview = await newEvent({ opens_at: ts(2 * DAY) });
+        const closed = await newEvent({ opens_at: ts(-3 * DAY), closes_at: ts(-1 * DAY), starts_at: ts(DAY) });
+        const locked = await newEvent({ allow_self_edit: 0 });
+        const flags = async (eventId: number) => {
+          const r = await register(eventId);
+          const s = (await registrationSummary(getDb(), r.id, 'en'))!;
+          return { s, id: r.id, flags: [s.canEdit, s.canCancel] };
+        };
+        expect((await flags(open)).flags).toEqual([true, true]);
+        expect((await flags(preview)).flags).toEqual([true, true]);
+        expect((await flags(closed)).flags).toEqual([false, false]);
+        expect((await flags(locked)).flags).toEqual([false, false]);
+        for (const status of ['cancelled', 'declined']) {
+          const r = await register(open);
+          await getDb().prepare(`UPDATE registrations SET status = ?1 WHERE id = ?2`).bind(status, r.id).run();
+          const s = (await registrationSummary(getDb(), r.id, 'en'))!;
+          expect([s.canEdit, s.canCancel]).toEqual([false, false]);
+        }
+        const waiting = await register(open, { status: 'pending', amountCents: 500 });
+        const pending = (await registrationSummary(getDb(), waiting.id, 'en'))!;
+        expect([pending.canEdit, pending.canCancel]).toEqual([true, false]); // awaiting payment: no cancel
+        // a hidden (inactive) event offers nothing either
+        const hidden = await register(open);
+        await getDb().prepare(`UPDATE reg_events SET active = 0 WHERE id = ?1`).bind(open).run();
+        const h = (await registrationSummary(getDb(), hidden.id, 'en'))!;
+        expect([h.canEdit, h.canCancel]).toEqual([false, false]);
+      });
+
+      it('updateRegistrationSelf edits name, phone, attendee names and answers, never the email', async () => {
+        const { id, q } = await withQuestion();
+        const r = await register(id, { attendees: party('Ada', 'Bob'), answers: [[q.id, 'old']] });
+        const attendees = await getDb().prepare(`SELECT id FROM reg_attendees WHERE registration_id = ?1 ORDER BY sort`).bind(r.id).all<{ id: number }>();
+        const result = await updateRegistrationSelf(getDb(), r.id, {
+          name: ' Ada L ', phone: '555 0199',
+          attendees: [{ id: attendees.results[1].id, name: 'Robert' }],
+          answers: { [String(q.id)]: 'new' },
+        });
+        expect(result).toEqual({ ok: true });
+        const s = (await registrationSummary(getDb(), r.id, 'en'))!;
+        expect([s.registration.name, s.registration.phone, s.registration.email]).toEqual(['Ada L', '555 0199', 'ada@example.com']);
+        expect(s.attendees.map((a) => a.name)).toEqual(['Ada', 'Robert']);
+        expect(s.answers.map((a) => a.value)).toEqual(['new']);
+      });
+
+      it('updateRegistrationSelf re-validates server side and returns field paths without writing', async () => {
+        const id = await newEvent({ max_party_size: 2 });
+        await saveQuestions(getDb(), id, [{ sort: 0, type: 'text', required: 1, labels: { en: 'Req' } }]);
+        const [q] = await listQuestions(getDb(), 'en', id);
+        const r = await register(id, { attendees: party('Ada', 'Bob'), answers: [[q.id, 'x']] });
+        const foreign = await register(id, { attendees: party('Zed') });
+        const foreignAttendee = (await getDb().prepare(`SELECT id FROM reg_attendees WHERE registration_id = ?1`).bind(foreign.id).first<{ id: number }>())!;
+        const result = await updateRegistrationSelf(getDb(), r.id, {
+          name: '', phone: 'abc', attendees: [{ id: foreignAttendee.id, name: 'Hacked' }], answers: { [String(q.id)]: '' },
+        });
+        expect(result).toEqual({
+          ok: false,
+          errors: expect.arrayContaining([
+            { path: 'contact.name', code: 'required' },
+            { path: 'contact.phone', code: 'invalid' },
+            { path: 'attendees.0.id', code: 'not_found' },
+            { path: `q.${q.id}`, code: 'missing_required' },
+          ]),
+        });
+        const s = (await registrationSummary(getDb(), r.id, 'en'))!;
+        expect([s.registration.name, s.answers[0].value]).toEqual(['Ada', 'x']);
+        expect((await attendeeRows(foreign.id))[0].name).toBe('Zed');
+      });
+
+      it('updateRegistrationSelf and the cancels refuse when self-service is closed', async () => {
+        const locked = await newEvent({ allow_self_edit: 0, max_party_size: 2 });
+        const r = await register(locked, { attendees: party('Ada', 'Bob') });
+        const a = (await getDb().prepare(`SELECT id FROM reg_attendees WHERE registration_id = ?1 ORDER BY sort`).bind(r.id).first<{ id: number }>())!;
+        expect(await updateRegistrationSelf(getDb(), r.id, { name: 'X' })).toEqual({ ok: false, errors: [{ path: '', code: 'not_allowed' }] });
+        expect(await cancelAttendee(getDb(), r.id, a.id)).toEqual({ ok: false, reason: 'not_allowed' });
+        expect(await cancelRegistrationSelf(getDb(), r.id)).toEqual({ ok: false, reason: 'not_allowed' });
+        expect(await updateRegistrationSelf(getDb(), 987654321, { name: 'X' })).toEqual({ ok: false, errors: [{ path: '', code: 'not_found' }] });
+        expect(await cancelRegistrationSelf(getDb(), 987654321)).toEqual({ ok: false, reason: 'not_found' });
+        expect((await field(r.id)).status).toBe('confirmed');
+      });
+
+      it('findRegistrationForPerson uses the person-or-email ownership rule', async () => {
+        const id = await newEvent();
+        const r = await register(id, { email: 'Owner@Example.com' });
+        expect(await findRegistrationForPerson(getDb(), r.id, 0, 'owner@example.com')).toEqual({ id: r.id, event_id: id, locale: null });
+        expect(await findRegistrationForPerson(getDb(), r.id, 0, 'someone@example.com')).toBeNull();
+        const mine = await register(id, { personId: null, email: 'p@example.com' });
+        await getDb().prepare(`UPDATE registrations SET status = 'cancelled' WHERE id = ?1`).bind(mine.id).run();
+        expect((await findRegistrationForPerson(getDb(), mine.id, 0, 'p@example.com'))?.id).toBe(mine.id);
+      });
+
+      it('restrictAttendeePersons keeps only the contact and live household members', async () => {
+        const [a, b] = (await getDb().prepare(`SELECT id FROM people ORDER BY id LIMIT 2`).all<{ id: number }>()).results;
+        if (!a || !b) return;
+        const out = await restrictAttendeePersons(getDb(), a.id, [
+          { name: 'Me', personId: b.id }, { name: 'Forged', personId: 999999 }, { name: 'None', personId: null },
+        ]);
+        expect(out[0].personId).toBe(a.id);
+        expect(out[1].personId).toBeNull();
+        expect(out[2].personId).toBeNull();
+        expect((await restrictAttendeePersons(getDb(), null, [{ name: 'G', personId: a.id }]))[0].personId).toBeNull();
+      });
+    });
+
+    // ── Cancellation and waitlist promotion ────────────────────────────────────
+    describe('cancellation and waitlist promotion', () => {
+      const status = async (registrationId: number) => (await field(registrationId)).status;
+
+      it('cancelling one person lowers party_size, frees the seat and promotes the waitlist', async () => {
+        const id = await newEvent({ capacity: 3, max_party_size: 3 });
+        const family = await register(id, { attendees: party('A', 'B', 'C') });
+        const waiting = await register(id, { attendees: party('D') });
+        expect(waiting.status).toBe('waitlist');
+        const b = (await getDb().prepare(`SELECT id FROM reg_attendees WHERE registration_id = ?1 AND sort = 1`).bind(family.id).first<{ id: number }>())!;
+        const result = await cancelAttendee(getDb(), family.id, b.id);
+        expect(result).toEqual({ ok: true, registrationCancelled: false, promoted: [waiting.id] });
+        expect((await field(family.id)).party_size).toBe(2);
+        expect((await attendeeRows(family.id)).map((a) => a.status)).toEqual(['active', 'cancelled', 'active']);
+        expect(await status(waiting.id)).toBe('confirmed');
+        expect((await getOpenEvent(getDb(), 'en', id))!.taken_count).toBe(3);
+        // cancelling the same person again changes nothing
+        expect(await cancelAttendee(getDb(), family.id, b.id)).toEqual({ ok: false, reason: 'not_found' });
+        expect((await field(family.id)).party_size).toBe(2);
+      });
+
+      it('cancelling the last active person cancels the registration', async () => {
+        const id = await newEvent({ capacity: 5, max_party_size: 2 });
+        const r = await register(id, { attendees: party('A', 'B') });
+        const ids = (await getDb().prepare(`SELECT id FROM reg_attendees WHERE registration_id = ?1 ORDER BY sort`).bind(r.id).all<{ id: number }>()).results;
+        expect(await cancelAttendee(getDb(), r.id, ids[0].id)).toMatchObject({ ok: true, registrationCancelled: false });
+        const last = await cancelAttendee(getDb(), r.id, ids[1].id);
+        expect(last).toMatchObject({ ok: true, registrationCancelled: true });
+        const row = await field(r.id);
+        expect(row.status).toBe('cancelled');
+        expect(row.cancelled_at).not.toBeNull();
+        expect(row.party_size).toBe(1);
+        expect((await getOpenEvent(getDb(), 'en', id))!.taken_count).toBe(0);
+      });
+
+      it('cancelRegistrationSelf cancels everyone, stamps cancelled_at and promotes', async () => {
+        const id = await newEvent({ capacity: 2, max_party_size: 2 });
+        const r = await register(id, { attendees: party('A', 'B') });
+        const w = await register(id, { attendees: party('C', 'D') });
+        expect(w.status).toBe('waitlist');
+        expect(await cancelRegistrationSelf(getDb(), r.id)).toEqual({ ok: true, registrationCancelled: true, promoted: [w.id] });
+        const row = await field(r.id);
+        expect([row.status, row.cancelled_at === null]).toEqual(['cancelled', false]);
+        expect((await attendeeRows(r.id)).map((a) => a.status)).toEqual(['cancelled', 'cancelled']);
+        expect(await status(w.id)).toBe('confirmed');
+        expect(await cancelRegistrationSelf(getDb(), r.id)).toEqual({ ok: false, reason: 'not_allowed' });
+      });
+
+      it('the admin cancel also promotes, and reports whether it cancelled', async () => {
+        const id = await newEvent({ capacity: 1 });
+        const r = await register(id);
+        const w = await register(id);
+        expect(await cancelRegistration(getDb(), r.id)).toBe(true);
+        expect(await status(w.id)).toBe('confirmed');
+        expect(await cancelRegistration(getDb(), r.id)).toBe(false);
+        expect((await field(r.id)).cancelled_at).not.toBeNull();
+        expect((await attendeeRows(r.id)).every((a) => a.status === 'cancelled')).toBe(true);
+        expect(await cancelRegistration(getDb(), 987654321)).toBe(false);
+      });
+
+      it('promotes oldest first, skips a party that is too large, and promotes a smaller later one', async () => {
+        const id = await newEvent({ capacity: 4, max_party_size: 4 });
+        const seated = await register(id, { attendees: party('S1', 'S2', 'S3', 'S4') });
+        const big = await register(id, { attendees: party('B1', 'B2', 'B3') });
+        const small = await register(id, { attendees: party('M1') });
+        const two = await register(id, { attendees: party('T1', 'T2') });
+        const last = await register(id, { attendees: party('L1') });
+        expect([big.status, small.status, two.status, last.status]).toEqual(['waitlist', 'waitlist', 'waitlist', 'waitlist']);
+        const s = (await getDb().prepare(`SELECT id FROM reg_attendees WHERE registration_id = ?1 ORDER BY sort`).bind(seated.id).all<{ id: number }>()).results;
+        // 1 seat free: the party of 3 is skipped, the single (oldest that fits) is promoted.
+        expect(await cancelAttendee(getDb(), seated.id, s[0].id)).toMatchObject({ ok: true, promoted: [small.id] });
+        // 1 seat free again: the 3 and the pair are skipped, the later single is promoted.
+        expect(await cancelAttendee(getDb(), seated.id, s[1].id)).toMatchObject({ ok: true, promoted: [last.id] });
+        // 1 free: nobody fits. 2 free: the pair fits; the party of 3 still waits and stays first in line.
+        expect(await cancelAttendee(getDb(), seated.id, s[2].id)).toMatchObject({ ok: true, promoted: [] });
+        expect(await cancelAttendee(getDb(), seated.id, s[3].id)).toMatchObject({ ok: true, registrationCancelled: true, promoted: [two.id] });
+        expect(await status(big.id)).toBe('waitlist');
+      });
+
+      it('promoteWaitlist is a no-op on a paid event and with nothing waiting', async () => {
+        const paid = await newEvent({ capacity: 1, price_cents: 1000 });
+        const a = await register(paid, { status: 'pending', amountCents: 1000 });
+        await getDb().prepare(`UPDATE registrations SET status = 'waitlist' WHERE id = ?1`).bind(a.id).run();
+        expect(await promoteWaitlist(getDb(), paid)).toEqual([]);
+        expect(await status(a.id)).toBe('waitlist');
+        expect(await promoteWaitlist(getDb(), await newEvent({ capacity: 3 }))).toEqual([]);
+        expect(await promoteWaitlist(getDb(), 987654321)).toEqual([]);
+      });
+
+      it('promotes everyone when the event has no capacity limit', async () => {
+        const id = await newEvent({ capacity: 1 });
+        const r = await register(id);
+        const w1 = await register(id);
+        const w2 = await register(id);
+        await getDb().prepare(`UPDATE reg_events SET capacity = NULL WHERE id = ?1`).bind(id).run();
+        expect(await promoteWaitlist(getDb(), id)).toEqual([w1.id, w2.id]);
+        expect(await status(r.id)).toBe('confirmed');
+      });
     });
 
     it('listPublicEvents localizes through the fallback chain', async () => {

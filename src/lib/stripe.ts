@@ -737,7 +737,8 @@ export async function createRegistrationCheckoutFromParams(
   const session = requireRegistrationCheckoutSession(raw, {
     requestId,
     registrationId: Number(params.metadata.registration_id),
-    amountCents: expected.unit_amount,
+    // Stripe's amount_total is the line item's unit amount times its quantity (party size).
+    amountCents: expected.unit_amount * params.line_items[0].quantity,
     currency: expected.currency,
     mode: stripeMode(env) ?? undefined,
   });
