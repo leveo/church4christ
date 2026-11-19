@@ -144,7 +144,7 @@ export const IDENTITY_MERGE_REFERENCE_REGISTRY: readonly IdentityMergeReference[
   ref('tokens', 'person_id', 'security_revoke', 'Every unused loser authentication token must be revoked.'),
   ref('verified_contact_owners', 'person_id', 'hard_conflict', 'Verified authentication ownership never silently transfers or unions.'),
 
-  ref('event_admins', 'person_id', 'dedupe_then_repoint', 'Event administrator uniqueness requires collision-aware reassignment.', 'postgres'),
+  ref('event_admins', 'person_id', 'dedupe_then_repoint', 'Event administrator uniqueness requires collision-aware reassignment.'),
   ref('gifts', 'person_id', 'subject_repoint', 'Gift donor attribution follows the canonical member without inspecting amounts.', 'postgres'),
   ref('gifts', 'recorded_by', 'historical_preserve', 'Manual gift recorder attribution remains historically exact.', 'postgres'),
   ref('recurring_gifts', 'person_id', 'hard_conflict', 'Recurring giving ownership conflicts require explicit resolution.', 'postgres'),

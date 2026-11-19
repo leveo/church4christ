@@ -176,6 +176,29 @@ describe('identity merge execution foundation (D1)', () => {
       .bind(pair.caseId).first<number>('n')).toBe(0);
   });
 
+  it('fails closed before create when the loser administers a registration event (same as Postgres)', async () => {
+    const pair = await createConfirmedPair();
+    const eventId = nextPersonId() + 800_000;
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO reg_events (id, starts_at, active) VALUES (?1, '2031-01-01 10:00:00', 1)").bind(eventId),
+      env.DB.prepare('INSERT INTO event_admins (reg_event_id, person_id) VALUES (?1, ?2)').bind(eventId, pair.loserPersonId),
+    ]);
+    const input = {
+      backend: 'd1' as const,
+      caseId: pair.caseId,
+      loserPersonId: pair.loserPersonId,
+      canonicalPersonId: pair.canonicalPersonId,
+      requestedByPersonId: pair.requesterPersonId,
+      scope: { kind: 'global' as const },
+      now: new Date().toISOString(),
+    };
+    const preview = await previewIdentityMerge(env.DB, input);
+    expect(preview.blockers).toContain('event_admins.person_id');
+    await expect(createIdentityMergeOperation(env.DB, input)).rejects.toThrow(/hard_conflict/);
+    expect(await env.DB.prepare('SELECT COUNT(*) n FROM person_merge_operations WHERE resolution_case_id=?1')
+      .bind(pair.caseId).first<number>('n')).toBe(0);
+  });
+
   it('submits a normal merge and atomically consumes a bound OTP with its one live approval', async () => {
     const pair = await createConfirmedPair();
     const created = await createIdentityMergeOperation(env.DB, {
