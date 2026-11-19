@@ -29,6 +29,7 @@ import {
   promoteWaitlist,
   type RegQuestion,
 } from '../../src/lib/regDb';
+import { createHousehold, linkPersonToHousehold } from '../../src/lib/householdDb';
 import {
   cancelAttendee,
   cancelRegistrationSelf,
@@ -559,6 +560,12 @@ export function defineRegCoreCases(label: string, getDb: () => AppDb): void {
         .prepare(`SELECT name, status, sort, person_id FROM reg_attendees WHERE registration_id = ?1 ORDER BY sort`)
         .bind(registrationId)
         .all<{ name: string; status: string; sort: number; person_id: number | null }>()).results;
+    let personSeq = 0;
+    const makePerson = async (name: string): Promise<number> =>
+      (await getDb()
+        .prepare(`INSERT INTO people (display_name, email) VALUES (?1, ?2) RETURNING id`)
+        .bind(name, `reg-party-${Date.now()}-${++personSeq}@example.com`)
+        .first<{ id: number }>())!.id;
     const field = async (registrationId: number) =>
       (await getDb()
         .prepare(`SELECT status, party_size, phone, locale, cancelled_at, manage_token_hash FROM registrations WHERE id = ?1`)
@@ -592,10 +599,10 @@ export function defineRegCoreCases(label: string, getDb: () => AppDb): void {
 
       it('the first attendee inherits the contact person id; later ones take their own', async () => {
         const id = await newEvent({ max_party_size: 3 });
-        const personId = (await getDb().prepare(`SELECT id FROM people ORDER BY id LIMIT 1`).first<{ id: number }>())?.id ?? null;
-        if (personId === null) return; // no people on this database
-        const r = await register(id, { personId, attendees: [{ name: 'Me' }, { name: 'Other', personId: null }] });
-        expect((await attendeeRows(r.id)).map((a) => a.person_id)).toEqual([personId, null]);
+        const me = await makePerson('Me');
+        const other = await makePerson('Other');
+        const r = await register(id, { personId: me, attendees: [{ name: 'Me' }, { name: 'Other', personId: other }, { name: 'Guest' }] });
+        expect((await attendeeRows(r.id)).map((a) => a.person_id)).toEqual([me, other, null]);
       });
 
       it('a single-person registration keeps its old shape (party of 1, contact as the only attendee)', async () => {
@@ -821,15 +828,26 @@ export function defineRegCoreCases(label: string, getDb: () => AppDb): void {
       });
 
       it('restrictAttendeePersons keeps only the contact and live household members', async () => {
-        const [a, b] = (await getDb().prepare(`SELECT id FROM people ORDER BY id LIMIT 2`).all<{ id: number }>()).results;
-        if (!a || !b) return;
-        const out = await restrictAttendeePersons(getDb(), a.id, [
-          { name: 'Me', personId: b.id }, { name: 'Forged', personId: 999999 }, { name: 'None', personId: null },
+        const contact = await makePerson('Contact');
+        const spouse = await makePerson('Spouse');
+        const outsider = await makePerson('Outsider');
+        const household = await createHousehold(getDb(), { name: 'Family', address: null, phone: null }, contact);
+        await linkPersonToHousehold(getDb(), household, spouse);
+        const out = await restrictAttendeePersons(getDb(), contact, [
+          { name: 'Me', personId: outsider }, // row 0 is always the contact
+          { name: 'Spouse', personId: spouse },
+          { name: 'Outsider', personId: outsider },
+          { name: 'Forged', personId: 999999 },
+          { name: 'None', personId: null },
         ]);
-        expect(out[0].personId).toBe(a.id);
-        expect(out[1].personId).toBeNull();
-        expect(out[2].personId).toBeNull();
-        expect((await restrictAttendeePersons(getDb(), null, [{ name: 'G', personId: a.id }]))[0].personId).toBeNull();
+        expect(out.map((a) => a.personId)).toEqual([contact, spouse, null, null, null]);
+        // a guest (no contact person) links nobody
+        expect((await restrictAttendeePersons(getDb(), null, [{ name: 'G', personId: spouse }, { name: 'H', personId: contact }])).map((a) => a.personId))
+          .toEqual([null, null]);
+        // a person with no household may only link themself
+        const solo = await makePerson('Solo');
+        expect((await restrictAttendeePersons(getDb(), solo, [{ name: 'S', personId: solo }, { name: 'X', personId: contact }])).map((a) => a.personId))
+          .toEqual([solo, null]);
       });
     });
 

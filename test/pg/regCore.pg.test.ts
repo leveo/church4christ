@@ -82,6 +82,28 @@ describe.skipIf(!hasPg)('registration core (Postgres)', () => {
       expect(new Set(roster.map((r) => r.confirmation_no)).size).toBe(6);
     });
 
+    it('two parallel requests with the same submission key create one registration', async () => {
+      const eventId = await saveEvent(db, { title_en: 'Double click', starts_at: ts(30 * DAY), active: 1 });
+      const clients = [pgClient(), pgClient()];
+      try {
+        const results = await Promise.all(
+          clients.map((client) =>
+            createRegistration(new PgAdapter(client), {
+              eventId, personId: null, name: 'Same', email: 's@example.com', status: 'confirmed',
+              amountCents: 0, currency: 'usd', answers: [], submissionKey: 'double-click-key',
+            }),
+          ),
+        );
+        expect(results[0].id).toBe(results[1].id);
+        expect(await listRegistrations(db, 'en', eventId)).toHaveLength(1);
+        const attendees = await sql`SELECT count(*)::int AS n FROM reg_attendees WHERE registration_id = ${results[0].id}`;
+        expect(attendees[0].n).toBe(1);
+      } finally {
+        await Promise.all(clients.map((c) => c.end()));
+      }
+    });
+  });
+
   describe('concurrent cancellations on a free event', () => {
     const seed = async (capacity: number, seated: number, waiting: number) => {
       const eventId = await saveEvent(db, { title_en: 'Cancel race', starts_at: ts(30 * DAY), active: 1, capacity, waitlist_enabled: 1 });
@@ -125,28 +147,6 @@ describe.skipIf(!hasPg)('registration core (Postgres)', () => {
       expect(roster.filter((r) => r.status === 'confirmed')).toHaveLength(3);
       // the oldest two waiters were the ones promoted
       expect(promoted.sort((a, b) => a - b)).toEqual(queue.slice(0, 2).map((q) => q.id).sort((a, b) => a - b));
-    });
-  });
-
-    it('two parallel requests with the same submission key create one registration', async () => {
-      const eventId = await saveEvent(db, { title_en: 'Double click', starts_at: ts(30 * DAY), active: 1 });
-      const clients = [pgClient(), pgClient()];
-      try {
-        const results = await Promise.all(
-          clients.map((client) =>
-            createRegistration(new PgAdapter(client), {
-              eventId, personId: null, name: 'Same', email: 's@example.com', status: 'confirmed',
-              amountCents: 0, currency: 'usd', answers: [], submissionKey: 'double-click-key',
-            }),
-          ),
-        );
-        expect(results[0].id).toBe(results[1].id);
-        expect(await listRegistrations(db, 'en', eventId)).toHaveLength(1);
-        const attendees = await sql`SELECT count(*)::int AS n FROM reg_attendees WHERE registration_id = ${results[0].id}`;
-        expect(attendees[0].n).toBe(1);
-      } finally {
-        await Promise.all(clients.map((c) => c.end()));
-      }
     });
   });
 });

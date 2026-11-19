@@ -222,6 +222,61 @@ describe.skipIf(!hasPg)('identity business continuation claims (PostgreSQL)', ()
     expect(receipts).toBe(2);
   });
 
+  it('charges a guest party the per-person price times the party through the paid continuation in PostgreSQL', async () => {
+    const [event] = await sql.unsafe(`INSERT INTO reg_events(starts_at,capacity,price_cents,currency,closes_at,active,max_party_size)
+      VALUES('2032-02-01 00:00:00',20,2500,'usd','2032-01-31 00:00:00',1,5) RETURNING id`);
+    await sql.unsafe("INSERT INTO reg_event_i18n(event_id,locale,title) VALUES($1,'en','PG Paid Party')", [event.id]);
+    const paidEnv = { ...identityEnv, STRIPE_MODE: 'test', STRIPE_SECRET_KEY: 'sk_test_party', APP_ORIGIN: 'https://church.example' };
+    const intentId = crypto.randomUUID();
+    const party = { phone: '555 0100', attendees: [{ name: 'Paid Guest' }, { name: 'Bob' }, { name: 'Cy' }] };
+    const begun = await beginRegistrationContinuation(db, paidEnv, {
+      campusId: 1, intentId,
+      event: { id: event.id, title: 'PG Paid Party', starts_at: '2032-02-01 00:00:00', closes_at: '2032-01-31 00:00:00',
+        price_cents: 2500, currency: 'usd', active: 1, max_party_size: 5 },
+      name: 'Paid Guest', email: `pg-paid-party-${intentId}@example.test`, locale: 'en', answers: [], party,
+      now: '2032-01-01 00:00:00',
+      requestContext: identityTrustedRequestContext(new Headers({ 'CF-Connecting-IP': '203.0.113.180' }), intentId),
+    });
+    expect(begun.status).toBe('verification_required');
+    if (begun.status !== 'verification_required') return;
+
+    const sent: Array<Record<string, string>> = [];
+    vi.stubGlobal('fetch', (async (_url: unknown, init?: RequestInit) => {
+      const body = Object.fromEntries(new URLSearchParams(String(init?.body ?? '')));
+      sent.push(body);
+      const total = Number(body['line_items[0][price_data][unit_amount]']) * Number(body['line_items[0][quantity]']);
+      return new Response(JSON.stringify({
+        id: 'cs_test_paidparty', url: 'https://checkout.stripe.com/c/pay/cs_test_paidparty', mode: 'payment', livemode: false,
+        status: 'open', payment_status: 'unpaid', payment_intent: null, amount_total: total, currency: 'usd',
+        metadata: { kind: 'registration', registration_id: body['metadata[registration_id]'], request_id: body['metadata[request_id]'] },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch);
+    let result: Awaited<ReturnType<typeof completeRegistrationContinuation>>;
+    try {
+      result = await completeRegistrationContinuation(db, paidEnv, {
+        campusId: 1, intentId, publicId: begun.delivery.publicId, code: begun.delivery.code,
+        appOrigin: 'https://church.example', now: '2032-01-01 00:01:00',
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(result.status).toBe('redirect');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]['line_items[0][quantity]']).toBe('3');
+    expect(sent[0]['line_items[0][price_data][unit_amount]']).toBe('2500');
+    const [registration] = await sql.unsafe(
+      `SELECT r.status,r.amount_cents,r.party_size,r.phone,r.locale,r.manage_token_hash,r.stripe_checkout_session_id,
+              (SELECT count(*)::int FROM reg_attendees a WHERE a.registration_id=r.id) attendees,
+              (SELECT a.person_id FROM reg_attendees a WHERE a.registration_id=r.id AND a.sort=0) first_person,r.person_id
+       FROM registrations r WHERE r.event_id=$1`, [event.id]);
+    expect(registration).toMatchObject({ status: 'pending', amount_cents: 7500, party_size: 3, phone: '555 0100', locale: 'en',
+      manage_token_hash: null, stripe_checkout_session_id: 'cs_test_paidparty', attendees: 3 });
+    expect(registration.first_person).toBe(registration.person_id);
+    const [child] = await sql.unsafe(`SELECT state,party_json FROM identity_registration_continuations WHERE intent_id=$1`, [intentId]);
+    expect(child.state).toBe('consumed');
+    expect(JSON.parse(child.party_json)).toEqual(party);
+  });
+
   it('revalidates checkbox, select, yes/no, and text answers by question id instead of display order in PostgreSQL', async () => {
     const [event] = await sql.unsafe(`INSERT INTO reg_events(starts_at,capacity,price_cents,currency,closes_at,active)
       VALUES('2032-02-01 00:00:00',5,0,'usd','2032-01-31 00:00:00',1) RETURNING id`);
