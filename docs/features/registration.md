@@ -168,9 +168,11 @@ set up Stripe in test mode:
    are refused. If Giving already imported these test credentials, Registration uses the same
    pair.
 2. **Point a Stripe test-mode webhook at your site.** In the Stripe dashboard's test mode, add
-   one endpoint at `https://your-site/api/stripe/webhook` and subscribe it to the events listed
-   in [Supabase setup, section 7](../supabase-setup.md#7-stripe-setup-and-go-live-giving-and-registration).
-   Giving and Registration share this one endpoint.
+   one endpoint at `https://your-site/api/stripe/webhook` and subscribe it to the full event list in
+   [Supabase setup, section 7](../supabase-setup.md#7-stripe-setup-and-go-live-giving-and-registration).
+   A paid seat is confirmed by `checkout.session.completed` or
+   `checkout.session.async_payment_succeeded`, and released by `checkout.session.expired` or
+   `checkout.session.async_payment_failed`. Giving and Registration share this one endpoint.
 3. **Create your first event** at `/admin/registration`, add its questions, and share
    `/register`.
 
