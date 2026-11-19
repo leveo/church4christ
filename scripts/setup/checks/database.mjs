@@ -47,7 +47,7 @@ const TABLES_BY_CAPABILITY = Object.freeze({
   'page-builder': Object.freeze(['custom_pages', 'custom_page_i18n', 'revisions']),
   portal: Object.freeze([
     'group_members', 'group_files', 'prayer_items', 'households', 'household_members',
-    'reg_events', 'reg_event_i18n', 'registrations',
+    'reg_events', 'reg_event_i18n', 'registrations', 'event_admins',
   ]),
   giving: Object.freeze(['funds', 'fund_i18n', 'gifts', 'recurring_gifts', 'stripe_customers', 'giving_statement_outbox', 'giving_audit_events', 'households', 'household_members', 'identity_giving_checkout_continuations']),
   registration: Object.freeze([
@@ -77,10 +77,7 @@ const PRIVATE_TABLES_BY_CAPABILITY = Object.freeze({
     'church_private.stripe_checkout_requests',
   ]),
 });
-const SUPABASE_TABLES_BY_CAPABILITY = Object.freeze({
-  // event_admins (event-scope prayer moderation) has no D1 counterpart.
-  portal: Object.freeze(['event_admins']),
-});
+const SUPABASE_TABLES_BY_CAPABILITY = Object.freeze({});
 
 function rows(value, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join('|') !== 'meta|results|success' ||

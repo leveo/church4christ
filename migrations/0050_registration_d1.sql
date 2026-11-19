@@ -114,6 +114,17 @@ CREATE TABLE group_reg_events (
 );
 CREATE UNIQUE INDEX idx_gre_pair ON group_reg_events(group_id, reg_event_id);
 
+-- Event admins (event-scope prayer moderation) belong to Registration and now exist
+-- on D1 too, in the same shape as Postgres (0009 + the campus_id of 0027).
+CREATE TABLE event_admins (
+  id INTEGER PRIMARY KEY,
+  reg_event_id INTEGER NOT NULL REFERENCES reg_events(id),
+  person_id INTEGER NOT NULL REFERENCES people(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  campus_id INTEGER NOT NULL DEFAULT 1,
+  UNIQUE (reg_event_id, person_id)
+);
+
 -- Keep the identity merge inventory exhaustive (registrations.person_id is already
 -- registered by 0033).
 DROP TRIGGER person_merge_registry_keys_append_only_insert;
