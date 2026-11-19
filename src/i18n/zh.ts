@@ -3128,6 +3128,7 @@ export default {
   'register.party.add': '再添加一位',
   'register.party.remove': '移除',
   'register.seats.only': '只剩 {count} 个名额。',
+  'register.seats.one': '只剩 1 个名额。',
   'register.seats.largerWaitlist': '人数较多的一组会一起进入候补名单。',
   'register.manage.title': '您的报名',
   'register.manage.confirmation': '报名编号',

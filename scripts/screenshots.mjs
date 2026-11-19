@@ -159,6 +159,14 @@ const MIN_BYTES = 20 * 1024;
 //            disclosure is an error rather than a closed-navigation screenshot
 //   openDetails — selectors for native details panels to open before capture
 //   waitForSelector — wait for a client-rendered editor before validating/capture
+//   interact — ordered steps run after load (and after postForm): { click: selector },
+//            { fill: { selector: value } } (inputs and selects; fires input/change),
+//            { submit: formSelector } (requestSubmit, waits for the page it loads) and
+//            { wait: selector }. Used to walk the registration flow for real (fill the
+//            party, review, confirm) so the review and manage pages show genuine output.
+//   finalPath — pathname (and query) the page is expected to END on when `interact`
+//            navigates away from `path` (e.g. the manage page after a confirm)
+//   anchorSelector — like `anchor`, but frames the first element matching this selector
 //   postForm — after load, click every element matching `checkAll` (if given)
 //            then `requestSubmit()` the element matching `form` and wait for
 //            the resulting navigation before continuing. Used for the one shot
@@ -211,6 +219,8 @@ export const LEARNING_DEMO_CAPTURE_ROWS = Object.freeze(LEARNING_DEMO_SCREENSHOT
     identityRejectionTexts: Object.freeze(['Returned', '已退回']),
   }),
 })));
+
+const DAVID = Object.freeze({ personId: 2, email: 'pastor.david@example.com', sessionEpoch: 0 });
 
 const LEGACY_CAPTURE_ROWS = [
   ...RELEASE_SCREENSHOTS.map((row) => ({ ...row, admin: row.identity === 'admin', anchor: row.out.endsWith('attendance-report.png') ? 'Attendance report' : row.out.endsWith('member-checklist.png') ? 'Members' : undefined })),
@@ -282,6 +292,56 @@ const LEGACY_CAPTURE_ROWS = [
   { path: '/en/register/done?ok=1&status=waitlist', out: 'docs/images/registration/done-waitlist.png', backend: 'd1', expectedText: 'on the waitlist' },
   { path: '/admin/registration', out: 'docs/images/registration/admin-events.png', admin: true, backend: 'd1', expectedText: 'Neighbors Potluck Night' },
   { path: '/admin/registration?edit=920', out: 'docs/images/registration/admin-editor.png', admin: true, backend: 'd1', anchor: 'Edit event', expectedText: 'Poster image' },
+  // Registration party flow (D1). The member rows walk the real form with David Chen (household
+  // with Amy and the children Ethan and Mia), so they need SCREENSHOT_SESSION_SECRET in the
+  // server and this process. The review and manage rows REGISTER for real (the confirm posts),
+  // so run them on a disposable seeded database and raise event 920's capacity first
+  // (UPDATE reg_events SET capacity = 10 WHERE id = 920) so the whole family is confirmed.
+  // Run each registering row in its own pass: they share the member's one seat budget.
+  ...[
+    ['docs/images/registration/party-form.png', null],
+    ['docs/images/mobile/register-party-form.png', MOBILE_VIEWPORT],
+  ].map(([out, viewport]) => ({
+    path: '/en/register/920', out, backend: 'd1', sessionIdentity: DAVID, anchorSelector: '#f-party', anchorMargin: viewport ? 20 : 70, ...(viewport ? { viewport } : {}),
+    expectedText: 'Who is coming?',
+    interact: [
+      { wait: '[data-household]:not([hidden])' },
+      { click: '[data-chip][data-name="Amy Chen"]' },
+      { click: '[data-chip][data-name="Mia Chen"]' },
+      { fill: { 'input[name="phone"]': '(555) 010-2020', 'select[name="921"]': 'Main dish' } },
+    ],
+  })),
+  ...[
+    ['docs/images/registration/review.png', null],
+    ['docs/images/mobile/register-review.png', MOBILE_VIEWPORT],
+  ].map(([out, viewport]) => ({
+    path: '/en/register/920', out, backend: 'd1', sessionIdentity: DAVID, ...(viewport ? { viewport, anchor: 'Check your registration', anchorMargin: 20 } : {}),
+    expectedText: 'Check your registration',
+    interact: [
+      { wait: '[data-household]:not([hidden])' },
+      { click: '[data-chip][data-name="Amy Chen"]' },
+      { click: '[data-chip][data-name="Mia Chen"]' },
+      { fill: { 'input[name="phone"]': '(555) 010-2020', 'select[name="921"]': 'Main dish' } },
+      { submit: '[data-register-form]' },
+    ],
+  })),
+  ...[
+    ['docs/images/registration/manage.png', null],
+    ['docs/images/mobile/register-manage.png', MOBILE_VIEWPORT],
+  ].map(([out, viewport]) => ({
+    path: '/en/register/920', out, backend: 'd1', sessionIdentity: DAVID, ...(viewport ? { viewport } : {}),
+    finalPath: '/en/register/manage', expectedText: 'Doors open at 5:30 pm',
+    interact: [
+      { wait: '[data-household]:not([hidden])' },
+      { click: '[data-chip][data-name="Amy Chen"]' },
+      { click: '[data-chip][data-name="Mia Chen"]' },
+      { fill: { 'input[name="phone"]': '(555) 010-2020', 'select[name="921"]': 'Main dish' } },
+      { submit: '[data-register-form]' },
+      { submit: 'form[action="/api/register/submit"]' },
+      { wait: '[data-confirmation]' },
+    ],
+  })),
+  { path: '/admin/registration?edit=920', out: 'docs/images/registration/admin-editor-party.png', admin: true, backend: 'd1', anchorSelector: 'input[name="max_party_size"]', anchorMargin: 120, expectedText: 'Max people per registration' },
   // Children's check-in (Task 8). The kiosk needs no session — the token in
   // the URL is the gate — so it captures in the same admin-bypass pass. The
   // dev seed fixes the kiosk token and gives Chen Family two children, which
@@ -361,7 +421,7 @@ export const README_CAPTURE_ROWS = Object.freeze([
   readmeShot('/admin/ministries?tab=email', 'admin/email-tab.png', 'Automation rules', { actor: 'admin', anchor: 'Automation rules', requiredTexts: ['Email templates', 'Recent emails'] }),
   readmeShot('/admin/settings', 'admin/settings-modules.png', 'Site Settings', { actor: 'admin', anchor: 'Modules', requiredTexts: ['Save modules'] }),
   readmeShot('/admin/learning', 'learning/admin-overview.png', 'Learning provider connections', { actor: 'admin', anchor: 'Learning provider connections', requiredTexts: ['Local fictional Canvas snapshot', 'https://canvas-learning.example.test'] }),
-  readmeShot('/en/my', 'portal/dashboard.png', 'Welcome, David Chen', { actor: 'david', backend: 'supabase', identityExpectedText: 'David Chen', requiredTexts: ['Chen Family'] }),
+  readmeShot('/en/my', 'portal/dashboard.png', 'Welcome, David Chen', { actor: 'david', backend: 'supabase', requiredTexts: ['Chen Family'] }),
   readmeShot('/en/my/opportunities', 'portal/member-opportunities.png', 'Find Your Place', { actor: 'sarah', backend: 'supabase', identityExpectedText: 'Sarah Johnson', requiredTexts: ['My participation', 'Open opportunities'] }),
   readmeShot('/en/manage', 'portal/leader-panel.png', 'Leader Panel', { actor: 'sarah', requiredTexts: ['Worship'] }),
   readmeShot('/en/serve/matrix/1', 'serve/matrix.png', 'Scheduling Matrix', { actor: 'sarah', requiredTexts: ['Sunday Worship (English)', 'WORSHIP TEAM'] }),
@@ -642,6 +702,59 @@ async function capture(cdp, base, row) {
       await resubmitted;
     }
 
+    // Scripted steps (see `interact` above): real clicks, fills and form submissions.
+    // A dev server can reload the page under the script (its file watcher sees local database
+    // writes), so every target is awaited briefly before it is used.
+    const exists = async (selector) => {
+      for (let i = 0; i < 50; i++) {
+        const { result } = await send('Runtime.evaluate', {
+          expression: `!!document.querySelector(${JSON.stringify(selector)})`, returnByValue: true,
+        }, sessionId);
+        if (result.value === true) return true;
+        await sleep(100);
+      }
+      return false;
+    };
+    for (const step of row.interact ?? []) {
+      if (step.click) await exists(step.click);
+      if (step.fill) for (const selector of Object.keys(step.fill)) await exists(selector);
+      if (step.submit) await exists(step.submit);
+      if (step.click) {
+        const { result } = await send('Runtime.evaluate', {
+          expression: `(()=>{const el=document.querySelector(${JSON.stringify(step.click)});if(!el)return false;el.click();return true;})()`,
+          returnByValue: true,
+        }, sessionId);
+        if (result.value !== true) throw new Error(`${row.out}: interact click target ${JSON.stringify(step.click)} was not found`);
+      } else if (step.fill) {
+        for (const [selector, value] of Object.entries(step.fill)) {
+          const { result } = await send('Runtime.evaluate', {
+            expression: `(()=>{const el=document.querySelector(${JSON.stringify(selector)});if(!el)return false;const proto=el instanceof HTMLSelectElement?HTMLSelectElement.prototype:el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(el,${JSON.stringify(value)});el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`,
+            returnByValue: true,
+          }, sessionId);
+          if (result.value !== true) throw new Error(`${row.out}: interact fill target ${JSON.stringify(selector)} was not found`);
+        }
+      } else if (step.submit) {
+        const navigated = onceEvent('Page.loadEventFired', sessionId, 20000).catch(() => {});
+        const { result } = await send('Runtime.evaluate', {
+          expression: `(()=>{const f=document.querySelector(${JSON.stringify(step.submit)});if(!(f instanceof HTMLFormElement))return false;f.requestSubmit();return true;})()`,
+          returnByValue: true,
+        }, sessionId);
+        if (result.value !== true) throw new Error(`${row.out}: interact form ${JSON.stringify(step.submit)} was not found`);
+        await navigated;
+      } else if (step.wait) {
+        let ready = false;
+        for (let i = 0; i < 100; i++) {
+          const { result } = await send('Runtime.evaluate', {
+            expression: `!!document.querySelector(${JSON.stringify(step.wait)})`, returnByValue: true,
+          }, sessionId);
+          if (result.value === true) { ready = true; break; }
+          await sleep(100);
+        }
+        if (!ready) throw new Error(`${row.out}: interact wait target ${JSON.stringify(step.wait)} never appeared`);
+      }
+      await sleep(150);
+    }
+
     // Wait for webfonts, then for the 繁 conversion (lang flips to zh-Hant) if applicable.
     await send('Runtime.evaluate',
       { expression: 'document.fonts.ready.then(()=>true)', awaitPromise: true, returnByValue: true }, sessionId);
@@ -692,7 +805,13 @@ async function capture(cdp, base, row) {
     // window starting `anchorMargin` px above it (captureBeyondViewport renders
     // the region even below the live viewport). A missing panel fails capture.
     let clip;
-    if (row.anchor) {
+    if (row.anchorSelector) {
+      const { result } = await send('Runtime.evaluate', {
+        expression: `(()=>{const el=document.querySelector(${JSON.stringify(row.anchorSelector)});return el?Math.round(el.getBoundingClientRect().top+window.scrollY):-1;})()`,
+        returnByValue: true,
+      }, sessionId);
+      clip = screenshotClip({ ...row, anchor: row.anchorSelector }, result.value);
+    } else if (row.anchor) {
       const { result } = await send('Runtime.evaluate', {
         expression: `(()=>{const h=[...document.querySelectorAll('h1,h2,h3')].find(e=>e.textContent.includes(${JSON.stringify(row.anchor)}));return h?Math.round(h.getBoundingClientRect().top+window.scrollY):-1;})()`,
         returnByValue: true,
@@ -704,7 +823,7 @@ async function capture(cdp, base, row) {
       expression: `({url:location.href,status:${Number(mainResponse.response.status)},title:document.title,headings:[...document.querySelectorAll('h1,h2,h3')].map((e)=>e.textContent||''),body:document.body?.innerText||'',links:[...document.querySelectorAll('a[href]')].map((e)=>e.href)})`,
       returnByValue: true,
     }, sessionId);
-    assertExpectedScreenshotPage(row, pageState.value);
+    assertExpectedScreenshotPage(row.finalPath ? { ...row, path: row.finalPath } : row, pageState.value);
 
     // Decode local media in the actual capture region, including lazy images
     // below the live viewport in an anchored shot. External video thumbnails

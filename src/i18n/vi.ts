@@ -2980,6 +2980,7 @@ const dict: Partial<Record<keyof typeof en, string>> = {
   "register.party.add": "Thêm một người nữa",
   "register.party.remove": "Xóa",
   "register.seats.only": "Chỉ còn {count} chỗ.",
+  "register.seats.one": "Chỉ còn 1 chỗ.",
   "register.seats.largerWaitlist": "Một nhóm đông hơn sẽ cùng vào danh sách chờ.",
   "register.manage.title": "Đăng ký của bạn",
   "register.manage.confirmation": "Mã xác nhận",

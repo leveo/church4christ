@@ -93,12 +93,13 @@ const { mode = 'admin' } = Astro.props;
   .gathering-surface :global(.reg-person-row[hidden]), .gathering-surface :global([data-household][hidden]), .gathering-surface :global([data-add-person][hidden]), .gathering-surface :global([data-remove-person][hidden]) { display: none; }
   .gathering-surface :global(.reg-chip) { min-height: 2.75rem; padding: .4rem .9rem; border: 1px solid var(--color-border); border-radius: var(--radius-full); background: var(--color-surface-raised); font-size: .875rem; font-weight: 600; color: var(--color-ink); }
   .gathering-surface :global(.reg-chip[aria-pressed="true"]) { border-color: var(--color-primary); background: var(--color-primary-soft); color: var(--color-on-primary-soft); }
-  .gathering-surface :global(.reg-facts) { display: grid; gap: .85rem; margin: 0; }
-  .gathering-surface :global(.reg-facts > div) { display: grid; grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr); gap: .25rem 1rem; align-items: baseline; }
+  .gathering-surface :global(.reg-facts) { display: grid; gap: .85rem; }
+  .gathering-surface :global(.reg-facts > div) { display: grid; grid-template-columns: minmax(8rem, 11rem) minmax(0, 1fr); gap: .25rem 1rem; align-items: baseline; }
   .gathering-surface :global(.reg-facts dt) { font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--color-ink-muted); }
   .gathering-surface :global(.reg-facts dd) { margin: 0; font-size: .9375rem; overflow-wrap: anywhere; }
   .gathering-surface :global(.reg-manage) { max-width: 44rem; margin-inline: auto; padding-block: 2rem 4rem; display: block; }
   .gathering-surface :global(.reg-manage > div), .gathering-surface :global(.reg-view) { display: grid; gap: 1rem; }
+  .gathering-surface :global(.reg-side) { display: grid; gap: 1rem; min-width: 0; align-content: start; }
   .gathering-surface :global(.reg-card) { padding: 1.25rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-raised); min-width: 0; }
   .gathering-surface :global(.reg-card h2) { font-size: 1rem; font-weight: 650; margin-bottom: .75rem; }
   .gathering-surface :global(.reg-head) { display: grid; gap: .5rem; }
@@ -115,6 +116,11 @@ const { mode = 'admin' } = Astro.props;
   .gathering-surface :global(.reg-actions) { display: flex; flex-wrap: wrap; gap: .75rem; }
   .gathering-surface :global(.reg-danger) { border-color: var(--color-danger); }
   .gathering-surface :global(.reg-error-summary) { padding: .75rem 1rem; border: 1px solid var(--color-danger); border-radius: var(--radius-sm); background: var(--color-danger-soft); color: var(--color-danger); font-weight: 600; }
+  @media (min-width: 900px) {
+    .gathering-surface :global(.reg-manage) { max-width: 62rem; }
+    .gathering-surface :global(.reg-manage > div), .gathering-surface :global(.reg-view) { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+    .gathering-surface :global(.reg-banner), .gathering-surface :global(.reg-head), .gathering-surface :global(.reg-actions), .gathering-surface :global(#reg-edit), .gathering-surface :global(.reg-danger), .gathering-surface :global(.reg-manage .gathering-registration-note) { grid-column: 1 / -1; }
+  }
   @media (max-width: 900px) { .gathering-surface :global(.gathering-registration-detail) { grid-template-columns: 1fr; gap: 1.5rem; } .gathering-surface :global(.gathering-registration-about) { position: static; } .gathering-surface :global(.gathering-registration-about > img) { aspect-ratio: 2.4; } .gathering-surface :global(.gathering-kiosk-panel) { grid-template-columns: 1fr; } }
   @media (max-width: 640px) { .gathering-surface :global(.gathering-registration-list) { grid-template-columns: 1fr; } .gathering-surface :global(.gathering-registration-card) { padding: 1rem; gap: 1rem; } .gathering-surface :global(.gathering-registration-form) { padding: 1.25rem; } .gathering-surface :global(.gathering-children-banner) { grid-template-columns: 1fr; } .gathering-surface :global(.gathering-children-banner img) { display: none; } .gathering-kiosk :global(.kiosk-welcome) { padding: .75rem; min-height: 0; margin: .5rem 0; } .gathering-kiosk :global(.kiosk-scene), .gathering-kiosk :global(.kiosk-welcome p), .gathering-kiosk :global(.gathering-flow) { display: none; } .gathering-kiosk :global(.kiosk-welcome h1) { font-size: 1.5rem; } .gathering-kiosk :global(.kiosk-search-panel) { padding: 1rem; } .gathering-kiosk :global(.kiosk-search-panel input) { font-size: 1rem; } .gathering-kiosk :global(.kiosk-section) { padding: 1rem; } .gathering-surface :global(.gathering-complete) { margin: 2rem 1rem; padding: 1.5rem; } }
 </style>

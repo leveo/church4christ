@@ -21,7 +21,7 @@ import { DESIGN_IMAGES } from '../../../lib/designAssets';
 import Base from '../../../layouts/Base.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
-import { formatDate } from '../../../lib/dates';
+import { formatDate, utcToDatetimeLocal } from '../../../lib/dates';
 import { getPublicEvent, listQuestions } from '../../../lib/regDb';
 import { getLiveHouseholdForPerson } from '../../../lib/householdDb';
 import { restrictAttendeePersons, validateSubmission, type SubmissionError } from '../../../lib/regManage';
@@ -185,7 +185,11 @@ const stepIndex = !event || event.phase !== 'open' || (isFull && !waitlistOffere
 const reviewTotal = event && paid && review ? formatCents(event.price_cents! * review.people.length, event.currency, locale) : '';
 
 const priceLabel = paid ? `$${(event!.price_cents! / 100).toFixed(2)}` : t(locale, 'register.free');
-const stamp = (utc: string) => `${formatDate(utc.slice(0, 10), locale)} ${utc.slice(11, 16)}`;
+// Event times are stored in UTC; people read them in the church's time zone (as the emails and the manage page do).
+const stamp = (utc: string) => {
+  const [date, time] = utcToDatetimeLocal(utc).split('T');
+  return `${formatDate(date, locale)} ${time}`;
+};
 const when = event ? stamp(event.starts_at) : '';
 ---
 
@@ -323,7 +327,7 @@ const when = event ? stamp(event.starts_at) : '';
                 <legend class={lab}>{t(locale, 'register.party.heading')}</legend>
                 <p class="text-sm text-ink-muted">{t(locale, 'register.party.hint', { max: maxParty })}</p>
                 {left !== null && left > 0 && left < maxParty && !isFull && (
-                  <p class="text-sm font-semibold text-warn" data-seats-left>{t(locale, 'register.seats.only', { count: left })} {waitlistOffered || (event.price_cents === null && event.waitlist_enabled === 1) ? t(locale, 'register.seats.largerWaitlist') : ''}</p>
+                  <p class="text-sm font-semibold text-warn" data-seats-left>{left === 1 ? t(locale, 'register.seats.one') : t(locale, 'register.seats.only', { count: left })} {waitlistOffered || (event.price_cents === null && event.waitlist_enabled === 1) ? t(locale, 'register.seats.largerWaitlist') : ''}</p>
                 )}
                 {errorFor('attendees') && <p id="f-party-err" class={errorText}>{errorFor('attendees')}</p>}
                 <p class="reg-person-you">{t(locale, 'register.party.you')}</p>

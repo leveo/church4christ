@@ -2981,6 +2981,7 @@ const dict: Partial<Record<keyof typeof en, string>> = {
   'register.party.add': 'Weitere Person hinzufügen',
   'register.party.remove': 'Entfernen',
   'register.seats.only': 'Nur noch {count} Plätze frei.',
+  'register.seats.one': 'Nur noch 1 Platz frei.',
   'register.seats.largerWaitlist': 'Eine größere Gruppe kommt gemeinsam auf die Warteliste.',
   'register.manage.title': 'Deine Anmeldung',
   'register.manage.confirmation': 'Bestätigungsnummer',

@@ -3133,6 +3133,7 @@ export default {
   'register.party.add': 'Add another person',
   'register.party.remove': 'Remove',
   'register.seats.only': 'Only {count} places left.',
+  'register.seats.one': 'Only 1 place left.',
   'register.seats.largerWaitlist': 'A larger group will join the waitlist together.',
   'register.manage.title': 'Your registration',
   'register.manage.confirmation': 'Confirmation number',

@@ -2983,6 +2983,7 @@ const dict: Partial<Record<keyof typeof en, string>> = {
   'register.party.add': 'एक और व्यक्ति जोड़ें',
   'register.party.remove': 'हटाएँ',
   'register.seats.only': 'केवल {count} स्थान बचे हैं।',
+  'register.seats.one': 'केवल 1 स्थान बचा है।',
   'register.seats.largerWaitlist': 'बड़ा समूह एक साथ प्रतीक्षा सूची में जाएगा।',
   'register.manage.title': 'आपका पंजीकरण',
   'register.manage.confirmation': 'पुष्टि संख्या',

@@ -2981,6 +2981,7 @@ const dict: Partial<Record<keyof typeof en, string>> = {
   'register.party.add': '다른 사람 추가',
   'register.party.remove': '삭제',
   'register.seats.only': '남은 자리는 {count}석뿐입니다.',
+  'register.seats.one': '남은 자리는 1석뿐입니다.',
   'register.seats.largerWaitlist': '인원이 더 많은 그룹은 함께 대기자 명단에 올라갑니다.',
   'register.manage.title': '내 등록',
   'register.manage.confirmation': '확인 번호',

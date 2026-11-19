@@ -210,8 +210,9 @@ export function renderRegistrationView(view: RegistrationView, o: RenderOptions)
     }${event.notes ? `<div class="reg-notes"><h2>${esc(L(lb, 'register.manage.notes'))}</h2><p>${esc(event.notes)}</p></div>` : ''}</section>`,
   );
 
-  // People.
-  out.push(
+  // People and answers sit side by side with the details on wide screens.
+  const side: string[] = [];
+  side.push(
     `<section class="reg-card"><h2>${esc(L(lb, 'register.manage.peopleHeading'))}</h2><ul class="reg-people">${view.attendees
       .map((a) => {
         if (!a.active) {
@@ -229,12 +230,13 @@ export function renderRegistrationView(view: RegistrationView, o: RenderOptions)
   );
 
   if (view.answers.length > 0) {
-    out.push(
+    side.push(
       `<section class="reg-card"><h2>${esc(L(lb, 'register.manage.answersHeading'))}</h2><dl class="reg-facts">${view.answers
         .map((a) => `<div><dt>${esc(a.label)}</dt><dd>${esc(a.value)}</dd></div>`)
         .join('')}</dl></section>`,
     );
   }
+  out.push(`<div class="reg-side">${side.join('')}</div>`);
 
   // Edit form.
   if (view.canEdit) {

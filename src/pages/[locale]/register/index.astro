@@ -14,7 +14,7 @@ import { DESIGN_IMAGES } from '../../../lib/designAssets';
 import Base from '../../../layouts/Base.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
-import { formatDate } from '../../../lib/dates';
+import { formatDate, utcToDatetimeLocal } from '../../../lib/dates';
 import { listPublicEvents, type RegPublicEvent } from '../../../lib/regDb';
 import { isEventFull, offersWaitlist } from '../../../lib/regPhase';
 import { mediaPath } from '../../../lib/mediaRef';
@@ -36,7 +36,11 @@ try {
 
 const priceLabel = (e: RegPublicEvent) =>
   e.price_cents !== null && e.price_cents > 0 ? `$${(e.price_cents / 100).toFixed(2)}` : t(locale, 'register.free');
-const stamp = (utc: string) => `${formatDate(utc.slice(0, 10), locale)} ${utc.slice(11, 16)}`;
+// Event times are stored in UTC; people read them in the church's time zone.
+const stamp = (utc: string) => {
+  const [date, time] = utcToDatetimeLocal(utc).split('T');
+  return `${formatDate(date, locale)} ${time}`;
+};
 const when = (e: RegPublicEvent) => stamp(e.starts_at);
 ---
 

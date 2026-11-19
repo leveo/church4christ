@@ -483,7 +483,7 @@ describe('Registration on D1: a family signs up, reviews, manages and cancels on
     await register(...MEMBERS[3]);
     const cookie = await sessionCookie(...SARAH);
     const formPage = await (await get('/en/register/920', { cookie })).text();
-    expect(formPage).toContain('Only 1 places left.');
+    expect(formPage).toContain('Only 1 place left.');
     const base = hiddenFieldsOf(formPage, '/en/register/920').filter(([n]) => n !== 'step');
     const review = await (await post('/en/register/920', formBody([...base, ['step', 'review'], ['person_name_1', 'Mia'], ['921', 'Main dish']]), { cookie })).text();
     expect(review).toContain('data-waitlist-party');

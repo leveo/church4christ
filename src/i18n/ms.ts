@@ -2981,6 +2981,7 @@ const dict: Partial<Record<keyof typeof en, string>> = {
   'register.party.add': 'Tambah orang lain',
   'register.party.remove': 'Buang',
   'register.seats.only': 'Hanya tinggal {count} tempat.',
+  'register.seats.one': 'Hanya tinggal 1 tempat.',
   'register.seats.largerWaitlist': 'Kumpulan yang lebih besar akan masuk senarai menunggu bersama-sama.',
   'register.manage.title': 'Pendaftaran anda',
   'register.manage.confirmation': 'Nombor pengesahan',
