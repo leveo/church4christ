@@ -20,9 +20,26 @@ than published to npm.
   descriptions, and question labels in every enabled site language, and add an optional poster
   image and an optional confirmation-number prefix. Seat limits no longer allow overselling.
   Free events can use a waitlist (on by default per event, can be turned off; paid events never
-  waitlist). Waitlist promotion is not automatic yet and is planned for a later release. Every
-  registration gets a confirmation number such as `R26-0001` and a party size. Guests still
+  waitlist). Every registration gets a confirmation number such as `R26-0001` and a party size. Guests still
   verify their email before registering. See [docs/features/registration.md](docs/features/registration.md).
+- Registration for households and groups. An event has a **Max people per registration**
+  setting (1 to 20, default 1). Signed-in members add household members with one tap. The whole
+  party takes seats together; if it does not fit a free event with a waitlist, the whole party
+  joins the waitlist. A paid sign-up costs the price times the number of people. Phone is
+  optional, and a review step ("Review and confirm") shows everything before saving.
+- Registration emails and a private page. Each registration gets a confirmation number and a QR
+  code. Confirmed, waitlist, paid-confirmed (after Stripe), promotion and cancellation emails go
+  out in the registrant's language, with a calendar (.ics) file and a private **Manage my
+  registration** link. A newer email replaces the link from an older one, so only the latest
+  link works. On that page (and from **My events** for signed-in members) people can edit
+  names, phone and answers, press **Can't come** for one person, or cancel all, while the event
+  is in Preview or Open and the new **Allow self-service changes** setting (on by default) is on.
+  Paid cancellations are not refunded automatically; people are told to contact the office.
+- Automatic waitlist promotion on free events when seats free up, oldest first. A party that does
+  not fit is skipped for a smaller one behind it. Promoted people get an email.
+- Event notes in every language, shown on the event page, the manage page and in emails.
+- The roster shows people and phone, and the CSV adds **People** and **Phone** as the last columns.
+  See [docs/features/registration.md](docs/features/registration.md).
 
 ### Changed
 
@@ -41,6 +58,22 @@ than published to npm.
   - Identity merge: on D1, a person who is an event admin is now a hard merge conflict, the
     same as on Postgres.
   - Setup treats only Giving (not Registration) as requiring Postgres.
+- Operator impact for Registration party flow (see [Upgrading](docs/upgrade.md#registration-party-flow-and-emails)):
+  - D1: apply `migrations/0051_registration_party.sql`. Postgres: apply
+    `migrations-supabase/0043_registration_party.sql`. Both only add columns, with no backfill.
+    Existing events stay at 1 person per registration with self-service on.
+  - Registration pages and the admin events list now show dates and times in the church's time
+    zone. They showed UTC before.
+  - The private page's API needs `NEWCOMER_RATE_LIMIT_SECRET`. Setup generates it; an install
+    without it shows "can't load right now". Signed-in member sign-ups need the
+    `IDENTITY_SOURCE_KEY_*` secrets, which setup manages.
+  - The existing daily cron (`0 13 * * *`) now also retries unsent confirmation emails. There is
+    no new cron. The first run after the upgrade does not email older registrations.
+  - `/register/qr/...` is a public, cacheable image route that holds only the confirmation
+    number. Email links end in `?campus=<slug>`. Email delivery needs the Cloudflare email
+    binding, as for other emails.
+  - The roster CSV gains **People** and **Phone** as the last columns; earlier columns keep
+    their order.
 
 ### Fixed
 

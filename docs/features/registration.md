@@ -25,8 +25,12 @@ It replaces the paper sign-up sheet, the separate payment link, and the spreadsh
 - **A waitlist for free events.** When a free event is full, people can join a waitlist
   instead of being turned away. It is on for every event by default, and you can turn it off
   per event. Paid events never have a waitlist.
-- **Your own languages.** Event titles, descriptions, and question labels can be written in
-  every language your site has turned on.
+- **Families and groups.** One sign-up can cover several people, up to a limit you set. The
+  whole group takes seats together.
+- **Emails and a private page.** People get a confirmation email with a QR code and a calendar
+  file, and a private link to view, change, or cancel their sign-up.
+- **Your own languages.** Event titles, descriptions, notes, and question labels can be written
+  in every language your site has turned on. Emails arrive in the language the person used.
 - **A roster your team can export.** Every sign-up lands on the event's roster. One click
   downloads it as a spreadsheet (CSV).
 
@@ -62,9 +66,21 @@ Open **New event** to fill in:
 - an optional **poster** image,
 - an optional **confirmation prefix** (see below),
 - the **waitlist** switch,
+- **Max people per registration** (1 to 20, default 1; see "Families and groups"),
+- **Allow self-service changes** (on by default; see "Changes by the registrant"),
+- optional **Notes for registrants** (one tab per language),
 - the schedule: **Visible from**, **Opens**, and **Closes**.
 
 ![The event editor, with a language tab for each site language](../images/registration/admin-editor.png)
+
+![The editor's group size, self-service, and notes settings](../images/registration/admin-editor-party.png)
+
+**Notes for registrants** are shown on the event page, on the registrant's private page, and in
+their emails. Use them for parking, what to bring, or the schedule.
+
+Dates and times on the registration pages and in the admin events list are shown in your
+church's time zone. Earlier versions showed UTC, so times may look different after you upgrade.
+They are now the times you meant.
 
 ### Stages
 
@@ -108,13 +124,92 @@ On a phone, the same pages fit the screen.
 ![The event list on a phone](../images/mobile/register-list.png)
 ![An event page on a phone](../images/mobile/register-detail.png)
 
-If a free event is full and its waitlist is on, the form says so and the person joins the
-waitlist. They see a confirmation page that says they are on the waitlist.
+### Families and groups
+
+Set **Max people per registration** on the event. At 1 (the default), each sign-up is one
+person. At a higher number, the form asks "Who is coming?" and the person can add more people
+with **Add another person**. Blank rows are ignored. A signed-in member can add people from
+their household with one tap.
+
+![The sign-up form with several people](../images/registration/party-form.png)
+
+![The same form on a phone](../images/mobile/register-party-form.png)
+
+- The whole group takes seats together. A group of four uses four seats.
+- On a free event with a waitlist, if the group does not fit in the seats left, the **whole
+  group** joins the waitlist. Groups are never split.
+- On a paid event, the price is the event price times the number of people.
+- Phone is optional. Questions are still answered once for the whole sign-up.
+
+### Check before saving
+
+After the form, people see a page to check everything. Nothing is saved until they confirm.
+If something is wrong, the page shows the problem beside the field. **Back to edit** returns
+to the form with their answers kept.
+
+![The page to check and confirm a sign-up](../images/registration/review.png)
+
+![The same page on a phone](../images/mobile/register-review.png)
+
+If a free event is full and its waitlist is on, the form says so and the person (or the whole
+group) joins the waitlist. They see a message that says they are on the waitlist.
 
 ![The confirmation page for a waitlist sign-up](../images/registration/done-waitlist.png)
 
-A waitlisted person is not moved to confirmed automatically yet. Staff can see them on the
-roster. Automatic promotion is planned for a later release.
+### Emails
+
+People get an email when they:
+
+- are confirmed, or join the waitlist,
+- pay (a paid sign-up is confirmed only after Stripe confirms the payment),
+- move from the waitlist to confirmed,
+- cancel, or are cancelled by your team.
+
+Each email arrives in the person's language. It shows the event, the time in your church's
+time zone, the place, the confirmation number, the people, your notes, and a QR code. The
+confirmation also has a calendar file (.ics) and a **Manage my registration** button.
+
+The button opens a private page. **Only the newest email's link works.** Each new email gives
+a fresh link and turns off the one in older emails. If someone says their link stopped working,
+ask them to use the link in the most recent email.
+
+If an email could not be sent, the site tries again during its daily job. The first daily job
+after you upgrade does **not** email people who registered before the upgrade.
+
+Sending needs the same Cloudflare email setup as your other emails.
+
+### Changes by the registrant
+
+People can open their private page to see their sign-up, with its confirmation number and QR
+code.
+
+![The private page for a registration](../images/registration/manage.png)
+
+![The private page on a phone](../images/mobile/register-manage.png)
+
+While the event is in Preview or Open, and **Allow self-service changes** is on, they can:
+
+- change names, phone, and answers (the email address stays the same),
+- press **Can't come** for one person, which frees that person's seat,
+- cancel the whole registration.
+
+![Editing names, phone, and answers](../images/registration/manage-edit.png)
+
+If the last person is removed, the registration is cancelled. People cannot add someone new on
+this page. A new person needs a new sign-up. Turn off **Allow self-service changes** if you
+want to handle all changes yourself.
+
+Signed-in members can do the same from **My events**.
+
+**Paid sign-ups are not refunded automatically.** The page tells people to contact the church
+office. Refund in Stripe yourself.
+
+### Waitlist promotion
+
+On free events, when seats free up, the people on the waitlist move to confirmed
+**automatically**, oldest first. If the oldest group is too big for the seats left, it is
+skipped and a smaller group behind it may get the seats. Each promoted person gets an email.
+This also happens when your team cancels a registration. Paid events never have a waitlist.
 
 ### Confirmation numbers
 
@@ -126,12 +221,15 @@ digits.
 ### Roster and CSV
 
 The **Questions & roster** page lists every registration: confirmation number, name, email,
-status, party size, amount, when they signed up, and each answer. Statuses are confirmed,
-pending, waitlist, and cancelled. Cancelling a registration frees its seat.
+status, party size, amount, when they signed up, each answer, the names of the people, and
+the phone number. Statuses are confirmed,
+pending, waitlist, and cancelled. 
 
 **Export CSV** downloads the roster. The columns are, in this order: Confirmation, Name,
-Email, Status, Party size, Amount, Registered, then one column per question. If you have a
-script or spreadsheet that reads the old export, update it for this order.
+Email, Status, Party size, Amount, Registered, one column per question, then **People** and
+**Phone** at the very end. The earlier columns keep their order, so existing scripts that read
+by position keep working. Cancelling a registration frees its seats and starts waitlist
+promotion.
 
 ### Who can manage events
 
@@ -151,6 +249,13 @@ merged away into another person in the identity merge tool. The tool reports it 
 **On D1 (free events).** Nothing extra is needed. If you are upgrading an existing D1 church,
 Registration stays **off** after the upgrade. Turn it on in **Admin → Settings → Modules**.
 A new install follows the module choice you made in setup. See [Upgrading](../upgrade.md).
+
+**For the private page and emails.** Run `npm run setup`. It creates the secrets the private
+page needs (`NEWCOMER_RATE_LIMIT_SECRET`, and the `IDENTITY_SOURCE_KEY_*` secrets for signed-in
+members). An install that lacks `NEWCOMER_RATE_LIMIT_SECRET` shows "can't load right now" on the
+private page. The QR images at `/register/qr/...` are public and cached by browsers. They hold
+only the confirmation number. Links in emails end in `?campus=<slug>` so they open on the right
+campus.
 
 **On Supabase (free and paid events).** Free events need no payment setup. To try paid events,
 set up Stripe in test mode:
@@ -208,6 +313,18 @@ before switching modes.
   tables: `migrations-supabase/0003_registration.sql`. Money is integer cents.
 - **Setup doctor:** `scripts/setup/checks/database.mjs` expects the registration tables,
   `group_reg_events`, and `event_admins` on D1.
+- **Party flow (Phase 2):** D1 `migrations/0051_registration_party.sql` and Postgres
+  `migrations-supabase/0043_registration_party.sql` add `reg_events.max_party_size` and
+  `allow_self_edit`, `reg_event_i18n.notes`, and `registrations.manage_token_hash` (SHA-256 of
+  the token), `locale`, `phone`, `confirmation_sent_at`, `cancelled_at`, plus
+  `identity_registration_continuations.party_json`. No backfill.
+  New modules: `src/lib/regManage.ts` (view, edit, cancel, token, promotion),
+  `src/lib/regManageApi.ts` and `src/pages/api/register/manage.ts` (token POST API),
+  `src/lib/regNotify.ts` (send, token rotation, retry sweep run by the daily cron in
+  `src/worker.ts`), `src/lib/regEmails.ts` (builders), `src/lib/qrPng.ts` plus
+  `src/pages/register/qr/[eventId]/[confirmation].png.ts` (QR PNG), and `src/lib/regPublic.ts`.
+  Pages: `src/pages/[locale]/register/manage.astro` (token read from the URL fragment) and
+  `src/pages/[locale]/my/events/[id].astro`.
 - **Key modules:** `src/lib/regDb.ts` (reads, the shared locked registration writer that
   enforces capacity, waitlist, confirmation numbers, roster and CSV, `cloneEvent`,
   `setEventLifecycle`), `src/lib/regPhase.ts` (pure `eventPhase`, `isEventFull`,
@@ -224,4 +341,7 @@ before switching modes.
   and `test/pg/regCore.pg.test.ts` (shared cases in `test/shared/regCoreCases.ts`),
   `test/regPhase.test.ts`, `test/regAdminActions.test.ts`,
   `test/node/registrationMigrationDefault.test.ts`, and the Postgres suites `test/pg/regDb.test.ts`,
-  `regSchema.test.ts`, `regWebhook.test.ts`. See [Modules](modules.md).
+  `regSchema.test.ts`, `regWebhook.test.ts`. Phase 2 adds `test/regCampus.d1.test.ts`,
+  `test/regManageApi.d1.test.ts`, `test/regNotify.d1.test.ts` and `test/pg/regNotify.pg.test.ts`
+  (shared cases in `test/shared/regNotifyCases.ts`), `test/regEmails.test.ts`, `test/qrPng.test.ts`,
+  `test/regPublic.test.ts`, and more e2e cases. See [Modules](modules.md).

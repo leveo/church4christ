@@ -115,7 +115,10 @@ its records and R2 objects.
 
 **My Events** lists the member's existing registration records. When the separate
 Registration module is enabled, it also shows events currently open for registration
-and links to the public registration flow. The public Events module (`/events`) remains
+and links to the public registration flow. Each registration opens a page where the member can
+see who is registered and, while the event is open and the church allows changes, edit names
+and answers, remove one person, or cancel. Paid registrations are not refunded automatically;
+the page tells the member to contact the office. The public Events module (`/events`) remains
 a separate publishing feature. Paid Registration and online Giving use the configured Stripe mode (test
 by default); the screenshot uses fictional test data, not a production charge.
 

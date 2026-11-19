@@ -482,7 +482,7 @@ binding or secret, and no behavior changes** for existing content.
 
 This release moves Registration onto Cloudflare D1 for free events and adds event stages, a
 waitlist, duplicate event, confirmation numbers, and a poster. It adds one forward migration
-on each database. There is no new binding, secret, or cron trigger. Back up first (section 2
+on each database. Back up first (section 2
 above), apply the migration, then deploy.
 
 ### Registration on D1
@@ -514,3 +514,29 @@ above), apply the migration, then deploy.
   Party size, Amount, Registered, then one column per question. If a script or spreadsheet
   reads the old export by column position, update it.
 - There is no down migration. Restore the pre-upgrade backup as in section 5 if you must go back.
+
+### Registration party flow and emails
+
+This part adds groups, a review step, emails, a private manage page, and automatic waitlist
+promotion. It adds one more migration on each database and no new binding or cron trigger.
+
+- **Apply the migrations** before deploying: D1 `migrations/0051_registration_party.sql`
+  (`npm run db:migrate:remote`) and Postgres `migrations-supabase/0043_registration_party.sql`
+  (`npm run db:migrate:supabase`). They add columns only, with no backfill. Existing events
+  stay at 1 person per registration with self-service on. Existing registrations have no
+  private link.
+- **Secrets.** The private page's API needs `NEWCOMER_RATE_LIMIT_SECRET`. Setup generates it. If
+  it is missing, the page says "can't load right now". Signed-in member sign-ups need the
+  `IDENTITY_SOURCE_KEY_*` secrets, which setup manages. Re-run setup if unsure.
+- **Time zone.** Registration pages and the admin events list now show church time. They showed
+  UTC before.
+- **Daily cron.** The `0 13 * * *` job also retries confirmation emails that did not send. The
+  first run after the upgrade does not email people who registered before it.
+- **Email.** Sending needs the Cloudflare email binding, as for other emails. Links in emails
+  end in `?campus=<slug>`. A newer email's link replaces the link from an older one.
+- **QR images.** `/register/qr/...` is public and cacheable. It encodes only the confirmation
+  number.
+- **CSV.** **People** and **Phone** are added as the last columns. Earlier columns keep their
+  order.
+- **Paid cancellations** do not refund automatically. Refund in Stripe.
+- No down migration. Restore the pre-upgrade backup as in section 5 if you must go back.
