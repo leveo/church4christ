@@ -576,6 +576,26 @@ describe('demo seed: member portal prayer items on D1', () => {
   });
 });
 
+describe('demo seed: free event registration on D1', () => {
+  it('seeds an open event with capacity 3 and two questions, plus a preview event', async () => {
+    const open = await env.DB
+      .prepare('SELECT capacity, price_cents, opens_at, waitlist_enabled, next_confirmation, campus_id FROM reg_events WHERE id = 920')
+      .first<{ capacity: number; price_cents: number | null; opens_at: string | null; waitlist_enabled: number; next_confirmation: number; campus_id: number }>();
+    expect(open).toEqual({ capacity: 3, price_cents: null, opens_at: null, waitlist_enabled: 1, next_confirmation: 1, campus_id: 1 });
+    const preview = await env.DB.prepare('SELECT opens_at, active FROM reg_events WHERE id = 930')
+      .first<{ opens_at: string; active: number }>();
+    expect(preview?.active).toBe(1);
+    expect(preview!.opens_at > new Date().toISOString().replace('T', ' ').slice(0, 19)).toBe(true);
+    const questions = await env.DB.prepare('SELECT COUNT(*) AS n FROM reg_questions WHERE event_id = 920').first<{ n: number }>();
+    expect(questions?.n).toBe(2);
+    const titles = await env.DB.prepare('SELECT event_id, locale FROM reg_event_i18n ORDER BY event_id, locale')
+      .all<{ event_id: number; locale: string }>();
+    expect(titles.results.map((r) => `${r.event_id}:${r.locale}`)).toEqual(['920:en', '920:zh', '930:en', '930:zh']);
+    const registrations = await env.DB.prepare('SELECT COUNT(*) AS n FROM registrations').first<{ n: number }>();
+    expect(registrations?.n).toBe(0);
+  });
+});
+
 describe('demo seed: service planning', () => {
   it('seeds an upcoming published Christmas service with a run sheet and two rehearsals', async () => {
     const event = await env.DB

@@ -1,10 +1,14 @@
-// Registration module schema (Supabase-only) — reg_events, reg_event_i18n,
-// reg_questions, reg_question_i18n, registrations, reg_answers. Applied via the
+// Registration module schema — reg_events, reg_event_i18n, reg_questions,
+// reg_question_i18n, registrations, reg_answers, reg_attendees. Applied via the
 // real migration runner against a freshly reset schema (the way an operator
 // ships it), so this suite exercises migrations-supabase/0003_registration.sql
-// end to end. Self-skips without DATABASE_URL, like every test/pg suite.
+// and 0042_registration_v2.sql end to end, including the 0042 backfill of
+// registrations that existed before it. Self-skips without DATABASE_URL, like every test/pg suite.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { hasPg, pgClient, resetSchema, DATABASE_URL } from './helpers';
 
 describe.skipIf(!hasPg)('Postgres registration schema', () => {
@@ -62,8 +66,8 @@ describe.skipIf(!hasPg)('Postgres registration schema', () => {
     );
 
     const [reg] = await sql.unsafe(
-      "INSERT INTO registrations (event_id, name, email) " +
-        "VALUES ($1, 'Jane Doe', 'jane@example.com') RETURNING id, status, amount_cents, currency, created_at",
+      "INSERT INTO registrations (event_id, name, email, submission_key) " +
+        "VALUES ($1, 'Jane Doe', 'jane@example.com', 'k-jane') RETURNING id, status, amount_cents, currency, created_at, party_size, confirmation_no",
       [eventId],
     );
     const regId = Number(reg.id);
@@ -72,6 +76,8 @@ describe.skipIf(!hasPg)('Postgres registration schema', () => {
     expect(reg.amount_cents).toBe(0);
     expect(reg.currency).toBe('usd');
     expect(reg.created_at).toBeTruthy();
+    expect(reg.party_size).toBe(1);
+    expect(reg.confirmation_no).toBeNull();
 
     await sql.unsafe(
       "INSERT INTO reg_answers (registration_id, question_id, value) VALUES ($1, $2, 'M')",
@@ -90,14 +96,14 @@ describe.skipIf(!hasPg)('Postgres registration schema', () => {
     );
     const eventId = Number(event.id);
     await sql.unsafe(
-      "INSERT INTO registrations (event_id, name, email, stripe_checkout_session_id) " +
-        "VALUES ($1, 'A', 'a@example.com', 'cs_dup')",
+      "INSERT INTO registrations (event_id, name, email, stripe_checkout_session_id, submission_key) " +
+        "VALUES ($1, 'A', 'a@example.com', 'cs_dup', 'k-a')",
       [eventId],
     );
     await expect(
       sql.unsafe(
-        "INSERT INTO registrations (event_id, name, email, stripe_checkout_session_id) " +
-          "VALUES ($1, 'B', 'b@example.com', 'cs_dup')",
+        "INSERT INTO registrations (event_id, name, email, stripe_checkout_session_id, submission_key) " +
+          "VALUES ($1, 'B', 'b@example.com', 'cs_dup', 'k-b')",
         [eventId],
       ),
     ).rejects.toMatchObject({ code: '23505' });
@@ -114,7 +120,7 @@ describe.skipIf(!hasPg)('Postgres registration schema', () => {
     );
     const questionId = Number(q.id);
     const [reg] = await sql.unsafe(
-      "INSERT INTO registrations (event_id, name, email) VALUES ($1, 'C', 'c@example.com') RETURNING id",
+      "INSERT INTO registrations (event_id, name, email, submission_key) VALUES ($1, 'C', 'c@example.com', 'k-c') RETURNING id",
       [eventId],
     );
     const regId = Number(reg.id);
@@ -129,5 +135,155 @@ describe.skipIf(!hasPg)('Postgres registration schema', () => {
     // The question survives — only the answers cascade with the registration.
     const questions = await sql.unsafe('SELECT count(*)::int AS n FROM reg_questions WHERE id = $1', [questionId]);
     expect(questions[0].n).toBe(1);
+  });
+
+  it('adds the v2 event defaults and rejects a bad confirmation prefix', async () => {
+    const [event] = await sql.unsafe(
+      "INSERT INTO reg_events (starts_at) VALUES ('2026-11-01 09:00:00') RETURNING visible_from, waitlist_enabled, confirmation_prefix, next_confirmation, poster",
+    );
+    expect(event).toMatchObject({ visible_from: null, waitlist_enabled: 1, confirmation_prefix: null, next_confirmation: 1, poster: null });
+    for (const prefix of ['abc', 'TOOLONG1', '']) {
+      await expect(
+        sql.unsafe("INSERT INTO reg_events (starts_at, confirmation_prefix) VALUES ('2026-11-01 09:00:00', $1)", [prefix]),
+      ).rejects.toMatchObject({ code: '23514' });
+    }
+    await expect(
+      sql.unsafe("INSERT INTO reg_events (starts_at, waitlist_enabled) VALUES ('2026-11-01 09:00:00', 2)"),
+    ).rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('accepts the six statuses and the widened question types, and rejects unknown ones', async () => {
+    const [event] = await sql.unsafe("INSERT INTO reg_events (starts_at) VALUES ('2026-12-01 09:00:00') RETURNING id");
+    const eventId = Number(event.id);
+    let n = 0;
+    for (const status of ['pending', 'review', 'confirmed', 'waitlist', 'declined', 'cancelled']) {
+      n += 1;
+      await sql.unsafe(
+        'INSERT INTO registrations (event_id, name, email, status, submission_key) VALUES ($1, $2, $3, $4, $5)',
+        [eventId, `S${n}`, `s${n}@example.com`, status, `status-${n}`],
+      );
+    }
+    await expect(
+      sql.unsafe("INSERT INTO registrations (event_id, name, email, status, submission_key) VALUES ($1, 'X', 'x@example.com', 'paid', 'status-x')", [eventId]),
+    ).rejects.toMatchObject({ code: '23514' });
+    for (const type of ['text', 'textarea', 'select', 'checkbox', 'yesno', 'section', 'number', 'date', 'email', 'phone', 'terms']) {
+      await sql.unsafe('INSERT INTO reg_questions (event_id, type) VALUES ($1, $2)', [eventId, type]);
+    }
+    await expect(sql.unsafe("INSERT INTO reg_questions (event_id, type) VALUES ($1, 'file')", [eventId])).rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('enforces party_size 1-50 and unique submission keys and confirmation numbers per event', async () => {
+    const [event] = await sql.unsafe("INSERT INTO reg_events (starts_at) VALUES ('2027-01-01 09:00:00') RETURNING id");
+    const eventId = Number(event.id);
+    const [otherEvent] = await sql.unsafe("INSERT INTO reg_events (starts_at) VALUES ('2027-02-01 09:00:00') RETURNING id");
+    const other = Number(otherEvent.id);
+    const insert = (id: number, key: string, no: string | null, size = 1) =>
+      sql.unsafe(
+        'INSERT INTO registrations (event_id, name, email, submission_key, confirmation_no, party_size) VALUES ($1, $2, $3, $4, $5, $6)',
+        [id, 'P', 'p@example.com', key, no, size],
+      );
+    await insert(eventId, 'u1', 'R27-0001');
+    await expect(insert(eventId, 'u1', 'R27-0002')).rejects.toMatchObject({ code: '23505' });
+    await expect(insert(eventId, 'u2', 'R27-0001')).rejects.toMatchObject({ code: '23505' });
+    await insert(eventId, 'u3', null);
+    await insert(eventId, 'u4', null);
+    await insert(other, 'u1', 'R27-0001');
+    await expect(insert(eventId, 'u5', null, 0)).rejects.toMatchObject({ code: '23514' });
+    await expect(insert(eventId, 'u6', null, 51)).rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('keeps attendees per registration, cascades on delete, and nulls a deleted person', async () => {
+    const [event] = await sql.unsafe("INSERT INTO reg_events (starts_at) VALUES ('2027-03-01 09:00:00') RETURNING id");
+    const [person] = await sql.unsafe("INSERT INTO people (display_name, email) VALUES ('Att Person', 'att-person@example.com') RETURNING id");
+    const [reg] = await sql.unsafe(
+      "INSERT INTO registrations (event_id, name, email, submission_key) VALUES ($1, 'Att', 'att@example.com', 'att-1') RETURNING id",
+      [event.id],
+    );
+    const [attendee] = await sql.unsafe(
+      "INSERT INTO reg_attendees (registration_id, name, person_id) VALUES ($1, 'Att', $2) RETURNING id, campus_id, sort, status",
+      [reg.id, person.id],
+    );
+    expect(attendee).toMatchObject({ campus_id: 1, sort: 0, status: 'active' });
+    await expect(
+      sql.unsafe("INSERT INTO reg_attendees (registration_id, name, status) VALUES ($1, 'Bad', 'gone')", [reg.id]),
+    ).rejects.toMatchObject({ code: '23514' });
+    await sql.unsafe('DELETE FROM people WHERE id = $1', [person.id]);
+    const [kept] = await sql.unsafe('SELECT person_id FROM reg_attendees WHERE id = $1', [attendee.id]);
+    expect(kept.person_id).toBeNull();
+    await sql.unsafe('DELETE FROM registrations WHERE id = $1', [reg.id]);
+    const left = await sql.unsafe('SELECT count(*)::int AS n FROM reg_attendees WHERE registration_id = $1', [reg.id]);
+    expect(left[0].n).toBe(0);
+  });
+});
+
+// 0042 on a database that already holds registrations: migrate through 0041 in a
+// scratch copy of the migration folder, insert rows the way v1 stored them, then
+// apply 0042 and check the backfill.
+describe.skipIf(!hasPg)('Postgres registration v2 backfill (0042)', () => {
+  const sql = hasPg ? pgClient() : (null as never);
+  const repo = resolve(process.cwd());
+  const scratch = hasPg ? mkdtempSync(join(tmpdir(), 'c4c-reg-migrate-')) : '';
+  const run = () =>
+    execFileSync('node', [join(repo, 'scripts/db/migrate-supabase.mjs')], {
+      cwd: scratch,
+      env: { ...process.env, SUPABASE_DB_URL: DATABASE_URL },
+      encoding: 'utf8',
+    });
+
+  beforeAll(async () => {
+    await resetSchema(sql);
+    mkdirSync(join(scratch, 'migrations-supabase'));
+    for (const file of readdirSync(join(repo, 'migrations-supabase'))) {
+      if (file.endsWith('.sql') && file < '0042') cpSync(join(repo, 'migrations-supabase', file), join(scratch, 'migrations-supabase', file));
+    }
+    run();
+    await sql.unsafe(`
+      INSERT INTO people (id, display_name, email) VALUES (9001, 'Linked Member', 'linked-member@example.com');
+      INSERT INTO reg_events (id, starts_at, capacity) VALUES
+        (801, '2026-08-01 09:00:00', 10), (802, '2031-05-01 09:00:00', NULL), (803, '2026-09-01 09:00:00', NULL);
+      INSERT INTO registrations (id, event_id, person_id, name, email, status) VALUES
+        (701, 801, 9001, 'First', 'first@example.com', 'confirmed'),
+        (702, 801, NULL, 'Second', 'second@example.com', 'cancelled'),
+        (703, 802, NULL, 'Third', 'third@example.com', 'pending'),
+        (704, 801, NULL, 'Fourth', 'fourth@example.com', 'pending');
+    `);
+    cpSync(join(repo, 'migrations-supabase/0042_registration_v2.sql'), join(scratch, 'migrations-supabase/0042_registration_v2.sql'));
+    run();
+  });
+  afterAll(async () => {
+    await sql?.end();
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it('gives existing registrations a legacy submission key and party size 1', async () => {
+    const rows = await sql.unsafe('SELECT id, submission_key, party_size FROM registrations ORDER BY id');
+    expect(rows.map((r) => [Number(r.id), r.submission_key, r.party_size])).toEqual([
+      [701, 'legacy-701', 1], [702, 'legacy-702', 1], [703, 'legacy-703', 1], [704, 'legacy-704', 1],
+    ]);
+    const [column] = await sql.unsafe(
+      "SELECT is_nullable FROM information_schema.columns WHERE table_name = 'registrations' AND column_name = 'submission_key'",
+    );
+    expect(column.is_nullable).toBe('NO');
+  });
+
+  it('numbers confirmations per event in id order with the start-year prefix and advances next_confirmation', async () => {
+    const rows = await sql.unsafe('SELECT id, confirmation_no FROM registrations ORDER BY id');
+    expect(rows.map((r) => [Number(r.id), r.confirmation_no])).toEqual([
+      [701, 'R26-0001'], [702, 'R26-0002'], [703, 'R31-0001'], [704, 'R26-0003'],
+    ]);
+    const events = await sql.unsafe('SELECT id, next_confirmation FROM reg_events ORDER BY id');
+    expect(events.map((r) => [Number(r.id), r.next_confirmation])).toEqual([[801, 4], [802, 2], [803, 1]]);
+  });
+
+  it('creates one attendee per registration, cancelled only when the registration was', async () => {
+    const rows = await sql.unsafe(
+      'SELECT registration_id, name, person_id, status, sort, campus_id FROM reg_attendees ORDER BY registration_id',
+    );
+    expect(rows.map((r) => [Number(r.registration_id), r.name, r.person_id === null ? null : Number(r.person_id), r.status, r.sort, r.campus_id])).toEqual([
+      [701, 'First', 9001, 'active', 0, 1],
+      [702, 'Second', null, 'cancelled', 0, 1],
+      [703, 'Third', null, 'active', 0, 1],
+      [704, 'Fourth', null, 'active', 0, 1],
+    ]);
   });
 });

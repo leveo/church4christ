@@ -759,8 +759,8 @@ export async function resolveRegistrationCheckoutRequest(
     db
       .prepare(
         `INSERT INTO registrations
-           (id, event_id, person_id, name, email, status, amount_cents, currency)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7)`,
+           (id, event_id, person_id, name, email, status, amount_cents, currency, submission_key)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7, ?8)`,
       )
       .bind(
         registrationId,
@@ -770,6 +770,7 @@ export async function resolveRegistrationCheckoutRequest(
         normalized.email,
         normalized.amountCents,
         normalized.currency,
+        `checkout-${registrationId}`,
       ),
   ];
   for (const [questionId, value] of normalized.answers) {

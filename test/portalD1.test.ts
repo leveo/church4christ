@@ -48,9 +48,9 @@ describe('migration 0039_member_portal_d1', () => {
     }
   });
 
-  it('keeps Registration tables off D1 and prayer_items.reg_event_id a plain column', async () => {
+  it('keeps prayer_items.reg_event_id a plain column (frozen 0039) and event_admins Postgres-only', async () => {
     const names = await tableNames();
-    for (const table of ['reg_events', 'reg_event_i18n', 'registrations', 'event_admins']) expect(names.has(table), table).toBe(false);
+    expect(names.has('event_admins')).toBe(false);
     const { results } = await env.DB.prepare('PRAGMA foreign_key_list(prayer_items)').all<{ from: string }>();
     expect(results.map((r) => r.from).sort()).toEqual(['approved_by', 'author_person_id', 'group_id']);
   });

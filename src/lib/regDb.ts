@@ -284,10 +284,10 @@ export async function createRegistration(
   const stmts: AppStatement[] = [
     db
       .prepare(
-        `INSERT INTO registrations (event_id, person_id, name, email, status, amount_cents, currency)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING id`,
+        `INSERT INTO registrations (event_id, person_id, name, email, status, amount_cents, currency, submission_key)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) RETURNING id`,
       )
-      .bind(input.eventId, input.personId, input.name, input.email, input.status, input.amountCents, input.currency),
+      .bind(input.eventId, input.personId, input.name, input.email, input.status, input.amountCents, input.currency, crypto.randomUUID()),
   ];
   for (const [questionId, value] of input.answers) {
     stmts.push(

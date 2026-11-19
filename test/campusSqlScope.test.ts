@@ -96,8 +96,6 @@ describe('campus SQL transformation', () => {
     expect(POSTGRES_ONLY_CAMPUS_SCOPED_TABLES).toEqual(expect.arrayContaining([
       'funds',
       'gifts',
-      'reg_events',
-      'registrations',
       'event_admins',
       'church_private.stripe_webhook_events',
       'church_private.stripe_checkout_requests',

@@ -17,11 +17,11 @@ describe('resolveProvider', () => {
     });
   });
 
-  it('keeps portal on D1 alone and on Supabase when giving or registration is also selected', () => {
+  it('keeps portal on D1 alone and on Supabase when giving is also selected', () => {
     expect(resolveProvider(['portal'], undefined, raw)).toMatchObject({ backend: 'd1', reasons: [] });
     expect(resolveProvider(['portal', 'serve', 'groups'], undefined, raw)).toMatchObject({ backend: 'd1' });
     expect(resolveProvider(['portal', 'giving'], undefined, raw)).toMatchObject({ backend: 'supabase' });
-    expect(resolveProvider(['portal', 'registration'], undefined, raw)).toMatchObject({ backend: 'supabase' });
+    expect(resolveProvider(['portal', 'registration'], undefined, raw)).toMatchObject({ backend: 'd1', reasons: [] });
     expect(resolveProvider(['portal'], 'supabase', raw)).toMatchObject({ backend: 'supabase' });
   });
 
@@ -32,23 +32,20 @@ describe('resolveProvider', () => {
     });
   });
 
-  it.each(['giving', 'registration'])(
-    'selects Supabase when %s is selected',
-    (key) => {
-      expect(resolveProvider([key], undefined, raw)).toMatchObject({
-        backend: 'supabase',
-        reasons: [{ capability: key, requiresBackend: 'supabase' }],
-      });
-    },
-  );
+  it('selects Supabase when giving is selected and keeps registration on D1', () => {
+    expect(resolveProvider(['giving'], undefined, raw)).toMatchObject({
+      backend: 'supabase',
+      reasons: [{ capability: 'giving', requiresBackend: 'supabase' }],
+    });
+    expect(resolveProvider(['registration'], undefined, raw)).toMatchObject({ backend: 'd1', reasons: [] });
+  });
 
   it('rejects D1 before mutation and lists every incompatible capability', () => {
     const selected = ['giving', 'registration'];
     const catalog = cloneCatalog();
-
-    expect(() => resolveProvider(selected, 'd1', catalog)).toThrow(
-      /giving, registration.*require Supabase/i,
-    );
+    // Only giving still needs Supabase; the message names it alone, never registration.
+    expect(() => resolveProvider(selected, 'd1', catalog)).toThrow(/giving.*requires? Supabase/i);
+    expect(() => resolveProvider(selected, 'd1', catalog)).not.toThrow(/registration/i);
     expect(selected).toEqual(['giving', 'registration']);
     expect(catalog).toEqual(raw);
   });

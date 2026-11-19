@@ -187,6 +187,8 @@ const HARD_CONFLICT_QUERIES: readonly HardConflictQuery[] = [
   { referenceKey: 'activity_score_config.updated_by_person_id', sql: () =>
     'SELECT COUNT(*) n FROM activity_score_config WHERE updated_by_person_id=?1' },
   { referenceKey: 'availability_windows.person_id', sql: () => 'SELECT COUNT(*) n FROM availability_windows WHERE person_id=?1' },
+  { referenceKey: 'registrations.person_id', sql: () => 'SELECT COUNT(*) n FROM registrations WHERE person_id=?1' },
+  { referenceKey: 'reg_attendees.person_id', sql: () => 'SELECT COUNT(*) n FROM reg_attendees WHERE person_id=?1' },
   { referenceKey: 'planning_event_coordinators.person_id', sql: () => 'SELECT COUNT(*) n FROM planning_event_coordinators WHERE person_id=?1' },
   { referenceKey: 'planning_items.owner_person_id', sql: () => 'SELECT COUNT(*) n FROM planning_items WHERE owner_person_id=?1' },
   { referenceKey: 'planning_session_people.person_id', sql: () => 'SELECT COUNT(*) n FROM planning_session_people WHERE person_id=?1' },
@@ -223,8 +225,6 @@ const HARD_CONFLICT_QUERIES: readonly HardConflictQuery[] = [
     ? 'SELECT COUNT(*) n FROM event_admins WHERE person_id=?1' : null },
   { referenceKey: 'gifts.person_id', sql: (backend) => backend === 'supabase'
     ? 'SELECT COUNT(*) n FROM gifts WHERE person_id=?1' : null },
-  { referenceKey: 'registrations.person_id', sql: (backend) => backend === 'supabase'
-    ? 'SELECT COUNT(*) n FROM registrations WHERE person_id=?1' : null },
   { referenceKey: 'stripe_customers.person_id', sql: (backend) => backend === 'supabase' ? 'SELECT COUNT(*) n FROM stripe_customers WHERE person_id=?1' : null },
   { referenceKey: 'recurring_gifts.person_id', sql: (backend) => backend === 'supabase' ? 'SELECT COUNT(*) n FROM recurring_gifts WHERE person_id=?1' : null },
 ] as const;

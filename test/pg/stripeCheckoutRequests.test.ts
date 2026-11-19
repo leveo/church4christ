@@ -282,8 +282,8 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
     const eventId = await event(1);
     const questionId = await question(eventId);
     await sql.unsafe(
-      `INSERT INTO registrations (event_id, name, email, status, amount_cents, currency)
-       VALUES ($1, 'Existing', 'existing@example.com', 'pending', 2500, 'usd')`,
+      `INSERT INTO registrations (event_id, name, email, status, amount_cents, currency, submission_key)
+       VALUES ($1, 'Existing', 'existing@example.com', 'pending', 2500, 'usd', 'fixture-existing')`,
       [eventId],
     );
 

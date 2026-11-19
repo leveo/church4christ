@@ -22,17 +22,9 @@ const SUPABASE_ONLY_TABLES = new Set([
   'stripe_customers',
   'giving_statement_outbox',
   'giving_audit_events',
-  // Registration
-  'reg_events',
-  'reg_event_i18n',
-  'reg_questions',
-  'reg_question_i18n',
-  'registrations',
-  'reg_answers',
-  // Member portal (group_files and prayer_items also exist on D1, migrations/0039)
+  // Member portal (group_files and prayer_items exist on D1, migrations/0039; the
+  // Registration tables and group_reg_events exist on D1, migrations/0050)
   'event_admins',
-  // Groups bridge available only on the Supabase schema
-  'group_reg_events',
 ]);
 
 // Private relations are qualified and deliberately separate from the public
@@ -44,13 +36,14 @@ const SUPABASE_ONLY_PRIVATE_RELATIONS = new Set([
 
 // Documented, intentional foreign-key divergences between the shared D1 and
 // PostgreSQL schemas. prayer_items.reg_event_id references reg_events on
-// PostgreSQL, but Registration is Supabase-only so D1 has no reg_events table;
-// D1 enforces foreign keys even for NULL, so the D1 column stays a plain INTEGER
-// (migrations/0039_member_portal_d1.sql). Add an entry here only with a reason.
+// PostgreSQL, but D1 created prayer_items before reg_events existed (frozen
+// migrations/0039_member_portal_d1.sql) and SQLite cannot add a foreign key to an
+// existing column, so the D1 column stays a plain INTEGER. Add an entry here only
+// with a reason.
 const PG_ONLY_FOREIGN_KEYS: ReadonlyMap<string, string> = new Map([
   [
     'prayer_items:foreign(reg_event_id)->reg_events(id)[delete=no action,update=no action]',
-    'reg_events is Supabase-only; D1 keeps reg_event_id as a plain column',
+    'frozen D1 migration 0039 predates reg_events; D1 keeps reg_event_id as a plain column',
   ],
 ]);
 

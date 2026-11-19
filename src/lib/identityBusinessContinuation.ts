@@ -746,13 +746,13 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
         // takes a PostgreSQL row lock and enters D1's serialized write
         // transaction before the capacity predicate is evaluated.
         db.prepare('UPDATE reg_events SET updated_at=updated_at WHERE id=?1').bind(child.event_id),
-        db.prepare(`INSERT INTO registrations(id,event_id,person_id,name,email,status,amount_cents,currency)
-          SELECT ?1,e.id,?3,?4,?5,'confirmed',0,?6 FROM reg_events e
+        db.prepare(`INSERT INTO registrations(id,event_id,person_id,name,email,status,amount_cents,currency,submission_key)
+          SELECT ?1,e.id,?3,?4,?5,'confirmed',0,?6,?8 FROM reg_events e
           WHERE e.id=?2 AND e.active=1 AND COALESCE(e.closes_at,e.starts_at)>?7
             AND COALESCE(e.price_cents,0)=0 AND lower(e.currency)=?6
             AND (e.capacity IS NULL OR (SELECT count(*) FROM registrations r
               WHERE r.event_id=e.id AND r.status IN ('pending','confirmed'))<e.capacity)`)
-          .bind(registrationId, child.event_id, auth.personId, owner.display_name, owner.email, child.currency, nowUtc(input.now)),
+          .bind(registrationId, child.event_id, auth.personId, owner.display_name, owner.email, child.currency, nowUtc(input.now), `continuation-${registrationId}`),
         ...answers.map(([questionId, answer]) => db.prepare('INSERT INTO reg_answers(registration_id,question_id,value) VALUES(?1,?2,?3)').bind(registrationId, questionId, answer)),
         db.prepare(`UPDATE identity_registration_continuations SET state='attached',registration_id=?1,claim_token_hash=NULL,claim_expires_at=NULL,updated_at=datetime('now') WHERE intent_id=?2 AND state='creating' AND claim_token_hash=?3`).bind(registrationId, input.intentId, claim.claimHash!),
         db.prepare(`INSERT INTO identity_business_intent_receipts(receipt_id,campus_id,intent_id,source_record_id,source_version,source_digest,person_id,business_record_key)

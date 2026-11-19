@@ -25,7 +25,7 @@ const TABLES_BY_CAPABILITY = Object.freeze({
   fellowships: Object.freeze([]),
   groups: Object.freeze([
     'groups', 'group_members', 'group_join_requests', 'group_events', 'group_event_occurrences',
-    'group_attendance', 'group_attendance_tokens',
+    'group_attendance', 'group_attendance_tokens', 'group_reg_events',
     'fellowships', 'fellowship_groups', 'fellowship_members', 'workflow_templates', 'workflow_runs', 'workflow_tasks',
   ]),
   people: Object.freeze([
@@ -47,10 +47,11 @@ const TABLES_BY_CAPABILITY = Object.freeze({
   'page-builder': Object.freeze(['custom_pages', 'custom_page_i18n', 'revisions']),
   portal: Object.freeze([
     'group_members', 'group_files', 'prayer_items', 'households', 'household_members',
+    'reg_events', 'reg_event_i18n', 'registrations',
   ]),
   giving: Object.freeze(['funds', 'fund_i18n', 'gifts', 'recurring_gifts', 'stripe_customers', 'giving_statement_outbox', 'giving_audit_events', 'households', 'household_members', 'identity_giving_checkout_continuations']),
   registration: Object.freeze([
-    'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers', 'identity_registration_continuations',
+    'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers', 'reg_attendees', 'identity_registration_continuations',
   ]),
   planning: Object.freeze([
     'planning_events', 'planning_event_coordinators', 'planning_items', 'planning_sessions',
@@ -77,9 +78,8 @@ const PRIVATE_TABLES_BY_CAPABILITY = Object.freeze({
   ]),
 });
 const SUPABASE_TABLES_BY_CAPABILITY = Object.freeze({
-  groups: Object.freeze(['group_reg_events']),
-  // Event-scope prayers and "My registrations" need Registration, which is Supabase-only.
-  portal: Object.freeze(['event_admins', 'reg_events', 'reg_event_i18n', 'registrations']),
+  // event_admins (event-scope prayer moderation) has no D1 counterpart.
+  portal: Object.freeze(['event_admins']),
 });
 
 function rows(value, label) {

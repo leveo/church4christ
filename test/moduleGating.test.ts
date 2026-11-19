@@ -62,12 +62,17 @@ describe('getEnabledModules', () => {
 });
 
 describe('getEnabledModules — backend gating', () => {
-  it("never contains giving/registration on 'd1', even when their settings rows are '1'", async () => {
+  it("never contains giving on 'd1', even when its settings row is '1'", async () => {
     await setSetting(env.DB, 'module.giving', '1');
-    await setSetting(env.DB, 'module.registration', '1');
     const enabled = await getEnabledModules(env.DB, 'd1');
     expect(enabled.has('giving')).toBe(false);
-    expect(enabled.has('registration')).toBe(false);
+  });
+
+  it("contains registration on 'd1' unless its settings row is '0' (existing installs stay off via migration 0050)", async () => {
+    expect((await getEnabledModules(env.DB, 'd1')).has('registration')).toBe(true);
+    await setSetting(env.DB, 'module.registration', '0');
+    clearModuleCache();
+    expect((await getEnabledModules(env.DB, 'd1')).has('registration')).toBe(false);
   });
 
   it("contains giving/registration by default on 'supabase'", async () => {
