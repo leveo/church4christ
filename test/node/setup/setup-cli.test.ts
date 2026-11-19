@@ -110,10 +110,10 @@ describe('guided setup CLI', () => {
     expect(d.apply).not.toHaveBeenCalled();
   });
 
-  it('D1 override plus giving/registration lists all offenders before mutation', async () => {
+  it('D1 override plus giving names the offender and ignores D1-capable registration before mutation', async () => {
     const d = deps();
     await expect(runSetup(['--mode', 'local', '--modules', 'giving,registration', '--backend', 'd1', '--site-slug', 'bad', '--church-name', 'Bad', '--locale', 'en', '--admin-name', 'Admin', '--admin-email', 'admin@example.test', '--yes'], d as any))
-      .rejects.toThrow(/giving, registration/);
+      .rejects.toThrow(/giving require Supabase and cannot run on d1/i);
     expect(d.apply).not.toHaveBeenCalled();
   });
 

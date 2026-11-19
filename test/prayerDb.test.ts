@@ -139,7 +139,7 @@ async function seedEvent(id: number, titleEn: string): Promise<void> {
   await env.DB.prepare(`INSERT INTO reg_event_i18n (event_id, locale, title) VALUES (?, 'en', ?)`).bind(id, titleEn).run();
 }
 async function register(eventId: number, personId: number | null, email: string, status = 'confirmed'): Promise<void> {
-  await env.DB.prepare(`INSERT INTO registrations (event_id, person_id, name, email, status) VALUES (?, ?, 'Reg', ?, ?)`).bind(eventId, personId, email, status).run();
+  await env.DB.prepare(`INSERT INTO registrations (event_id, person_id, name, email, status, submission_key) VALUES (?, ?, 'Reg', ?, ?, ?)`).bind(eventId, personId, email, status, crypto.randomUUID()).run();
 }
 async function insertPrayer(opts: {
   author?: number;

@@ -64,6 +64,7 @@ const SUPABASE_MIGRATIONS = [
   '0039_giving_production.sql',
   '0040_service_planning.sql',
   '0041_supported_locales.sql',
+  '0042_registration_v2.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });
@@ -386,15 +387,13 @@ describe('doctor database check', () => {
     expect(Object.keys(TABLES_BY_CAPABILITY).sort()).toEqual([...catalog.order].sort());
     expect(ALWAYS_REQUIRED_TABLES).toEqual(expect.arrayContaining(['people', 'settings', 'media', 'tokens']));
     expect(TABLES_BY_CAPABILITY.registration).toEqual(expect.arrayContaining([
-      'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers',
+      'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers', 'reg_attendees',
     ]));
     expect(TABLES_BY_CAPABILITY.portal).toEqual(expect.arrayContaining([
       'group_members', 'group_files', 'prayer_items', 'households', 'household_members',
     ]));
-    expect(TABLES_BY_CAPABILITY.portal).not.toContain('event_admins');
-    expect(SUPABASE_TABLES_BY_CAPABILITY.portal).toEqual([
-      'event_admins', 'reg_events', 'reg_event_i18n', 'registrations',
-    ]);
+    expect(TABLES_BY_CAPABILITY.portal).toEqual(expect.arrayContaining(['reg_events', 'reg_event_i18n', 'registrations', 'event_admins']));
+    expect(SUPABASE_TABLES_BY_CAPABILITY.portal).toBeUndefined();
     expect(TABLES_BY_CAPABILITY.giving).toEqual(expect.arrayContaining(['funds', 'fund_i18n', 'gifts', 'recurring_gifts', 'households', 'household_members']));
     expect(TABLES_BY_CAPABILITY.children).toEqual(expect.arrayContaining(['checkin_events', 'checkins', 'households', 'household_members']));
     expect(TABLES_BY_CAPABILITY.attendance).toEqual([
@@ -413,7 +412,8 @@ describe('doctor database check', () => {
       ...GOOGLE_CLASSROOM_TABLES,
       ...CANVAS_TABLES,
     ]));
-    expect(SUPABASE_TABLES_BY_CAPABILITY.groups).toEqual(['group_reg_events']);
+    expect(TABLES_BY_CAPABILITY.groups).toContain('group_reg_events');
+    expect(SUPABASE_TABLES_BY_CAPABILITY.groups).toBeUndefined();
     const full = { ...baseManifest, preset: 'full-church', modules: [...catalog.order], database: 'supabase', resources: { d1DatabaseName: null, d1DatabaseId: null, r2BucketName: 'grace-church-media', hyperdriveId: 'local' } } as const;
     const allTables = [...new Set([...ALWAYS_REQUIRED_TABLES, ...Object.values(TABLES_BY_CAPABILITY).flat(), ...Object.values(SUPABASE_TABLES_BY_CAPABILITY).flat()])];
     const allRelations = [

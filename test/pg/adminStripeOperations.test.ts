@@ -188,8 +188,8 @@ describe.skipIf(!hasPg)('Stripe admin operations (Postgres)', () => {
   it('paginates bounded Checkout request projections without request JSON, email, secrets, or URLs', async () => {
     const [event] = await sql.unsafe(`INSERT INTO reg_events (starts_at,price_cents,currency) VALUES (datetime('now','+1 day'),2500,'usd') RETURNING id`);
     const [registration] = await sql.unsafe(`
-      INSERT INTO registrations (event_id,name,email,status,amount_cents,currency)
-      VALUES ($1,'Private Person','private@example.test','pending',2500,'usd') RETURNING id
+      INSERT INTO registrations (event_id,name,email,status,amount_cents,currency,submission_key)
+      VALUES ($1,'Private Person','private@example.test','pending',2500,'usd','fixture-private') RETURNING id
     `, [event.id]);
     await sql.unsafe(`
       INSERT INTO church_private.stripe_checkout_requests
@@ -216,8 +216,8 @@ describe.skipIf(!hasPg)('Stripe admin operations (Postgres)', () => {
       VALUES (datetime('now','+2 days'),12,2500,'usd') RETURNING id
     `);
     await sql.unsafe(`
-      INSERT INTO registrations (event_id,name,email,status,amount_cents,currency)
-      VALUES ($1,'Seat Holder','seat-holder@example.test','pending',2500,'usd')
+      INSERT INTO registrations (event_id,name,email,status,amount_cents,currency,submission_key)
+      VALUES ($1,'Seat Holder','seat-holder@example.test','pending',2500,'usd','fixture-seat')
     `, [domainEvent.id]);
     await insertEvent('evt_test_admin_still_replayable', 'failed', new Date(expiredAt.getTime() + 1_000));
     await insertEvent('evt_test_admin_expired', 'failed', expiredAt);

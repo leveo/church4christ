@@ -21,7 +21,10 @@ import {
   type CheckoutRequestResolution,
 } from './stripeCheckoutRequests';
 import { classifyRegistrationCheckoutFailure } from './registrationCheckoutFailure';
-import { listQuestions, validateAnswers, type RegEvent, type RegQuestion } from './regDb';
+import {
+  listQuestions, readRegistrationInsert, registrationInsertStatements, seatsTakenSql, validateAnswers,
+  type CreatedRegistration, type RegEvent, type RegQuestion, type RegStatus,
+} from './regDb';
 import { sha256Utf8 } from './stripeWebhookInbox';
 import { newCheckoutRequestId, parseCheckoutRequestId } from './stripeCheckoutRequests';
 
@@ -665,10 +668,17 @@ export async function continuePaidRegistrationCheckout(
   }
 }
 
+async function savedRegistrationStatus(db: AppDb, registrationId: number): Promise<RegStatus | undefined> {
+  const row = await db.prepare('SELECT status FROM registrations WHERE id=?1').bind(registrationId).first<{ status: RegStatus }>();
+  return row?.status;
+}
+
 export async function completeRegistrationContinuation(db: AppDb, env: IdentityBusinessContinuationEnv, input: {
   campusId: number; intentId: string; publicId: string; code: string; appOrigin: string; now?: string;
 }): Promise<{ status: 'done' | 'redirect' | 'waiting' | 'review' | 'invalid'; personId?: number; sessionEpoch?: number;
-  resolution?: CheckoutRequestResolution; replay?: true }> {
+  resolution?: CheckoutRequestResolution; replay?: true;
+  /** For a free 'done' result: the registration's status ('waitlist' when the event filled up first). */
+  registrationStatus?: RegStatus }> {
   if (!validId(input.campusId) || !validIntentId(input.intentId)) return { status: 'invalid' };
   const intent = await loadRegistrationContinuation(db, input.campusId, input.intentId);
   if (!intent) return { status: 'invalid' };
@@ -692,7 +702,10 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
     if (resolution.kind === 'create') resolution = await continuePaidRegistrationCheckout(db, env, resolution, intent.event_id);
     if (resolution.kind === 'conflict' || resolution.kind === 'expired') return { status: 'invalid' };
     if (resolution.kind === 'review') return { status: 'waiting', personId: auth.personId, sessionEpoch: auth.sessionEpoch, resolution };
-    return resolution.kind === 'done' ? { status: 'done', personId: auth.personId, sessionEpoch: auth.sessionEpoch, resolution, replay: true }
+    return resolution.kind === 'done' ? {
+      status: 'done', personId: auth.personId, sessionEpoch: auth.sessionEpoch, resolution, replay: true,
+      ...(intent.checkout_request_id ? {} : { registrationStatus: await savedRegistrationStatus(db, intent.registration_id) }),
+    }
       : resolution.kind === 'redirect' ? { status: 'redirect', personId: auth.personId, sessionEpoch: auth.sessionEpoch, resolution, replay: true }
         : { status: 'waiting', personId: auth.personId, sessionEpoch: auth.sessionEpoch, resolution };
   }
@@ -701,7 +714,8 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
   if (claim.status === 'done') {
     const saved = await db.prepare('SELECT registration_id FROM identity_registration_continuations WHERE intent_id=?1').bind(input.intentId).first<{ registration_id: number | null }>();
     return saved?.registration_id !== null && saved?.registration_id !== undefined
-      ? { status: 'done', personId: auth.personId, sessionEpoch: auth.sessionEpoch, replay: true }
+      ? { status: 'done', personId: auth.personId, sessionEpoch: auth.sessionEpoch, replay: true,
+        registrationStatus: await savedRegistrationStatus(db, saved.registration_id) }
       : { status: 'waiting', personId: auth.personId, sessionEpoch: auth.sessionEpoch };
   }
   const child = await db.prepare('SELECT event_id,amount_cents,currency,locale,answers_json,question_digest,checkout_request_id FROM identity_registration_continuations WHERE intent_id=?1')
@@ -740,20 +754,21 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
   if (!owner) { await release().run(); return { status: 'invalid' }; }
   if (child.amount_cents === 0) {
     const registrationId = databaseId();
+    let created: CreatedRegistration | null;
     try {
-      await db.batch([
-        // This harmless write is the portable per-event capacity mutex: it
-        // takes a PostgreSQL row lock and enters D1's serialized write
-        // transaction before the capacity predicate is evaluated.
-        db.prepare('UPDATE reg_events SET updated_at=updated_at WHERE id=?1').bind(child.event_id),
-        db.prepare(`INSERT INTO registrations(id,event_id,person_id,name,email,status,amount_cents,currency)
-          SELECT ?1,e.id,?3,?4,?5,'confirmed',0,?6 FROM reg_events e
-          WHERE e.id=?2 AND e.active=1 AND COALESCE(e.closes_at,e.starts_at)>?7
-            AND COALESCE(e.price_cents,0)=0 AND lower(e.currency)=?6
-            AND (e.capacity IS NULL OR (SELECT count(*) FROM registrations r
-              WHERE r.event_id=e.id AND r.status IN ('pending','confirmed'))<e.capacity)`)
-          .bind(registrationId, child.event_id, auth.personId, owner.display_name, owner.email, child.currency, nowUtc(input.now)),
-        ...answers.map(([questionId, answer]) => db.prepare('INSERT INTO reg_answers(registration_id,question_id,value) VALUES(?1,?2,?3)').bind(registrationId, questionId, answer)),
+      const results = await db.batch([
+        // The shared registration writer: per-event lock + confirmation number,
+        // the capacity-or-waitlist decision in SQL, the attendee and the answers.
+        // The guard keeps this path's own conditions (still active, not closed,
+        // free, same currency). When the event is full and has no waitlist nothing
+        // is inserted, and the foreign key on registration_id below aborts the
+        // whole batch (counter included) - handled in the catch.
+        ...registrationInsertStatements(db, {
+          id: registrationId, eventId: child.event_id, personId: auth.personId,
+          name: owner.display_name, email: owner.email, status: 'confirmed',
+          amountCents: 0, currency: child.currency, submissionKey: `continuation:${input.intentId}`,
+          allowWaitlist: true, answers, guard: { now: nowUtc(input.now), currency: child.currency },
+        }),
         db.prepare(`UPDATE identity_registration_continuations SET state='attached',registration_id=?1,claim_token_hash=NULL,claim_expires_at=NULL,updated_at=datetime('now') WHERE intent_id=?2 AND state='creating' AND claim_token_hash=?3`).bind(registrationId, input.intentId, claim.claimHash!),
         db.prepare(`INSERT INTO identity_business_intent_receipts(receipt_id,campus_id,intent_id,source_record_id,source_version,source_digest,person_id,business_record_key)
           VALUES(?1,?2,?3,?4,?5,?6,?7,?8)`).bind(crypto.randomUUID(), intent.campus_id, intent.intent_id, intent.source_record_id, intent.source_version, intent.source_digest, auth.personId, String(registrationId)),
@@ -761,15 +776,16 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
           signup_delivery_count=0,signup_delivery_not_before=NULL,updated_at=datetime('now') WHERE intent_id=?2 AND state='ready' AND result_person_id=?3`).bind(String(registrationId), input.intentId, auth.personId),
         db.prepare(`UPDATE identity_registration_continuations SET state='consumed',updated_at=datetime('now') WHERE intent_id=?1 AND registration_id=?2`).bind(input.intentId, registrationId),
       ]);
+      created = readRegistrationInsert(results);
     } catch (error) {
       await db.prepare(`UPDATE identity_registration_continuations SET state='ready',claim_token_hash=NULL,claim_expires_at=NULL,updated_at=datetime('now') WHERE intent_id=?1 AND state='creating' AND claim_token_hash=?2`).bind(input.intentId, claim.claimHash!).run();
-      const capacity = await db.prepare(`SELECT e.capacity,(SELECT count(*) FROM registrations r
-        WHERE r.event_id=e.id AND r.status IN ('pending','confirmed')) taken FROM reg_events e WHERE e.id=?1`)
+      const capacity = await db.prepare(`SELECT e.capacity,${seatsTakenSql('e.id')} taken FROM reg_events e WHERE e.id=?1`)
         .bind(child.event_id).first<{ capacity: number | null; taken: number }>();
       if (capacity && capacity.capacity !== null && capacity.taken >= capacity.capacity) return { status: 'invalid' };
       return { status: 'waiting', personId: auth.personId, sessionEpoch: auth.sessionEpoch };
     }
-    return { status: 'done', personId: auth.personId, sessionEpoch: auth.sessionEpoch };
+    return { status: 'done', personId: auth.personId, sessionEpoch: auth.sessionEpoch,
+      registrationStatus: created?.status ?? await savedRegistrationStatus(db, registrationId) };
   }
   if (!child.checkout_request_id) return { status: 'invalid' };
   let resolution: CheckoutRequestResolution;

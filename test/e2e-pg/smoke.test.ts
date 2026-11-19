@@ -94,15 +94,17 @@ describe('Postgres-backed worker: public render path', () => {
     expect(body).not.toContain('name="email"');
   });
 
-  it('/en/register renders the open-events list empty state (no reg events seeded)', async () => {
-    // registration is Supabase-only and defaults ON, so /register renders over
-    // Postgres via listOpenEvents(). The seed lands no reg_events, so this
-    // exercises the query returning empty and the page's empty-state markup.
+  it('/en/register lists the seeded open and preview events over Postgres', async () => {
+    // registration defaults ON, so /register renders over Postgres via
+    // listPublicEvents(). dev-seed.sql lands one open event (920) and one preview
+    // event (930) whose registration opens later.
     const res = await get('/en/register');
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('Event registration'); // register.title heading
-    expect(body).toContain('No events are open for registration right now'); // register.empty
+    expect(body).toContain('Neighbors Potluck Night'); // open event 920
+    expect(body).toContain('Community Picnic'); // preview event 930
+    expect(body).not.toContain('No events are open for registration right now'); // register.empty
   });
 
   it('/en/my/giving: anon → 303 to signin (route policy /my is authed)', async () => {

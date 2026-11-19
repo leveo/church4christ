@@ -60,8 +60,8 @@ and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing
 launch and during operation.
 
 > **One choice to know about: your database.** The **D1** filing cabinet above is the
-> default for 20 modules. **Giving** and **Registration** need Postgres,
-> so setup selects **Supabase** when either is enabled. Local D1 needs no external
+> default for 21 modules. **Giving** and *paid* **Registration** need Postgres. Setup selects **Supabase**
+> when Giving is enabled. Free **Registration** runs on D1. Local D1 needs no external
 > account; deployed D1 needs Cloudflare. Local Supabase needs a local or hosted Supabase
 > database; deployed Supabase needs both Cloudflare and Supabase. There is no automated
 > D1↔Supabase content migration yet, so choose before entering production content.
@@ -136,7 +136,7 @@ Every one of these is spelled out, with the exact text to type, in
 [`deploy.md`](./deploy.md).
 
 **Stripe is Supabase-only and starts in test mode.** D1 does not support Giving,
-Registration, or Stripe operations. If your selected Supabase features accept payments,
+paid Registration, or Stripe operations. If your selected Supabase features accept payments,
 provide test credentials as one-shot inputs when you run setup:
 
 ```bash

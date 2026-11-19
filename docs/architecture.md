@@ -129,7 +129,7 @@ run on either of two databases:
 | `page-builder` | Page Builder | 页面编辑器 | Either |
 | `portal` | Member Portal | 会友平台 | Either |
 | `giving` | Giving | 奉献 | Supabase |
-| `registration` | Registration | 活动报名 | Supabase |
+| `registration` | Registration | 活动报名 | Either |
 | `learning` | Learning | 学习 | Either |
 | `planning` | Service Planning | 服事流程 | Either |
 <!-- capabilities:end -->
@@ -144,11 +144,12 @@ requests) whose `end()` drains it after the response. The middleware opens this 
 request and hands the page `locals.db` and `locals.dbBackend` (`src/middleware.ts`); the
 `scheduled` handler opens its own for the cron jobs that touch data.
 
-**Two modules require Postgres.** `giving` and `registration` are marked
+**One module requires Postgres, and one needs it for payments.** `giving` is marked
 `requiresBackend: 'supabase'` in `src/lib/modules.ts`, and `getEnabledModules` force-disables
-any such module on a mismatched backend — so both stay off on D1 even when their
-settings row says on. `portal` runs on either backend; its Registration-dependent parts
-are gated on `modules.has('registration')`. See [`docs/supabase-setup.md`](supabase-setup.md) and
+any such module on a mismatched backend, so it stays off on D1 even when its
+settings row says on. `registration` runs on both: free events work on D1, and D1
+refuses a priced event because paid checkout needs Stripe on Postgres. `portal` runs on either backend; its
+Registration-dependent parts are gated on `modules.has('registration')`. See [`docs/supabase-setup.md`](supabase-setup.md) and
 [`docs/features/giving.md`](features/giving.md).
 
 ## Portability and operations
@@ -192,7 +193,7 @@ the provider-specific D1 backup or Supabase Stripe recovery job.
 | `0 * * * *` | D1 and Supabase | Hourly group-attendance tracking email; skips when Groups is disabled |
 | `15,45 * * * *` | D1 and Supabase | Split Learning work: `:15` tries one durable Canvas token revocation then Google Classroom registration cleanup/renewal; `:45` fairly reconciles one active mapped course; disabled or unconfigured providers skip safely |
 | `0 9 * * *` | D1 only | Export D1 → `backups/YYYY-MM-DD.sql` in R2 |
-| `*/5 * * * *` | Supabase only | Stripe webhook inbox and Checkout recovery, then a bounded drain of the giving-statement outbox; processing honors enabled Giving and Registration modules |
+| `*/5 * * * *` | Supabase only | Stripe webhook inbox and Checkout recovery, then a bounded drain of the giving-statement outbox; processing honors enabled Giving and (paid) Registration modules |
 
 The backup **skips gracefully** (logs a line, no error) when its account/database/token
 config is absent, so the demo deploy runs all its crons without backups configured. See

@@ -128,8 +128,8 @@ beforeAll(async () => {
     if (!event) throw new Error('stripe_e2e_recovery_event_missing');
     recoveryEventId = event.id;
     const registration = await db.prepare(`
-      INSERT INTO registrations (event_id,name,email,status,amount_cents,currency)
-      VALUES (?1,'Private Checkout Person',?2,'pending',2500,'usd') RETURNING id
+      INSERT INTO registrations (event_id,name,email,status,amount_cents,currency,submission_key)
+      VALUES (?1,'Private Checkout Person',?2,'pending',2500,'usd','fixture-webhook') RETURNING id
     `).bind(event.id, CHECKOUT_EMAIL_MARKER).first<{ id: number }>();
     if (!registration) throw new Error('stripe_e2e_recovery_registration_missing');
     await db.prepare(`

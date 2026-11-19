@@ -94,8 +94,8 @@ describe.skipIf(!hasPg)('activity score DB (PostgreSQL)', () => {
         VALUES (24, 22, 2, 'C');
 
       INSERT INTO reg_events (id, starts_at, active) VALUES (30, '2026-06-03 18:00:00', 1);
-      INSERT INTO registrations (id, event_id, person_id, name, email, status)
-        VALUES (31, 30, 2, 'Member', 'pg-score-member@example.com', 'confirmed');
+      INSERT INTO registrations (id, event_id, person_id, name, email, status, submission_key)
+        VALUES (31, 30, 2, 'Member', 'pg-score-member@example.com', 'confirmed', 'fixture-31');
     `);
 
     expect(await listGroupAttendanceEvidence(db, '2026-06-01', '2026-06-30')).toEqual([

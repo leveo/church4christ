@@ -52,7 +52,7 @@ ones you do not need and click **Save modules** — the change takes effect imme
 | `page-builder` | Page Builder | 页面编辑器 | Either |
 | `portal` | Member Portal | 会友平台 | Either |
 | `giving` | Giving | 奉献 | Supabase |
-| `registration` | Registration | 活动报名 | Supabase |
+| `registration` | Registration | 活动报名 | Either |
 | `learning` | Learning | 学习 | Either |
 | `planning` | Service Planning | 服事流程 | Either |
 <!-- capabilities:end -->
@@ -64,13 +64,14 @@ the credential key ring, authorize Google Classroom or Canvas, map courses, and 
 For the `learning` provider/privacy boundary and screenshots, see **[Learning](learning.md)** and
 the [deployment runbook](../deploy.md#learning-module-and-shared-credential-key-ring).
 
-**Giving and Registration need the Supabase database.** They run
+**Giving needs the Supabase database, and so does paid Registration.** Giving runs
 only on the optional **Supabase** backend (see
 [`docs/supabase-setup.md`](../supabase-setup.md)) — a church on the default Cloudflare **D1**
-database sees their checkboxes **greyed out** in the Modules panel with a note explaining
-why, and their pages simply do not exist (404) on D1. Member Portal runs on either
+database sees its checkbox **greyed out** in the Modules panel with a note explaining
+why, and its pages simply do not exist (404) on D1. **Registration** runs on D1 for free events;
+the price field is disabled there, and an upgraded D1 church keeps it off until an admin enables it. Member Portal runs on either
 database; on D1 its event-related parts (event-scope prayers, event administrators, and
-"My registrations") are hidden because they depend on Registration. Every
+"My registrations") stay hidden until Registration is enabled. Every
 other module works the same on either database.
 
 **What happens when a module is off.** The capability is hidden everywhere at once, not
@@ -123,7 +124,7 @@ soft-degrade so an off module never leaves a dangling reference.
   `src/lib/modules.ts` for runtime use. It maps each of the 21 keys to the locale-stripped
   route prefixes it owns (public and admin), its
   nav dictionary keys, its soft `uses` (degrade-only, never a hard gate), and an optional
-  `requiresBackend: 'supabase'` for Giving and Registration. `moduleForPath` is the
+  `requiresBackend: 'supabase'` for Giving (Registration has none: free events run on D1, and D1 refuses a priced event). `moduleForPath` is the
   classifier — longest matching prefix wins, so `/serve/gifts` resolves to `gifts` even
   though `/serve` also matches.
 - **Authoring-only exception:** `page-builder` owns only its `/admin/pages/builder` admin

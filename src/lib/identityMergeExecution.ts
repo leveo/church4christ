@@ -150,9 +150,9 @@ const RISK_QUERIES: readonly StaticRiskQuery[] = [
       ON a.person_id=?1 AND b.person_id=?2 AND a.is_current=1 AND b.is_current=1
       AND ((a.legacy_email_key IS NOT NULL AND a.legacy_email_key=b.legacy_email_key)
         OR (a.normalized_name_key IS NOT NULL AND a.normalized_name_key=b.normalized_name_key))) THEN 1 ELSE 0 END n` },
-  { category: 'event_admin', countSql: (backend) => backend === 'supabase' ? personCount('event_admins') : zeroCount,
-    collisionSql: (backend) => backend === 'supabase' ? `SELECT COUNT(*) n FROM event_admins a JOIN event_admins b
-      ON a.reg_event_id=b.reg_event_id WHERE a.person_id=?1 AND b.person_id=?2` : zeroCollision },
+  { category: 'event_admin', countSql: () => personCount('event_admins'),
+    collisionSql: () => `SELECT COUNT(*) n FROM event_admins a JOIN event_admins b
+      ON a.reg_event_id=b.reg_event_id WHERE a.person_id=?1 AND b.person_id=?2` },
 ] as const;
 
 type HardConflictQuery = Readonly<{ referenceKey: string; sql: (backend: SnapshotBackend) => string | null }>;
@@ -187,6 +187,8 @@ const HARD_CONFLICT_QUERIES: readonly HardConflictQuery[] = [
   { referenceKey: 'activity_score_config.updated_by_person_id', sql: () =>
     'SELECT COUNT(*) n FROM activity_score_config WHERE updated_by_person_id=?1' },
   { referenceKey: 'availability_windows.person_id', sql: () => 'SELECT COUNT(*) n FROM availability_windows WHERE person_id=?1' },
+  { referenceKey: 'registrations.person_id', sql: () => 'SELECT COUNT(*) n FROM registrations WHERE person_id=?1' },
+  { referenceKey: 'reg_attendees.person_id', sql: () => 'SELECT COUNT(*) n FROM reg_attendees WHERE person_id=?1' },
   { referenceKey: 'planning_event_coordinators.person_id', sql: () => 'SELECT COUNT(*) n FROM planning_event_coordinators WHERE person_id=?1' },
   { referenceKey: 'planning_items.owner_person_id', sql: () => 'SELECT COUNT(*) n FROM planning_items WHERE owner_person_id=?1' },
   { referenceKey: 'planning_session_people.person_id', sql: () => 'SELECT COUNT(*) n FROM planning_session_people WHERE person_id=?1' },
@@ -219,12 +221,9 @@ const HARD_CONFLICT_QUERIES: readonly HardConflictQuery[] = [
   { referenceKey: 'roster_assignments.person_id', sql: () => 'SELECT COUNT(*) n FROM roster_assignments WHERE person_id=?1' },
   { referenceKey: 'team_applications.person_id', sql: () => 'SELECT COUNT(*) n FROM team_applications WHERE person_id=?1' },
   { referenceKey: 'testimonies.person_id', sql: () => 'SELECT COUNT(*) n FROM testimonies WHERE person_id=?1' },
-  { referenceKey: 'event_admins.person_id', sql: (backend) => backend === 'supabase'
-    ? 'SELECT COUNT(*) n FROM event_admins WHERE person_id=?1' : null },
+  { referenceKey: 'event_admins.person_id', sql: () => 'SELECT COUNT(*) n FROM event_admins WHERE person_id=?1' },
   { referenceKey: 'gifts.person_id', sql: (backend) => backend === 'supabase'
     ? 'SELECT COUNT(*) n FROM gifts WHERE person_id=?1' : null },
-  { referenceKey: 'registrations.person_id', sql: (backend) => backend === 'supabase'
-    ? 'SELECT COUNT(*) n FROM registrations WHERE person_id=?1' : null },
   { referenceKey: 'stripe_customers.person_id', sql: (backend) => backend === 'supabase' ? 'SELECT COUNT(*) n FROM stripe_customers WHERE person_id=?1' : null },
   { referenceKey: 'recurring_gifts.person_id', sql: (backend) => backend === 'supabase' ? 'SELECT COUNT(*) n FROM recurring_gifts WHERE person_id=?1' : null },
 ] as const;

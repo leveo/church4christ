@@ -76,14 +76,14 @@ INSERT INTO reg_question_i18n (question_id, locale, label) VALUES
 -- fake succeeded Checkout session + payment intent, amount 2500) and two PENDING
 -- ones (a Checkout session attached but not yet paid — payment_intent NULL — the
 -- state that holds a seat until Stripe confirms or the session expires).
-INSERT INTO registrations (id, event_id, person_id, name, email, status, amount_cents, currency, stripe_checkout_session_id, stripe_payment_intent_id, created_at) VALUES
-  (900, 900, 3, 'Sarah Johnson', 'sarah.johnson@example.com', 'confirmed', 0, 'usd', NULL, NULL, datetime('now','-8 days')),
-  (901, 900, 5, 'Mark Liu', 'mark.liu@example.com', 'confirmed', 0, 'usd', NULL, NULL, datetime('now','-6 days')),
-  (902, 900, NULL, 'Rebecca Adams', 'rebecca.adams@example.com', 'confirmed', 0, 'usd', NULL, NULL, datetime('now','-5 days')),
-  (910, 910, 7, 'Amy Chen', 'amy.chen@example.com', 'confirmed', 2500, 'usd', 'cs_test_reg001', 'pi_test_reg001', datetime('now','-7 days')),
-  (911, 910, 2, 'David Chen', 'pastor.david@example.com', 'confirmed', 2500, 'usd', 'cs_test_reg002', 'pi_test_reg002', datetime('now','-7 days')),
-  (912, 910, 4, 'Grace Lin', 'grace.lin@example.com', 'pending', 2500, 'usd', 'cs_test_reg003', NULL, datetime('now','-2 days')),
-  (913, 910, 8, 'Ben Wu', 'ben.wu@example.com', 'pending', 2500, 'usd', 'cs_test_reg004', NULL, datetime('now','-1 days'));
+INSERT INTO registrations (id, event_id, person_id, name, email, status, amount_cents, currency, stripe_checkout_session_id, stripe_payment_intent_id, created_at, submission_key, confirmation_no) VALUES
+  (900, 900, 3, 'Sarah Johnson', 'sarah.johnson@example.com', 'confirmed', 0, 'usd', NULL, NULL, datetime('now','-8 days'), 'seed-reg-900', 'RET-0001'),
+  (901, 900, 5, 'Mark Liu', 'mark.liu@example.com', 'confirmed', 0, 'usd', NULL, NULL, datetime('now','-6 days'), 'seed-reg-901', 'RET-0002'),
+  (902, 900, NULL, 'Rebecca Adams', 'rebecca.adams@example.com', 'confirmed', 0, 'usd', NULL, NULL, datetime('now','-5 days'), 'seed-reg-902', 'RET-0003'),
+  (910, 910, 7, 'Amy Chen', 'amy.chen@example.com', 'confirmed', 2500, 'usd', 'cs_test_reg001', 'pi_test_reg001', datetime('now','-7 days'), 'seed-reg-910', 'DIN-0001'),
+  (911, 910, 2, 'David Chen', 'pastor.david@example.com', 'confirmed', 2500, 'usd', 'cs_test_reg002', 'pi_test_reg002', datetime('now','-7 days'), 'seed-reg-911', 'DIN-0002'),
+  (912, 910, 4, 'Grace Lin', 'grace.lin@example.com', 'pending', 2500, 'usd', 'cs_test_reg003', NULL, datetime('now','-2 days'), 'seed-reg-912', 'DIN-0003'),
+  (913, 910, 8, 'Ben Wu', 'ben.wu@example.com', 'pending', 2500, 'usd', 'cs_test_reg004', NULL, datetime('now','-1 days'), 'seed-reg-913', 'DIN-0004');
 
 -- Answers, keyed to the exact registration + question ids above. Select values are
 -- among each question's options, yes/no is normalized 'yes'/'no', and optional
@@ -110,3 +110,11 @@ INSERT INTO reg_answers (registration_id, question_id, value) VALUES
   (912, 911, 'Vegetarian'),
   (913, 911, 'Chicken'),
   (913, 912, 'Peanut allergy');
+
+-- One attendee per registration (the party model), status mirroring the registration.
+INSERT INTO reg_attendees (registration_id, sort, name, person_id, status)
+SELECT id, 0, name, person_id, 'active' FROM registrations WHERE id IN (900, 901, 902, 910, 911, 912, 913);
+
+-- Confirmation numbers 0001-0003 (free event) and 0001-0004 (dinner) are taken.
+UPDATE reg_events SET confirmation_prefix = 'RET', next_confirmation = 4 WHERE id = 900;
+UPDATE reg_events SET confirmation_prefix = 'DIN', next_confirmation = 5 WHERE id = 910;

@@ -276,10 +276,10 @@ if (Astro.request.method === 'POST') {
     if (!parsed.ok) specialErrors = parsed.errors;
     else {
       await createSpecialEvent(db, group.id, {
-        title_en: parsed.data.title_en,
-        title_zh: parsed.data.title_zh,
-        description_en: parsed.data.description_en,
-        description_zh: parsed.data.description_zh,
+        title_en: parsed.data.titles.en?.title ?? '',
+        title_zh: parsed.data.titles.zh?.title ?? '',
+        description_en: parsed.data.titles.en?.description ?? '',
+        description_zh: parsed.data.titles.zh?.description ?? '',
         starts_at: parsed.data.starts_at,
         ends_at: parsed.data.ends_at,
         location: parsed.data.location,

@@ -14,9 +14,9 @@ The portal itself is optional and runs on **both the default Cloudflare D1 datab
 Supabase (Postgres)**. On D1 you get households, groups and protected group files, the
 calendar, opportunity discovery, and church, group, and private prayers. The parts that
 depend on Registration — event-scope prayers, event administrators, and **My events**
-(registrations) — need the Supabase backend, because Registration is Supabase-only and
-stays off on D1. When Registration is off, those controls are hidden and no registration
-data is read. Giving and Registration have their own Supabase-only module gates. Portal declares soft `uses` of Volunteer Scheduling, Groups, and Learning,
+(registrations) — work on D1 too once an administrator enables Registration. When
+Registration is off, those controls are hidden and no registration
+data is read. Giving needs Supabase, and paid Registration needs Supabase. Portal declares soft `uses` of Volunteer Scheduling, Groups, and Learning,
 not hard dependencies, so selecting Portal in a custom setup does not automatically
 enable any of them.
 
@@ -161,10 +161,10 @@ its admin board.
 
 1. Follow [`docs/supabase-setup.md`](../supabase-setup.md) and run `npm run setup`.
    Choose **Full Church** for the complete composition pictured above (it includes Giving and
-   Registration, so setup selects Supabase), or explicitly select **Member Portal +
+   Giving, so setup selects Supabase), or explicitly select **Member Portal +
    Volunteer Scheduling + Groups + Learning**. Portal's soft `uses` do not auto-enable the
-   other three. A custom selection without Giving or Registration stays on D1 and writes the
-   `DB` and `MEDIA` bindings; one with either selects Supabase and writes `HYPERDRIVE` and
+   other three. A custom selection without Giving stays on D1 and writes the
+   `DB` and `MEDIA` bindings; one with Giving selects Supabase and writes `HYPERDRIVE` and
    `MEDIA`. Setup runs the current migrations and records every module setting. Giving and
    Registration remain independently gated selections.
 2. Configure the production `MEDIA` R2 bucket. Protected group-file rows in Postgres
@@ -174,7 +174,7 @@ its admin board.
    domain must be onboarded for Cloudflare Email Sending; `EMAIL_FROM` alone does not
    perform that onboarding.
 4. In **Admin → Settings → Modules**, enable **Member Portal** and each related module
-   the church intends to use. Giving and Registration remain Supabase-only and are
+   the church intends to use. Giving (and paid Registration) remain Supabase-only and are
    enabled separately; without Registration the portal's event features stay hidden.
 5. In **Admin → People**, put members in the correct households and designate no more
    than two eligible adult owners. In **Admin → Groups**, appoint group administrators.

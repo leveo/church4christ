@@ -4,7 +4,8 @@ import { gatheringsCopy } from '../../../i18n/designGatherings';
 import Icon from '../../../components/ui/Icon.astro';
 
 // Registration confirmation page. Reached two ways: the submit endpoint 303s a
-// FREE registration here (?ok=1, no paid marker → "you're registered"), and a
+// FREE registration here (?ok=1, no paid marker → "you're registered"; ?status=waitlist
+// when the event had filled up → "you're on the waitlist"), and a
 // PAID registration lands here after the Stripe Checkout redirect (?ok=1&paid=1 →
 // adds the "payment received, check your email" note). Deliberately static: the
 // Stripe webhook is the source of truth for the paid seat, so this page makes no
@@ -21,15 +22,17 @@ if (!locale) {
 }
 const copy = gatheringsCopy(locale);
 const paid = Astro.url.searchParams.get('paid') === '1';
+const waitlist = Astro.url.searchParams.get('status') === 'waitlist';
 ---
 
-<Base title={t(locale, 'register.done.title')} locale={locale} noindex={true}>
+<Base title={t(locale, waitlist ? 'register.done.waitlistTitle' : 'register.done.title')} locale={locale} noindex={true}>
   <GatheringSurface mode="public">
   <div class="gathering-complete">
     <div class="gathering-complete-icon"><Icon name="calendar" size={28} /></div>
     <ol class="gathering-flow justify-center" aria-label={copy.registrationSteps}>{[copy.reviewDetails, copy.fillDetails, copy.confirm].map((label, i) => <li aria-current={i === 2 ? 'step' : undefined}><b aria-hidden="true">{i + 1}</b>{label}</li>)}</ol>
-    <h1 class="font-display text-heading-md font-bold">{t(locale, 'register.done.title')}</h1>
-    {paid && <p class="mt-4 text-ink-muted">{t(locale, 'register.done.paid')}</p>}
+    <h1 class="font-display text-heading-md font-bold">{t(locale, waitlist ? 'register.done.waitlistTitle' : 'register.done.title')}</h1>
+    {waitlist && <p class="mt-4 text-ink-muted" data-status="waitlist">{t(locale, 'register.done.waitlist')}</p>}
+    {paid && !waitlist && <p class="mt-4 text-ink-muted">{t(locale, 'register.done.paid')}</p>}
 
     <div class="mt-8 flex flex-wrap justify-center gap-3">
       <a href={localePath(locale, '/')} class={btn}>{t(locale, 'notFound.home')}</a>

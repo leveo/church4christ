@@ -274,6 +274,14 @@ const LEGACY_CAPTURE_ROWS = [
   { path: '/en/give', out: 'docs/images/giving/give-form.png', backend: 'supabase' },
   { path: '/admin/giving', out: 'docs/images/admin/giving.png', admin: true, backend: 'supabase' },
   { path: '/admin/registration', out: 'docs/images/admin/registration.png', admin: true, backend: 'supabase' },
+  // Event Registration on D1 (free events, preview and waitlist): the seeded D1 dev server shows
+  // event 920 (open, capacity 3) and 930 (preview). Capture with --only registration/
+  { path: '/en/register', out: 'docs/images/registration/public-list.png', backend: 'd1', expectedText: 'Neighbors Potluck Night' },
+  { path: '/en/register/920', out: 'docs/images/registration/event-detail.png', backend: 'd1', expectedText: 'What will you bring?' },
+  { path: '/en/register/930', out: 'docs/images/registration/event-preview.png', backend: 'd1', expectedText: 'Registration is not open yet' },
+  { path: '/en/register/done?ok=1&status=waitlist', out: 'docs/images/registration/done-waitlist.png', backend: 'd1', expectedText: 'on the waitlist' },
+  { path: '/admin/registration', out: 'docs/images/registration/admin-events.png', admin: true, backend: 'd1', expectedText: 'Neighbors Potluck Night' },
+  { path: '/admin/registration?edit=920', out: 'docs/images/registration/admin-editor.png', admin: true, backend: 'd1', anchor: 'Edit event', expectedText: 'Poster image' },
   // Children's check-in (Task 8). The kiosk needs no session — the token in
   // the URL is the gate — so it captures in the same admin-bypass pass. The
   // dev seed fixes the kiosk token and gives Chen Family two children, which
@@ -399,6 +407,9 @@ export const MOBILE_CAPTURE_ROWS = Object.freeze([
   { path: '/en/serve/matrix/1', out: 'docs/images/mobile/serve-matrix.png', anchor: 'day, ', anchorMargin: 20, bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Sunday Worship (English)' },
   { path: '/en/my/calendar', out: 'docs/images/mobile/my-calendar.png', anchor: 'This month', anchorMargin: 60, bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Calendar' },
   { path: '/en/my/blockouts', out: 'docs/images/mobile/my-blockouts.png', anchor: 'Add a blockout', anchorMargin: 20, bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Add' },
+  // Event Registration on D1 at phone width (public pages, no session).
+  { path: '/en/register', out: 'docs/images/mobile/register-list.png', viewport: MOBILE_VIEWPORT, backend: 'd1', expectedText: 'Neighbors Potluck Night' },
+  { path: '/en/register/920', out: 'docs/images/mobile/register-detail.png', viewport: MOBILE_VIEWPORT, anchor: 'Your registration', anchorMargin: 20, backend: 'd1', expectedText: 'What will you bring?' },
   // Seeded Christmas Service run sheet (planning_events id 31000 in seed/dev-seed.sql); Sarah coordinates it.
   { path: '/en/planning/31000', out: 'docs/images/mobile/planning-run-sheet.png', bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Christmas Service' },
 ]);

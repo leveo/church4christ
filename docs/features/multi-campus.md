@@ -56,7 +56,7 @@ All feature-owned tables carry a non-null `campus_id`. Middleware wraps the requ
 with `src/lib/campusScope.ts`, which injects the selected campus into inserts and limits
 reads, updates, and deletes. People reads join through active campus membership. The flat
 settings API is transparently mapped to `campus_settings`; themes, identity text, navigation,
-and other settings can therefore differ by campus. The Supabase-only Giving, Registration,
+and other settings can therefore differ by campus. The Giving, Registration,
 member-portal, and private Stripe operation tables use the same boundary.
 
 The default `main` campus preserves an existing installation. Migration `0027_multi_campus`

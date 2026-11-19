@@ -46,7 +46,7 @@ Page status, exact pathname and requested query values, page markers and applica
 | `/admin/onboarding` | `admin/onboarding.png` | D1 or Supabase | Launch checklist |
 | `/admin/pages/builder/seedbuilderwelcome0000000000pb01` | `admin/page-builder.png` | D1 or Supabase | Design your page; wait: .builder-topbar |
 | `/admin/giving` | `admin/giving.png` | Supabase | Giving |
-| `/admin/registration` | `admin/registration.png` | Supabase | Registration |
+| `/admin/registration` | `admin/registration.png` | Supabase (paid events) | Registration |
 | `/admin/ministries?tab=email` | `admin/email-tab.png` | D1 or Supabase | Automation rules; anchor: Automation rules |
 | `/admin/settings` | `admin/settings-modules.png` | D1 or Supabase | Site Settings; anchor: Modules |
 | `/admin/learning` | `learning/admin-overview.png` | D1 or Supabase | Learning provider connections; anchor: Learning provider connections |

@@ -43,6 +43,23 @@ function seedStatements(sql: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+// The demo seeds describe the current schema, but this suite seeds a database frozen at
+// 0040. Drop what only exists from 0042 onward (the dev-seed Registration block, which
+// is the file's last section, and registration-seed's v2 columns and statements).
+function preV2Seed(file: string, sql: string): string[] {
+  if (file === 'dev-seed.sql') return seedStatements(sql.split('-- Event Registration (free events')[0]);
+  if (file !== 'registration-seed.sql') return seedStatements(sql);
+  return seedStatements(sql)
+    .filter((statement) => !/^(INSERT INTO reg_attendees|UPDATE reg_events)\b/.test(statement))
+    .map((statement) =>
+      statement.startsWith('INSERT INTO registrations')
+        ? statement
+            .replace(', submission_key, confirmation_no)', ')')
+            .replace(/, 'seed-reg-\d+', '[A-Z]+-\d{4}'\)/g, ')')
+        : statement,
+    );
+}
+
 describe.skipIf(!hasPg)('locale lookup migration 0041 on PostgreSQL', () => {
   const sql = hasPg ? pgClient() : (null as never);
 
@@ -66,9 +83,8 @@ describe.skipIf(!hasPg)('locale lookup migration 0041 on PostgreSQL', () => {
         await tx.unsafe('INSERT INTO _migrations(name) VALUES ($1)', [file]);
       });
     }
-    for (const statement of seedStatements(readFileSync('seed/dev-seed.sql', 'utf8'))) await sql.unsafe(statement);
-    for (const file of ['giving-seed.sql', 'registration-seed.sql']) {
-      for (const statement of seedStatements(readFileSync(`seed/${file}`, 'utf8'))) await sql.unsafe(statement);
+    for (const file of ['dev-seed.sql', 'giving-seed.sql', 'registration-seed.sql']) {
+      for (const statement of preV2Seed(file, readFileSync(`seed/${file}`, 'utf8'))) await sql.unsafe(statement);
     }
     await sql.unsafe("UPDATE people SET lang = 'zh' WHERE id = 1; UPDATE people SET lang = 'en' WHERE id = 2");
 

@@ -1,133 +1,162 @@
-# Registration (free sign-ups and paid checkout)
+# Registration (event sign-ups)
 
-> **Free event registration does not need Stripe.** Paid registration uses the same Stripe
-> mode as Giving: test mode by default, live mode only after the go-live checklist in
+> **Free events run on the default Cloudflare D1 database. Paid events need Postgres
+> (Supabase) and Stripe.** Free sign-ups never touch Stripe. Paid sign-ups use the same
+> Stripe mode as Giving: test mode by default, live mode only after the go-live checklist in
 > [`supabase-setup.md`](../supabase-setup.md#7-stripe-setup-and-go-live-giving-and-registration).
-> Paid registration records no live/test marker of its own, so rehearse in test mode, then
-> verify with one small live registration before collecting real fees, and resolve any
-> pending checkout requests before switching modes.
 
 ## What it does
 
-**Registration** lets your church put a free event online and collect sign-ups, custom answers,
-and roster data without Stripe. You create the event, add the questions you need, set a seat
-limit if there is one, and share the link. The same module can also take a paid checkout
-through Stripe in the configured Stripe mode.
+**Registration** lets your church put an event online and collect sign-ups, answers to your
+own questions, and a roster. You create the event, add the questions you need, set a seat
+limit if there is one, and share the link.
 
-It brings together the things a church normally patches from a paper sign-up sheet, a
-separate payment link, and a spreadsheet:
+It replaces the paper sign-up sheet, the separate payment link, and the spreadsheet:
 
-- **Events anyone can sign up for.** A guest can register without an account — just a name and
-  an email. A signed-in member registers with one tap, their name and email already filled in.
-  Each event shows its date, place, and price (or **Free**) on a simple public page.
-- **The questions you actually need.** Every event carries its own short form. Ask for a
-  **T-shirt size** as a dropdown, **dietary needs** as a paragraph, **first time?** as a
-  yes/no — five field types in all, each in English and Chinese, each optional or required as
-  you choose.
-- **Paid-checkout Preview.** Set a test price and the sign-up can continue to **Stripe test
-  mode**, where Stripe handles test-card details. This is for evaluating the workflow only;
-  a free event skips Stripe entirely and confirms on the spot.
-- **A roster your team can export.** Every registration lands on the event's roster with its
-  answers laid out in columns. One click downloads the whole roster as a spreadsheet
-  (CSV) — names, emails, amounts, and every answer — ready for name tags, meal counts, or a
-  check-in list.
+- **Events anyone can sign up for.** A signed-in member registers with one tap, with their name
+  and email already filled in. A guest enters a name and email, then confirms the email with a
+  short code before the sign-up is saved. Each event shows its date, place, and price (or
+  **Free**) on a simple public page.
+- **The questions you need.** Each event has its own short form. Ask for a T-shirt size as a
+  dropdown, dietary needs as a paragraph, or "first time?" as yes/no. You choose which
+  questions are required.
+- **Seat limits that hold.** When the last seat is taken, the next person is never let in by
+  mistake, even if two people press the button at the same moment.
+- **A waitlist for free events.** When a free event is full, people can join a waitlist
+  instead of being turned away. It is on for every event by default, and you can turn it off
+  per event. Paid events never have a waitlist.
+- **Your own languages.** Event titles, descriptions, and question labels can be written in
+  every language your site has turned on.
+- **A roster your team can export.** Every sign-up lands on the event's roster. One click
+  downloads it as a spreadsheet (CSV).
 
-Because every roster holds people's names and emails, its pages and exports are open only to
-staff. In the paid Preview, test-card details stay at Stripe and a pending test seat is confirmed
-only by Stripe's signed test-mode notification. Those controls do not make paid registration
-production-ready.
+Rosters hold names and emails, so the admin pages and exports are open only to staff.
+
+## Free and paid events
+
+| | Free event | Paid event |
+|---|---|---|
+| Database | Cloudflare D1 or Supabase | Supabase (Postgres) only |
+| Stripe | Not used | Required, same mode as Giving |
+| Price field | Leave blank | Enter a price |
+| Waitlist | Available | Never |
+
+On a church that uses D1, the **price** field in the event editor is turned off, and saving an
+event with a price is refused with a message. If you want paid events, choose Supabase when you
+set up (see [Supabase setup](../supabase-setup.md)).
 
 ## How your team uses it
 
-**A member or guest signs up.** The public page at `/register` lists every event currently open
-for sign-up — each as a card with its date, location, and price or a **Free** label, and a
-**Full** badge once every seat is taken. Opening an event shows its details and a form built
-from the questions you set. A signed-in member sees their name and email already filled in; a
-guest types both. For a free event, submitting registers them right away and shows a
-"you're registered" page. For a paid Preview event, submitting continues to Stripe test
-checkout, and the seat is confirmed when the signed test event is processed.
+### Create an event
 
-![The public list of events open for sign-up, each with its date, place, and price](../images/register/list.png)
+Go to **Admin → Registration**. The page lists every event with its stage, how many people
+have signed up, and its seats.
 
-![The public event page and its form, built from the event's own questions](../images/register/event-form.png)
+![The Registration admin list, with a stage badge and action buttons on each event](../images/registration/admin-events.png)
 
-**Creating an event.** The admin page at `/admin/registration` has a form for a new event:
-a title and description in English and Chinese, when it **starts** and **ends**, an optional
-**location**, an optional **capacity** (leave it blank for unlimited), and a **price** in
-dollars (leave it blank or `0` for a free event). Two optional fields — **Opens** and
-**Closes** — control the sign-up window: by default an event is open right away and stays open
-until it starts, but you can open sign-ups later or close them early. Below the form, a table
-lists every event with how many have registered, its price, and whether it is active. Editing an
-event reuses the same form, and unchecking **Active** hides an event without deleting it (its
-registrations stay on the roster). A row of summary cards above the form shows how many events
-are currently open, how many active registrations there are, and how many seats remain across
-those events, at a glance.
+Open **New event** to fill in:
 
-![The registration admin: create or edit an event, with the events table below](../images/admin/registration.png)
+- the **title** and **description** (one tab per site language),
+- when it **starts** and **ends**, and an optional **location**,
+- an optional **capacity** (leave blank for unlimited),
+- an optional **poster** image,
+- an optional **confirmation prefix** (see below),
+- the **waitlist** switch,
+- the schedule: **Visible from**, **Opens**, and **Closes**.
 
-**Adding questions.** Each event has its own **Questions & roster** page at
-`/admin/registration/<event>`. The question builder lets you add as many questions as you like,
-each with a type:
+![The event editor, with a language tab for each site language](../images/registration/admin-editor.png)
 
-- **Short answer** — a single line (a name, a phone number).
-- **Paragraph** — a longer note (dietary needs, special requests).
-- **Dropdown** — pick one from a list you type in (a T-shirt size, a workshop choice).
-- **Checkboxes** — pick any number from a list (which sessions to attend).
-- **Yes / No** — a simple yes-or-no.
+### Stages
 
-Each question has an English and a Chinese label, an order number, and a **Required** switch.
-Dropdown and checkbox questions get an **Options** box where you type each choice on its own
-line. You can add and remove questions and reorder them, and editing a question later keeps the
+Every event is in one of four stages. The list shows the stage on each event.
+
+| Stage | What visitors see |
+|---|---|
+| **Hidden** | Nothing. The event is switched off or its Visible-from time has not come. |
+| **Preview** | The event page is public, but sign-up has not opened yet. |
+| **Open** | Visitors can sign up. |
+| **Closed** | Sign-up has ended. The event ends at its Closes time, or at its start time if no Closes time is set. |
+
+Buttons on each event move it along: **Open now**, **Close now**, **Hide**, and **Show**. If
+you open an event whose closing time has already passed, you are asked for a new closing time.
+
+![A Preview event: visitors can read the details, and sign-up opens later](../images/registration/event-preview.png)
+
+### Duplicate an event
+
+**Duplicate** copies an event's details and questions, but not its registrations. The copy
+starts hidden so you can change the dates and then show it.
+
+### Questions
+
+Each event has a **Questions & roster** page. Add as many questions as you like. Each has a
+type, a label in every site language, and a **Required** switch. Dropdown and checkbox
+questions get an **Options** box with one choice per line. Editing a question later keeps the
 answers people have already given.
 
-![The question builder — add each question, pick its type, and label it in both languages](../images/admin/registration-event.png)
+### Signing up
 
-**Watching the roster and exporting it.** The same page lists every registration below the
-questions — name, email, status (**confirmed**, **pending**, or **cancelled**), amount, when they
-signed up, and each answer in its own column. An admin can **cancel** a registration, which frees
-its seat. The **Export CSV** button downloads the whole roster as a spreadsheet file, one column
-per question, ready to open in Excel or Google Sheets for name tags, meal counts, or a check-in
-list.
+The public page at `/register` lists the events that are open or in preview. Opening an
+event shows its details and its form.
 
-![The event roster — each sign-up with its status, amount, and answers in columns, and an Export CSV button](../images/admin/registration-roster.png)
+![The public list of events](../images/registration/public-list.png)
 
-**Paid checkout (Stripe Preview).** In test mode, a paid event exercises the same checkout
-lifecycle as Giving. The seat is held as **pending** during Stripe test checkout and becomes
-**confirmed** only after the signed test event is processed. An expiry event releases the test
-hold. A free event never touches Stripe, and the paid path must not be used for event fees.
+![An event page and its sign-up form](../images/registration/event-detail.png)
 
-**Capacity and the sign-up window.** When you set a **capacity**, both confirmed sign-ups and
-pending test checkouts count toward it, so the paid Preview can exercise seat holds. When every
-seat is taken, the event shows **Full** and its form is replaced
-by a "this event is full" notice. Leave capacity blank for an unlimited event. The **Opens** and
-**Closes** times let you schedule when sign-ups begin and end; outside that window the event
-simply does not appear as open.
+On a phone, the same pages fit the screen.
 
-**Who can manage events.** Creating events, editing questions, and viewing or exporting the
-roster are open to an **admin** or an **editor** (the same staff who run bulletins and events).
-A volunteer team leader with no editor role cannot reach these pages or download a roster —
-the roster is people's names, emails, and answers, so access stays deliberately narrow. The
-public sign-up pages, of course, are open to everyone, and a hidden anti-spam field quietly
-drops bot submissions so they can never exhaust an event's seats.
+![The event list on a phone](../images/mobile/register-list.png)
+![An event page on a phone](../images/mobile/register-detail.png)
 
-## How it fits together
+If a free event is full and its waitlist is on, the form says so and the person joins the
+waitlist. They see a confirmation page that says they are on the waitlist.
 
-You create an event and add its questions. Members and guests can complete implemented free
-sign-ups on the public page. A paid Preview continues to Stripe test checkout and exercises the
-pending-to-confirmed lifecycle. Every resulting registration lands on the event roster with its
-answers for CSV export.
+![The confirmation page for a waitlist sign-up](../images/registration/done-waitlist.png)
 
-![How free and paid sign-ups flow into one roster you can export](../images/diagrams/registration.svg)
+A waitlisted person is not moved to confirmed automatically yet. Staff can see them on the
+roster. Automatic promotion is planned for a later release.
+
+### Confirmation numbers
+
+Each registration gets a confirmation number such as `R26-0001`. It starts with `R` and the
+last two digits of the event's start year, then counts up from 0001 within that event. To use
+your own prefix, set the **confirmation prefix** on the event: one to six capital letters or
+digits.
+
+### Roster and CSV
+
+The **Questions & roster** page lists every registration: confirmation number, name, email,
+status, party size, amount, when they signed up, and each answer. Statuses are confirmed,
+pending, waitlist, and cancelled. Cancelling a registration frees its seat.
+
+**Export CSV** downloads the roster. The columns are, in this order: Confirmation, Name,
+Email, Status, Party size, Amount, Registered, then one column per question. If you have a
+script or spreadsheet that reads the old export, update it for this order.
+
+### Who can manage events
+
+Admins and editors can create events, edit questions, and view or export rosters. Volunteer
+team leaders without an editor role cannot. The public pages are open to everyone. A hidden
+anti-spam field quietly drops bot sign-ups so they cannot use up an event's seats.
+
+### Event admins and the member portal
+
+Registration also stores which people are **event admins**, and which groups are linked to an
+event. The Member Portal uses these for event prayers and "My events". These tables are
+available on D1 too, once Registration is enabled. A person who is an event admin cannot be
+merged away into another person in the identity merge tool. The tool reports it as a conflict.
 
 ## Setting it up
 
-Registration is **Supabase (Postgres)-only in the current implementation**. The module gate keeps
-it off in the D1 configuration as a current repository boundary. Stand up the Supabase backend first (see
-[`docs/supabase-setup.md`](../supabase-setup.md)). Free events need no payment setup; configure
-Stripe only to evaluate the paid test Preview:
+**On D1 (free events).** Nothing extra is needed. If you are upgrading an existing D1 church,
+Registration stays **off** after the upgrade. Turn it on in **Admin → Settings → Modules**.
+A new install follows the module choice you made in setup. See [Upgrading](../upgrade.md).
 
-1. **Import Stripe test credentials through setup.** Pass an `sk_test_…` key and the test
-   endpoint's `whsec_…` signing secret only to the setup process:
+**On Supabase (free and paid events).** Free events need no payment setup. To try paid events,
+set up Stripe in test mode:
+
+1. **Import Stripe test credentials through setup.** Give setup an `sk_test_…` key and the test
+   endpoint's `whsec_…` signing secret:
 
    ```bash
    CHURCH_SETUP_STRIPE_SECRET_KEY="sk_test_…" \
@@ -135,69 +164,64 @@ Stripe only to evaluate the paid test Preview:
    npm run setup
    ```
 
-   Setup writes the runtime secrets automatically. The `CHURCH_SETUP_STRIPE_*` values are
-   one-shot setup inputs, not ambient runtime variables. Live keys are rejected, and signed
-   live webhook events receive `400 live_mode_disabled` without storage. If Giving already
-   imported these test credentials, Registration uses the same pair.
+   Setup writes the runtime secrets for you. Live keys are rejected, and live webhook events
+   are refused. If Giving already imported these test credentials, Registration uses the same
+   pair.
 2. **Point a Stripe test-mode webhook at your site.** In the Stripe dashboard's test mode, add
-   one shared endpoint at `https://your-site/api/stripe/webhook` and subscribe it to all eight
-   events:
-   `checkout.session.completed`, `checkout.session.expired`,
-   `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`,
-   `invoice.paid`, `charge.refunded`, `customer.subscription.updated`, and
-   `customer.subscription.deleted`. Completed or asynchronously successful payment confirms a
-   paid seat; expiry or asynchronous failure releases it. Use the signing secret as the
-   `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET` input in step 1. Registration and Giving share this one
-   endpoint — each event tells them apart on its own.
-3. **Create your first event** on `/admin/registration`, add its questions on the event's
-   **Questions & roster** page, and share the public link (`/register`).
+   one endpoint at `https://your-site/api/stripe/webhook` and subscribe it to the full event list in
+   [Supabase setup, section 7](../supabase-setup.md#7-stripe-setup-and-go-live-giving-and-registration).
+   A paid seat is confirmed by `checkout.session.completed` or
+   `checkout.session.async_payment_succeeded`, and released by `checkout.session.expired` or
+   `checkout.session.async_payment_failed`. Giving and Registration share this one endpoint.
+3. **Create your first event** at `/admin/registration`, add its questions, and share
+   `/register`.
 
-Supabase runs durable test-webhook and pending-Checkout recovery every five minutes. Admins and
-finance users can reconcile, attach a retrieved and verified `cs_test_…` session, or perform
-an explicitly confirmed cancellation from `/admin/stripe-events`; raw request and customer
-data are not displayed. The current D1 implementation does not enable Registration or Stripe
-operations.
+A paid seat is held as **pending** while the person is at Stripe, and becomes **confirmed**
+only when Stripe's signed notice arrives. If checkout expires, the seat is released. Every
+five minutes the site recovers lost notices. Admins and finance users can review them at
+`/admin/stripe-events`.
 
-The **payment operations** permission covers both Giving and paid Registration. Grant it only
-to people trusted to reconcile Stripe events, attach verified sessions, and explicitly cancel
-pending paid registrations as well as manage gifts.
+The **payment operations** permission covers both Giving and paid Registration. Give it only to
+people you trust to reconcile Stripe events and cancel pending paid registrations.
 
-Free events need none of the Stripe steps — create the event, add questions, and share the link.
-Use the Stripe steps only to test the paid Preview; they do not enable production charges.
+Paid registration records no live or test marker of its own. Rehearse in test mode, make one
+small live registration before collecting real fees, and resolve pending checkout requests
+before switching modes.
+
+![How free and paid sign-ups flow into one roster](../images/diagrams/registration.svg)
 
 ## For developers
 
-- **Backend gating:** `registration` is Supabase-only in the current implementation
-  (`requiresBackend: 'supabase'` in `src/lib/modules.ts`) — the enablement filter force-disables
-  it on D1 regardless of its settings row. It owns the `/register` and `/api/register` public
-  prefixes and the `/admin/registration` admin prefix, and depends on no other module.
-- **Schema:** `migrations-supabase/0003_registration.sql` adds `reg_events` + `reg_event_i18n`,
-  `reg_questions` + `reg_question_i18n`, `registrations`, and `reg_answers`. Money is **integer
-  cents**; a paid registration carries a partial unique index on `stripe_checkout_session_id` so
-  a redelivered webhook dedups, and `registrations(event_id, status)` is indexed for the seat
-  counts.
-- **Data library:** `src/lib/regDb.ts` holds the open-window event reads with live seat counts,
-  the answer validator (`validateAnswers`), the atomic registration+answers writer with its
-  documented capacity-race backstop (`createRegistration`), the Checkout-session lifecycle
-  transitions (`attachCheckoutSession` / `confirmBySession` / `cancelBySession`), the admin
-  event + question editors (`saveEvent` / `saveQuestions`), and the roster + RFC4180 CSV export.
-  Form parsing lives in `src/lib/regForms.ts`.
-- **Submit + webhook:** `src/pages/api/register/submit.ts` (module-gates, resolves identity,
-  validates answers, then splits free→confirmed vs paid→pending+Stripe, compensating by
-  cancelling the pending row if Stripe fails). Paid registrations ride the **same** Stripe
-  webhook as giving: `src/pages/api/stripe/webhook.ts` → `src/lib/givingWebhook.ts`, routed by
-  `metadata.kind === 'registration'` — `checkout.session.completed` confirms the seat,
-  `checkout.session.expired` frees it, and a gift event is never touched by the registration
-  branch.
-- **Access:** the two admin pages and the CSV route re-tighten from the `console` route class to
-  `editor ∪ admin` before any DB read (the roster is PII); the public pages and the submit
-  endpoint are open, with a honeypot field that silently drops bot sign-ups so they cannot
-  exhaust capacity.
-- **Demo data:** `seed/registration-seed.sql` (Postgres-only, applied by
-  `scripts/db/seed-supabase.mjs` after `dev-seed.sql` and `giving-seed.sql`) seeds one free
-  upcoming event with three questions, one paid $25 event (capacity 20), and seven
-  registrations — confirmed and pending, with answers — all fictional, with obviously-fake
-  Stripe ids and relative dates.
-- **Tests:** the `test/pg/` suites against real Postgres — `regDb.test.ts`, `regSchema.test.ts`,
-  `regWebhook.test.ts` — plus the migration-runner check in `test/pg/runner.test.ts`. See
-  [Modules](modules.md) for the on/off behavior.
+- **Backends and gating:** `registration` has no `requiresBackend`, so it is available on D1
+  and Postgres. `giving` is still Postgres-only. On D1 the admin price field is disabled and
+  `saveEventFromForm` (`src/lib/regAdminActions.ts`) refuses a price with `admin.reg.priceD1Error`.
+  Paid events rely on Stripe, which needs the Supabase worker.
+- **Schema:** D1 `migrations/0050_registration_d1.sql` creates `reg_events`, `reg_event_i18n`,
+  `reg_questions`, `reg_question_i18n`, `registrations`, `reg_answers`, `reg_attendees`,
+  `group_reg_events`, and `event_admins`, and registers `reg_attendees.person_id` in the
+  identity merge inventory. On an initialized database it writes `module.registration = 0`
+  (an existing explicit row is never changed). Postgres
+  `migrations-supabase/0042_registration_v2.sql` adds `visible_from`, `waitlist_enabled`,
+  `confirmation_prefix`, `next_confirmation`, `poster`, `submission_key`, `confirmation_no`,
+  and `party_size`, widens the status and question-type checks, and backfills a legacy
+  submission key, one attendee row, and confirmation numbers per event in id order. Original
+  tables: `migrations-supabase/0003_registration.sql`. Money is integer cents.
+- **Setup doctor:** `scripts/setup/checks/database.mjs` expects the registration tables,
+  `group_reg_events`, and `event_admins` on D1.
+- **Key modules:** `src/lib/regDb.ts` (reads, the shared locked registration writer that
+  enforces capacity, waitlist, confirmation numbers, roster and CSV, `cloneEvent`,
+  `setEventLifecycle`), `src/lib/regPhase.ts` (pure `eventPhase`, `isEventFull`,
+  `offersWaitlist`), `src/lib/regAdminActions.ts` (editor save and list buttons),
+  `src/lib/regForms.ts` (form parsing), `src/pages/api/register/submit.ts`, and the pages under
+  `src/pages/[locale]/register/` and `src/pages/admin/registration/`. Guests start at
+  `/api/identity/continuation/start` and finish after email verification.
+- **Stripe:** paid registrations ride the shared webhook, `src/pages/api/stripe/webhook.ts`
+  to `src/lib/givingWebhook.ts`, routed by `metadata.kind === 'registration'`.
+- **Access:** admin pages and the CSV route require `editor` or `admin` before any read.
+- **Demo data:** `seed/registration-seed.sql` (Postgres) seeds fictional events and
+  registrations.
+- **Tests:** `test/e2e/registration.e2e.test.ts` (D1 end to end), `test/regCore.d1.test.ts`
+  and `test/pg/regCore.pg.test.ts` (shared cases in `test/shared/regCoreCases.ts`),
+  `test/regPhase.test.ts`, `test/regAdminActions.test.ts`,
+  `test/node/registrationMigrationDefault.test.ts`, and the Postgres suites `test/pg/regDb.test.ts`,
+  `regSchema.test.ts`, `regWebhook.test.ts`. See [Modules](modules.md).

@@ -121,29 +121,29 @@ describe('listRegistrationsForPerson', () => {
     // person_id hit (email deliberately different from the account's).
     await env.DB
       .prepare(
-        `INSERT INTO registrations (event_id, person_id, name, email, status, amount_cents, currency)
-         VALUES (1, 1, 'Person 1', 'other@example.com', 'confirmed', 1000, 'usd')`,
+        `INSERT INTO registrations (event_id, person_id, name, email, status, amount_cents, currency, submission_key)
+         VALUES (1, 1, 'Person 1', 'other@example.com', 'confirmed', 1000, 'usd', 'fixture-1')`,
       )
       .run();
     // email-only hit, case-insensitive, no person_id linked.
     await env.DB
       .prepare(
-        `INSERT INTO registrations (event_id, person_id, name, email, status, amount_cents, currency)
-         VALUES (2, NULL, 'Person 1', 'P1@EXAMPLE.COM', 'pending', 0, 'usd')`,
+        `INSERT INTO registrations (event_id, person_id, name, email, status, amount_cents, currency, submission_key)
+         VALUES (2, NULL, 'Person 1', 'P1@EXAMPLE.COM', 'pending', 0, 'usd', 'fixture-2')`,
       )
       .run();
     // cancelled — excluded even though person_id matches.
     await env.DB
       .prepare(
-        `INSERT INTO registrations (event_id, person_id, name, email, status, amount_cents, currency)
-         VALUES (3, 1, 'Person 1', 'p1@example.com', 'cancelled', 500, 'usd')`,
+        `INSERT INTO registrations (event_id, person_id, name, email, status, amount_cents, currency, submission_key)
+         VALUES (3, 1, 'Person 1', 'p1@example.com', 'cancelled', 500, 'usd', 'fixture-3')`,
       )
       .run();
     // another person entirely — excluded.
     await env.DB
       .prepare(
-        `INSERT INTO registrations (event_id, person_id, name, email, status, amount_cents, currency)
-         VALUES (1, 2, 'Person 2', 'p2@example.com', 'confirmed', 1000, 'usd')`,
+        `INSERT INTO registrations (event_id, person_id, name, email, status, amount_cents, currency, submission_key)
+         VALUES (1, 2, 'Person 2', 'p2@example.com', 'confirmed', 1000, 'usd', 'fixture-4')`,
       )
       .run();
 

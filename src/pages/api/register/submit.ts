@@ -150,6 +150,8 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
     const event = await deps.getOpenEvent(locals.db, locale, eventId);
     if (!event) return back(locale, eventId, 'closed');
     const paid = event.price_cents !== null && event.price_cents > 0;
+    // Paid registration needs Stripe + Postgres: on D1 a priced event is refused.
+    if (paid && locals.dbBackend === 'd1') return back(locale, eventId, 'paid_unavailable');
 
     let personId: number | null;
     let name: string;
@@ -176,12 +178,18 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
     }
 
     if (!paid) {
+      // The idempotency key: a well-formed client key wins; otherwise one derived
+      // from the form's request id, so a double click converges on one registration.
+      // ':' keeps a derived key outside the client alphabet.
+      const clientKey = String(form.get('submission_key') ?? '');
+      const submissionKey = /^[A-Za-z0-9_-]{16,64}$/.test(clientKey) ? clientKey : `form:${requestId}`;
+      let created: Awaited<ReturnType<typeof createRegistration>>;
       try {
         await deps.attachIdentitySource(locals.rawDb, deps.identityEnv, {
           campusId, source: 'registration', intentId: requestId, personId: user.id, sessionEpoch: epoch,
           sourceDigest: await continuationPayloadDigest({ eventId, name, email, amountCents: 0, currency: event.currency, locale, answers }), name, email,
         });
-        await deps.createRegistration(locals.db, {
+        created = await deps.createRegistration(locals.db, {
           eventId,
           personId,
           name,
@@ -190,12 +198,14 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
           amountCents: 0,
           currency: event.currency,
           answers,
+          submissionKey,
+          allowWaitlist: true,
         });
       } catch (error) {
         if ((error as Error).message === 'event_full') return back(locale, eventId, 'full');
         throw error;
       }
-      return redirect(`/${locale}/register/done?ok=1`);
+      return redirect(`/${locale}/register/done?ok=1${created.status === 'waitlist' ? '&status=waitlist' : ''}`);
     }
 
     await deps.attachIdentitySource(locals.rawDb, deps.identityEnv, {

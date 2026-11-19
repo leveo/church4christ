@@ -22,8 +22,8 @@ describe('parseRegEventForm', () => {
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.data.title_en).toBe('Retreat');
-    expect(r.data.title_zh).toBe('退修会');
+    expect(r.data.titles.en).toEqual({ title: 'Retreat', description: 'Come' });
+    expect(r.data.titles.zh?.title).toBe('退修会');
     expect(r.data.capacity).toBe(40);
     expect(r.data.price_cents).toBe(2500);
     expect(r.data.location).toBe('Camp');
@@ -70,6 +70,52 @@ describe('parseRegEventForm', () => {
     if (!r.ok) expect(r.errors.title_en).toBe('errors.required');
   });
 
+  it('reads title_<locale> / description_<locale> for every supported language, blanks included', () => {
+    const r = parseRegEventForm(
+      form({ ...base, title_es: 'Retiro', description_es: 'Venga', title_ja: '', title_xx: 'unknown', description_fr: 'Seulement' }),
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.titles).toEqual({
+      en: { title: 'Retreat', description: '' },
+      es: { title: 'Retiro', description: 'Venga' },
+      ja: { title: '', description: '' },
+      fr: { title: '', description: 'Seulement' },
+    });
+  });
+
+  it('lifecycle fields: absent stays undefined, present is parsed', () => {
+    const plain = parseRegEventForm(form(base));
+    expect(plain.ok && 'visible_from' in plain.data).toBe(false);
+    expect(plain.ok && 'waitlist_enabled' in plain.data).toBe(false);
+    expect(plain.ok && 'confirmation_prefix' in plain.data).toBe(false);
+    expect(plain.ok && 'poster' in plain.data).toBe(false);
+
+    const r = parseRegEventForm(
+      form({ ...base, visible_from: '2026-08-01T08:00', waitlist_enabled: ['0', '1'], confirmation_prefix: ' ret26 ', poster: 'media/p.png' }),
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.visible_from).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    expect(r.data.waitlist_enabled).toBe(1); // a hidden 0 followed by a ticked checkbox
+    expect(r.data.confirmation_prefix).toBe('RET26');
+    expect(r.data.poster).toBe('media/p.png');
+
+    const off = parseRegEventForm(form({ ...base, waitlist_enabled: '0', visible_from: '', confirmation_prefix: '', poster: '' }));
+    expect(off.ok && off.data.waitlist_enabled).toBe(0);
+    expect(off.ok && off.data.visible_from).toBeNull();
+    expect(off.ok && off.data.confirmation_prefix).toBeNull();
+    expect(off.ok && off.data.poster).toBeNull();
+  });
+
+  it('rejects a malformed confirmation prefix', () => {
+    for (const bad of ['TOOLONG1', 'A-B', 'a b']) {
+      const r = parseRegEventForm(form({ ...base, confirmation_prefix: bad }));
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.errors.confirmation_prefix).toBe('errors.invalidOption');
+    }
+  });
+
   it('requires a valid starts_at and rejects a malformed one', () => {
     expect(parseRegEventForm(form({ title_en: 'X' })).ok).toBe(false);
     const bad = parseRegEventForm(form({ title_en: 'X', starts_at: 'not-a-date' }));
@@ -110,9 +156,21 @@ describe('parseQuestionsForm', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.questions).toEqual([
-      { id: 7, sort: 0, type: 'text', required: 1, options: null, label_en: 'Full name', label_zh: '姓名' },
-      { sort: 1, type: 'select', required: 0, options: ['S', 'M', 'L'], label_en: 'Shirt size', label_zh: '' },
+      { id: 7, sort: 0, type: 'text', required: 1, options: null, labels: { en: 'Full name', zh: '姓名' } },
+      { sort: 1, type: 'select', required: 0, options: ['S', 'M', 'L'], labels: { en: 'Shirt size', zh: '' } },
     ]);
+  });
+
+  it('collects a label for every supported language, keeps blanks, ignores unknown languages', () => {
+    const r = parseQuestionsForm(
+      form({ 'q[0][type]': 'text', 'q[0][label_en]': 'Name', 'q[0][label_es]': 'Nombre', 'q[0][label_ja]': '', 'q[0][label_xx]': 'nope' }),
+    );
+    expect(r.ok && r.questions[0].labels).toEqual({ en: 'Name', es: 'Nombre', ja: '' });
+  });
+
+  it('requires the default language label even when another language is filled in', () => {
+    const r = parseQuestionsForm(form({ 'q[0][type]': 'text', 'q[0][label_es]': 'Solo español' }));
+    expect(r).toEqual({ ok: false, error: 'missing_label' });
   });
 
   it('splits, trims, and drops empty option lines (select/checkbox only)', () => {
@@ -140,7 +198,7 @@ describe('parseQuestionsForm', () => {
       }),
     );
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.questions.map((q) => q.label_en)).toEqual(['Kept']);
+    if (r.ok) expect(r.questions.map((q) => q.labels.en)).toEqual(['Kept']);
   });
 
   it('rejects a bad type', () => {

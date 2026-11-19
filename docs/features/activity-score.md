@@ -77,7 +77,7 @@ See the [feature visual capture notes](../design/feature-visuals.md) to reproduc
 The **Activity Score** grant lets a limited admin view `/admin/activity-score`. A super admin
 can view the same report and edit its church-wide configuration. The module depends on People
 and optionally reads Groups, Volunteer Scheduling, Registration, and Learning; it works on D1
-and PostgreSQL, although Registration itself remains Supabase-only.
+and PostgreSQL, and Registration data is read once an administrator enables that module.
 
 The report contains names, membership status, bounded counts, scores, and calculation details.
 It does not expose email addresses, group names, serving positions, event names, or excluded

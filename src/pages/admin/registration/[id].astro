@@ -16,11 +16,11 @@ import DateBadge from '../../../components/gatherings/DateBadge.astro';
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
 import { parseQuestionsForm } from '../../../lib/regForms';
-import { getEventAdmin, listQuestionsAdmin, listRegistrations, saveQuestions, cancelRegistration, type RegQuestionAdmin } from '../../../lib/regDb';
+import { getEventAdmin, listQuestions, listQuestionsAdmin, listRegistrations, saveQuestions, cancelRegistration, type RegQuestionAdmin } from '../../../lib/regDb';
 import { listEventAdmins, addEventAdmin, removeEventAdmin, listPeopleWithAccount } from '../../../lib/prayerDb';
 import { formatCents } from '../../../lib/money';
 import { tin, lab, card, btn, btnSecondary, rowBtn, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
-import { type Locale, pickPair } from '../../../lib/locales';
+import { SUPPORTED_LOCALES, localeMeta, type Locale } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const user = Astro.locals.user;
@@ -57,7 +57,7 @@ if (Astro.request.method === 'POST') {
   if (action === 'saveQuestions') {
     const parsed = parseQuestionsForm(fd);
     if (!parsed.ok) {
-      qError = parsed.error === 'bad_type' ? 'admin.reg.qErrorType' : 'admin.reg.qErrorLabel';
+      qError = parsed.error === 'bad_type' ? 'admin.reg.qErrorType' : 'admin.reg.qErrorLabelDefault';
     } else {
       await saveQuestions(db, eventId, parsed.questions);
       return Astro.redirect(`/admin/registration/${eventId}?saved=1`, 303);
@@ -67,6 +67,9 @@ if (Astro.request.method === 'POST') {
 
 const questions = await listQuestionsAdmin(db, eventId);
 const roster = await listRegistrations(db, lang, eventId);
+// Roster column headers use the same localized labels the answers carry (so each
+// answer lines up with its column even when two questions share a label).
+const rosterQuestions = await listQuestions(db, lang, eventId);
 const saved = Astro.url.searchParams.get('saved') === '1';
 const cancelled = Astro.url.searchParams.get('cancelled') === '1';
 
@@ -78,15 +81,20 @@ if (hasPortal) {
 
 // The event's display title + the localized question label (for roster headers
 // and aligning each answer to its column — the CSV keys by id, the HTML by label).
-const eventTitle = pickPair(lang, event.title_en, event.title_zh) || `#${eventId}`;
-const qLabel = (q: RegQuestionAdmin) => pickPair(lang, q.label_en, q.label_zh);
+const defaultLocale = Astro.locals.locales.default;
+const eventTitle = event.titles[lang] || event.titles[defaultLocale] || event.title_en || `#${eventId}`;
+// Question labels are editable in every enabled site language (default first, required);
+// the rest sit under a "other languages" fold. A disabled language is left out of the
+// form, which the server reads as "leave that language's text as it is".
+const { enabled } = Astro.locals.locales;
+const labelLocales: Locale[] = [defaultLocale, ...enabled.filter((code) => code !== defaultLocale)].filter((code) => SUPPORTED_LOCALES.includes(code));
+const otherLocales = labelLocales.filter((code) => code !== defaultLocale);
 
 const types: RegQuestionAdmin['type'][] = ['text', 'textarea', 'select', 'checkbox', 'yesno'];
 const needsOptions = (type: string) => type === 'select' || type === 'checkbox';
 const copy = gatheringsCopy(lang);
 const heading = t(lang, 'admin.reg.title');
 const h2 = 'font-display text-heading-sm font-bold';
-const cellCls = 'flex-1 min-w-40';
 ---
 
 <Admin title={`${eventTitle} · ${heading}`}>
@@ -106,12 +114,14 @@ const cellCls = 'flex-1 min-w-40';
     <table class="gathering-table">
       <thead class="bg-surface-sunken">
         <tr>
+          <th class={th}>{t(lang, 'admin.reg.confirmation')}</th>
           <th class={th}>{t(lang, 'admin.reg.name')}</th>
           <th class={th}>{t(lang, 'admin.reg.email')}</th>
+          <th class={th}>{t(lang, 'admin.reg.partySize')}</th>
           <th class={th}>{t(lang, 'admin.reg.status')}</th>
           <th class={th}>{t(lang, 'admin.reg.amount')}</th>
           <th class={th}>{t(lang, 'admin.reg.registered')}</th>
-          {questions.map((q) => <th class={th}>{qLabel(q)}</th>)}
+          {rosterQuestions.map((q) => <th class={th}>{q.label}</th>)}
           <th class={th}>{t(lang, 'admin.reg.actions')}</th>
         </tr>
       </thead>
@@ -119,7 +129,7 @@ const cellCls = 'flex-1 min-w-40';
         {
           roster.length === 0 ? (
             <tr>
-              <td class={`${td} text-ink-muted`} colspan={6 + questions.length}>
+              <td class={`${td} text-ink-muted`} colspan={8 + rosterQuestions.length}>
                 {t(lang, 'admin.reg.rosterEmpty')}
               </td>
             </tr>
@@ -128,19 +138,21 @@ const cellCls = 'flex-1 min-w-40';
               const byLabel = new Map(r.answers.map((a) => [a.label, a.value]));
               return (
                 <tr class="border-t border-border align-top">
+                  <td class={`${td} font-medium tabular-nums`} data-confirmation>{r.confirmation_no ?? '—'}</td>
                   <td class={`${td} font-medium`}><div class="gathering-identity"><AvatarInitials name={r.name} sizeClass="h-8 w-8 text-xs" />{r.name}</div></td>
                   <td class={`${td} break-all`}>{r.email}</td>
-                  <td class={td}><span class="gathering-roster-status" data-status={r.status}>{r.status}</span></td>
+                  <td class={`${td} tabular-nums`}>{r.party_size}</td>
+                  <td class={td}><span class="gathering-roster-status" data-status={r.status}>{t(lang, `admin.reg.status.${r.status}`)}</span></td>
                   <td class={`${td} tabular-nums`}>{formatCents(r.amount_cents, event.currency)}</td>
                   <td class={`${td} text-ink-muted tabular-nums`}>{r.created_at.slice(0, 16)}</td>
-                  {questions.map((q) => (
-                    <td class={td}>{byLabel.get(qLabel(q)) ?? ''}</td>
+                  {rosterQuestions.map((q) => (
+                    <td class={td}>{byLabel.get(q.label) ?? ''}</td>
                   ))}
                   <td class={td}>
                     <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.reg.cancelConfirm'))})`}>
                       <input type="hidden" name="action" value="cancel" />
                       <input type="hidden" name="registration_id" value={r.id} />
-                      <button type="submit" class={rowBtn} disabled={r.status === 'cancelled'}>
+                      <button type="submit" class={rowBtn} disabled={r.status === 'cancelled' || r.status === 'declined'}>
                         {t(lang, 'admin.reg.cancel')}
                       </button>
                     </form>
@@ -187,16 +199,23 @@ const cellCls = 'flex-1 min-w-40';
                 {t(lang, 'admin.reg.removeQuestion')}
               </button>
             </div>
-            <div class="flex flex-wrap gap-3">
-              <label class={cellCls}>
-                <span class={lab}>{t(lang, 'admin.reg.labelEn')}</span>
-                <input data-qname="label_en" name={`q[${i}][label_en]`} value={q.label_en} class={tin} />
-              </label>
-              <label class={cellCls}>
-                <span class={lab}>{t(lang, 'admin.reg.labelZh')}</span>
-                <input data-qname="label_zh" name={`q[${i}][label_zh]`} value={q.label_zh ?? ''} class={tin} />
-              </label>
-            </div>
+            <label class="block">
+              <span class={lab}>{t(lang, 'admin.reg.questionLabel')} · {localeMeta(defaultLocale).nativeName}</span>
+              <input data-qname={`label_${defaultLocale}`} name={`q[${i}][label_${defaultLocale}]`} value={q.labels[defaultLocale] ?? ''} lang={localeMeta(defaultLocale).bcp47} class={tin} />
+            </label>
+            {otherLocales.length > 0 && (
+              <details class="rounded-md border border-border px-3 py-2">
+                <summary class="min-h-11 cursor-pointer py-2 text-sm font-semibold text-ink-muted">{t(lang, 'admin.reg.translations')}</summary>
+                <div class="grid gap-3 pb-2 sm:grid-cols-2">
+                  {otherLocales.map((code) => (
+                    <label class="block">
+                      <span class={lab}>{localeMeta(code).nativeName}</span>
+                      <input data-qname={`label_${code}`} name={`q[${i}][label_${code}]`} value={q.labels[code] ?? ''} lang={localeMeta(code).bcp47} class={tin} />
+                    </label>
+                  ))}
+                </div>
+              </details>
+            )}
             <label class="block" data-q-options hidden={!needsOptions(q.type)}>
               <span class={lab}>{t(lang, 'admin.reg.options')}</span>
               <textarea data-qname="options" name={`q[${i}][options]`} rows="3" class={tin}>{(q.options ?? []).join('\n')}</textarea>
@@ -226,16 +245,23 @@ const cellCls = 'flex-1 min-w-40';
           </label>
           <button type="button" data-q-remove class={`${rowBtn} ml-auto`}>{t(lang, 'admin.reg.removeQuestion')}</button>
         </div>
-        <div class="flex flex-wrap gap-3">
-          <label class={cellCls}>
-            <span class={lab}>{t(lang, 'admin.reg.labelEn')}</span>
-            <input data-qname="label_en" name="q[0][label_en]" value="" class={tin} />
-          </label>
-          <label class={cellCls}>
-            <span class={lab}>{t(lang, 'admin.reg.labelZh')}</span>
-            <input data-qname="label_zh" name="q[0][label_zh]" value="" class={tin} />
-          </label>
-        </div>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.reg.questionLabel')} · {localeMeta(defaultLocale).nativeName}</span>
+          <input data-qname={`label_${defaultLocale}`} name={`q[0][label_${defaultLocale}]`} value="" lang={localeMeta(defaultLocale).bcp47} class={tin} />
+        </label>
+        {otherLocales.length > 0 && (
+          <details class="rounded-md border border-border px-3 py-2">
+            <summary class="min-h-11 cursor-pointer py-2 text-sm font-semibold text-ink-muted">{t(lang, 'admin.reg.translations')}</summary>
+            <div class="grid gap-3 pb-2 sm:grid-cols-2">
+              {otherLocales.map((code) => (
+                <label class="block">
+                  <span class={lab}>{localeMeta(code).nativeName}</span>
+                  <input data-qname={`label_${code}`} name={`q[0][label_${code}]`} value="" lang={localeMeta(code).bcp47} class={tin} />
+                </label>
+              ))}
+            </div>
+          </details>
+        )}
         <label class="block" data-q-options hidden>
           <span class={lab}>{t(lang, 'admin.reg.options')}</span>
           <textarea data-qname="options" name="q[0][options]" rows="3" class={tin} />

@@ -94,12 +94,12 @@ describe('MODULES registry', () => {
     }
   });
 
-  it('giving and registration require the supabase backend; no other module does (portal runs on D1)', () => {
+  it('only giving requires the supabase backend (portal and registration run on D1)', () => {
     expect(MODULES.giving.requiresBackend).toBe('supabase');
-    expect(MODULES.registration.requiresBackend).toBe('supabase');
+    expect(MODULES.registration.requiresBackend).toBeUndefined();
     expect(MODULES.portal.requiresBackend).toBeUndefined();
     for (const key of MODULE_KEYS) {
-      if (key !== 'giving' && key !== 'registration') expect(MODULES[key].requiresBackend).toBeUndefined();
+      if (key !== 'giving') expect(MODULES[key].requiresBackend).toBeUndefined();
     }
   });
 
@@ -131,15 +131,15 @@ describe('MODULES registry', () => {
 });
 
 describe('filterByBackend (middleware fail-safe + getEnabledModules share it)', () => {
-  it("on 'd1', drops the supabase-only modules (giving/registration) and keeps portal", () => {
+  it("on 'd1', drops the supabase-only giving module and keeps portal and registration", () => {
     const enabled = filterByBackend(MODULE_KEYS, 'd1');
     expect(enabled.has('giving')).toBe(false);
-    expect(enabled.has('registration')).toBe(false);
+    expect(enabled.has('registration')).toBe(true);
     expect(enabled.has('portal')).toBe(true);
     // Every non-backend-gated module survives.
-    expect(enabled.size).toBe(MODULE_KEYS.length - 2);
+    expect(enabled.size).toBe(MODULE_KEYS.length - 1);
     for (const key of MODULE_KEYS) {
-      if (key !== 'giving' && key !== 'registration') expect(enabled.has(key)).toBe(true);
+      if (key !== 'giving') expect(enabled.has(key)).toBe(true);
     }
   });
 

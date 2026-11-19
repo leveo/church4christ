@@ -48,9 +48,10 @@ export interface PersonRegistration {
   created_at: string;
 }
 
-// The open-window predicate, identical to regDb's OPEN_WHERE (active + opened +
+// The open-window predicate, identical to regDb's OPEN_WHERE (active + visible + opened +
 // not closed), expressed as a 1/0 flag so the list can badge each event.
 const IS_OPEN = `CASE WHEN e.active = 1
+    AND (e.visible_from IS NULL OR e.visible_from <= datetime('now'))
     AND (e.opens_at IS NULL OR e.opens_at <= datetime('now'))
     AND (COALESCE(e.closes_at, e.starts_at) > datetime('now'))
   THEN 1 ELSE 0 END`;
@@ -138,7 +139,7 @@ export async function listSpecialEventsForGroup(db: AppDb, groupId: number, loca
               e.starts_at AS starts_at,
               e.active AS active,
               ${IS_OPEN} AS is_open,
-              (SELECT count(*) FROM registrations r WHERE r.event_id = e.id AND r.status = 'confirmed') AS confirmed_count
+              (SELECT COALESCE(SUM(r.party_size), 0) FROM registrations r WHERE r.event_id = e.id AND r.status = 'confirmed') AS confirmed_count
        FROM group_reg_events g
        JOIN reg_events e ON e.id = g.reg_event_id
        LEFT JOIN reg_event_i18n el ON el.event_id = e.id AND el.locale = ?2
@@ -167,6 +168,7 @@ export async function listOpenSpecialEventsForGroup(
        LEFT JOIN reg_event_i18n ed ON ed.event_id = e.id AND ed.locale = 'en'
        WHERE g.group_id = ?1
          AND e.active = 1
+         AND (e.visible_from IS NULL OR e.visible_from <= datetime('now'))
          AND (e.opens_at IS NULL OR e.opens_at <= datetime('now'))
          AND (COALESCE(e.closes_at, e.starts_at) > datetime('now'))
        ORDER BY e.starts_at, e.id`,

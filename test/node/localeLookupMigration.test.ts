@@ -10,6 +10,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 const MIGRATIONS = readdirSync('migrations').filter((f) => f.endsWith('.sql')).sort();
 const BEFORE = MIGRATIONS.filter((f) => f < '0041');
 const FIRST_LOCALE_FK = MIGRATIONS.filter((f) => f >= '0041' && f < '0050');
+// Later migrations (0050 onward) add their own tables; this suite covers 0041-0049 only.
+const AFTER_LOCALE_FK = [...BEFORE, ...FIRST_LOCALE_FK];
 
 const LOCALE_TABLES = [
   'people',
@@ -126,14 +128,14 @@ describe('locale lookup migrations 0041-0049: schema', () => {
   });
 
   it('seeds the twelve planned languages', () => {
-    const db = migrated(MIGRATIONS);
+    const db = migrated(AFTER_LOCALE_FK);
     expect(all(db, 'SELECT code FROM supported_locales ORDER BY code').map((r) => r.code)).toEqual(
       ['de', 'en', 'es', 'fr', 'hi', 'id', 'ja', 'ko', 'ms', 'pt', 'vi', 'zh'],
     );
   });
 
   it('leaves no hard-coded locale list in the schema', () => {
-    const db = migrated(MIGRATIONS);
+    const db = migrated(AFTER_LOCALE_FK);
     const hardCoded = all(
       db,
       "SELECT name FROM sqlite_master WHERE sql LIKE '%IN (''en'',''zh'')%' AND type IN ('table','trigger','index')",
@@ -146,7 +148,7 @@ describe('locale lookup migrations 0041-0049: schema', () => {
     let after: ReturnType<typeof snapshot>;
     beforeAll(() => {
       before = snapshot(migrated(BEFORE), table);
-      after = snapshot(migrated(MIGRATIONS), table);
+      after = snapshot(migrated(AFTER_LOCALE_FK), table);
     });
 
     it('differs only by swapping the locale CHECK for the foreign key', () => {
@@ -167,7 +169,7 @@ describe('locale lookup migrations 0041-0049: schema', () => {
   describe('people', () => {
     it('replaces only the lang constraint and keeps indexes and triggers', () => {
       const before = snapshot(migrated(BEFORE), 'people');
-      const after = snapshot(migrated(MIGRATIONS), 'people');
+      const after = snapshot(migrated(AFTER_LOCALE_FK), 'people');
       const strip = (columns: Row[]) => byName(columns.filter((c) => c.name !== 'lang'));
       expect(strip(after.columns)).toEqual(strip(before.columns));
       expect(after.columns.find((c) => c.name === 'lang')).toEqual(before.columns.find((c) => c.name === 'lang'));
@@ -187,13 +189,13 @@ describe('locale lookup migrations 0041-0049: schema', () => {
         .map((r) => `${r.type}:${r.name}`)
         .sort();
     const before = names(migrated(BEFORE));
-    const after = names(migrated(MIGRATIONS));
+    const after = names(migrated(AFTER_LOCALE_FK));
     expect(after.filter((n) => !before.includes(n))).toEqual(['table:supported_locales']);
     expect(before.filter((n) => !after.includes(n))).toEqual([]);
   });
 
   it('keeps foreign keys consistent and leaves no scratch tables', () => {
-    const db = migrated(MIGRATIONS);
+    const db = migrated(AFTER_LOCALE_FK);
     expect(all(db, 'PRAGMA foreign_key_check')).toEqual([]);
     expect(all(db, "SELECT name FROM sqlite_master WHERE name LIKE '_locale_bak_%'")).toEqual([]);
     expect(all(db, 'PRAGMA integrity_check')).toEqual([{ integrity_check: 'ok' }]);
@@ -204,7 +206,9 @@ describe('locale lookup migrations 0041-0049: schema', () => {
 // careless parent rebuild would damage.
 function seededAt0040(): DatabaseSync {
   const db = migrated(BEFORE);
-  db.exec(readFileSync('seed/dev-seed.sql', 'utf8'));
+  // The Registration demo block (the file's last section) needs tables that 0050 creates,
+  // which a database frozen at 0040 does not have yet.
+  db.exec(readFileSync('seed/dev-seed.sql', 'utf8').split('-- Event Registration (free events')[0]);
   db.exec(`
     INSERT INTO newcomer_fields (id, key, type, required, active, sort, fixed) VALUES (900, 'locale_probe', 'select', 0, 1, 99, 0);
     INSERT INTO newcomer_field_options (field_id, value, sort) VALUES (900, 'a', 1);

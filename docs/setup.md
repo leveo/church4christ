@@ -12,7 +12,7 @@ same installer with real infrastructure.
 | --- | --- | --- |
 | Explore the website and community features | Local / `website-community` | Git, Node.js 22.22.1+, npm; no hosted account |
 | Start a smaller publishing site | Local / `website` | Same local tools |
-| Explore all modules, including Giving and Registration | Local / `full-church` | The local tools plus a compatible PostgreSQL database |
+| Explore all modules, including Giving and paid Registration | Local / `full-church` | The local tools plus a compatible PostgreSQL database |
 | Put an organization online | Deploy / chosen preset | Cloudflare account, organization details, origin, admin email; Supabase for Full Church |
 | Update an existing church installation | Upgrade | Follow [the upgrade runbook](upgrade.md), preserving data and configuration |
 
@@ -121,13 +121,13 @@ before setup or the development server.
 ### Setup presets
 
 `--preset` works with both `npm run onboard` and the installer. Every preset below runs on
-the default Cloudflare D1 database except Full Church. Member Portal also runs on D1 when you select it in a custom setup; only Giving and Registration need Supabase.
+the default Cloudflare D1 database except Full Church. Member Portal also runs on D1 when you select it in a custom setup; only Giving and paid Registration need Supabase.
 
 | Preset | Features |
 |---|---|
 | `website` | Bulletins, sermons, prayer sheets, prayer wall, events, articles, fellowships, page builder |
 | `website-community` | The website features plus volunteers, groups, people, check-in, attendance, newcomers, activity score, and learning (the recommended default) |
-| `full-church` | Every feature, including Member Portal, Giving, and Registration (needs Supabase because of Giving and Registration) |
+| `full-church` | Every feature, including Member Portal, Giving, and Registration (needs Supabase because of Giving and paid Registration) |
 | `checkin` | People & Households and Children Check-in |
 | `volunteer-scheduling` | Volunteer Scheduling, Spiritual Gifts, and People & Households |
 | `small-groups` | Groups, Fellowships, and People & Households |

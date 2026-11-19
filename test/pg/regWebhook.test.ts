@@ -66,7 +66,7 @@ describe.skipIf(!hasPg)('handleStripeEvent — registration branch (Postgres)', 
       active: 1,
       ...over,
     });
-    const reg = await createRegistration(db, {
+    const { id: reg } = await createRegistration(db, {
       eventId: eid,
       personId: null,
       name: 'Ann',

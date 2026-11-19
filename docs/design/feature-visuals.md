@@ -16,7 +16,7 @@ session epoch 0). The local church date displayed in the report is September 7, 
 
 The Activity Score fixture uses the default 90-day model, with Group attendance and
 Confirmed serving weighted 50 each. Registration and Learning are disabled in the model.
-Registration is unavailable on this D1 backend. These are genuine calculated results;
+Registration is off in this capture. These are genuine calculated results;
 the capture does not replace scores or fabricate participation. The onboarding image
 shows unresolved local operational checks, not a production-ready installation.
 
