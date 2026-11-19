@@ -28,3 +28,20 @@ export function eventPhase(event: RegPhaseInput, now: Date | string = new Date()
   if (at >= (event.closes_at ?? event.starts_at)) return 'closed';
   return 'open';
 }
+
+export interface RegSeatsInput {
+  capacity: number | null;
+  taken_count: number;
+  price_cents: number | null;
+  waitlist_enabled: number;
+}
+
+/** True when every seat is taken (an event with no capacity is never full). */
+export function isEventFull(event: Pick<RegSeatsInput, 'capacity' | 'taken_count'>): boolean {
+  return event.capacity !== null && event.taken_count >= event.capacity;
+}
+
+/** A full free event with the waitlist switched on takes waitlist sign-ups instead of saying "Full". Paid events never waitlist. */
+export function offersWaitlist(event: RegSeatsInput): boolean {
+  return isEventFull(event) && !(event.price_cents !== null && event.price_cents > 0) && event.waitlist_enabled === 1;
+}
