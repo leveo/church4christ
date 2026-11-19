@@ -45,5 +45,6 @@ describe('Activity Score 0016 to 0026 D1 history upgrade', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+    // Seven sqlite3 subprocesses: ~0.1 s locally, but >5 s on a loaded CI runner.
+  }, 30_000);
 });
