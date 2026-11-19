@@ -1,6 +1,6 @@
 // Public QR image for a registration email: GET /register/qr/<eventId>/<confirmation>.png.
 // It lives outside /[locale] because a mail client fetches it with no language or
-// campus cookie. The QR encodes ONLY the confirmation number (no link, no token, no
+// campus cookie (the link carries ?campus=<slug> instead). The QR encodes ONLY the confirmation number (no link, no token, no
 // personal data), so the URL is no more revealing than the email it appears in; an
 // unknown event/number pair gets the same bare 404 as a malformed one. The module
 // gate in the middleware (the /register prefix) makes it 404 when registration is off.
@@ -16,8 +16,8 @@ export const GET: APIRoute = async ({ params, locals }) => {
   const confirmation = params.confirmation ?? '';
   if (!/^\d{1,9}$/.test(rawEvent) || !CONFIRMATION_NO_RE.test(confirmation)) return notFound();
   if (!locals.modules.has('registration')) return notFound();
-  // rawDb: the request may resolve to a different campus than the registration's.
-  const found = await locals.rawDb
+  // The request's own campus-scoped database: the link carries ?campus=<slug> of the registration's campus.
+  const found = await locals.db
     .prepare(`SELECT 1 AS found FROM registrations WHERE event_id = ?1 AND confirmation_no = ?2`)
     .bind(Number(rawEvent), confirmation)
     .first<{ found: number }>();

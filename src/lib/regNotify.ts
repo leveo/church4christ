@@ -19,7 +19,7 @@ import { loadDict } from './i18n';
 import { isSupportedLocale, type Locale } from './locales';
 import { getEnabledModules } from './modules';
 import { cancelRegistrationPromoting, hashManageToken } from './regDb';
-import { cancelledEmail, confirmationEmail, promotedEmail, registrationManageUrl, registrationQrUrl, type BuiltRegEmail } from './regEmails';
+import { cancelledEmail, confirmationEmail, promotedEmail, registrationCampusSlug, registrationManageUrl, registrationQrUrl, type BuiltRegEmail } from './regEmails';
 import { issueManageToken, registrationSummary, type RegistrationSummary } from './regManage';
 
 export type RegNotifyEnv = EmailEnv & { APP_ORIGIN?: string };
@@ -127,11 +127,12 @@ export async function sendConfirmation(
       restore = rotated?.restore ?? null;
     }
     const origin = originOf(env);
+    const campus = await registrationCampusSlug(db, registrationId);
     const built = confirmationEmail(summary, {
       locale,
       origin,
-      manageUrl: token ? registrationManageUrl(origin, locale, token) : null,
-      qrUrl: registrationQrUrl(origin, summary.event.id, summary.registration.confirmation_no),
+      manageUrl: token ? registrationManageUrl(origin, locale, token, campus) : null,
+      qrUrl: registrationQrUrl(origin, summary.event.id, summary.registration.confirmation_no, campus),
     });
     const ok = await deliver(env, db, summary, 'regConfirm', built, token !== null);
     if (ok) await stampSent(db, registrationId);
@@ -152,11 +153,12 @@ export async function sendPromoted(env: RegNotifyEnv, db: AppDb, registrationId:
     if (summary.registration.status !== 'confirmed' || !summary.registration.email) return false;
     const rotated = await rotateToken(db, registrationId);
     const origin = originOf(env);
+    const campus = await registrationCampusSlug(db, registrationId);
     const built = promotedEmail(summary, {
       locale,
       origin,
-      manageUrl: rotated ? registrationManageUrl(origin, locale, rotated.token) : null,
-      qrUrl: registrationQrUrl(origin, summary.event.id, summary.registration.confirmation_no),
+      manageUrl: rotated ? registrationManageUrl(origin, locale, rotated.token, campus) : null,
+      qrUrl: registrationQrUrl(origin, summary.event.id, summary.registration.confirmation_no, campus),
     });
     const ok = await deliver(env, db, summary, 'regPromoted', built, rotated !== null);
     // A promotion mail IS the registrant's confirmation: the sweep must not send another.

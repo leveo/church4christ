@@ -97,7 +97,7 @@ describe('manage API: authorization', () => {
     expect(body.view.canEdit).toBe(true);
     expect(body.view.canCancel).toBe(true);
     expect(body.view.questions[0]).toMatchObject({ label: 'What will you bring?', value: ['Salad'] });
-    expect(body.view.qrUrl).toBe(`/register/qr/${eventId}/${created.confirmationNo}.png`);
+    expect(body.view.qrUrl).toBe(`/register/qr/${eventId}/${created.confirmationNo}.png?campus=main`);
   });
 
   it('answers a wrong, garbled, missing or replaced token with the same bare 404', async () => {

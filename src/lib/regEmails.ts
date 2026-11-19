@@ -8,6 +8,7 @@
 // dictionary. Copy lives in the `reg.email.*` dictionary keys; t() would HTML-escape
 // substituted values, so values are substituted raw here and escaped exactly once
 // where they enter the HTML part (the plain-text part and the subject stay raw).
+import type { AppDb } from './appDb';
 import { escapeHtml, type EmailAttachment } from './email';
 import { t } from './i18n';
 import { formatDateWithWeekday, utcToDatetimeLocal } from './dates';
@@ -43,14 +44,26 @@ const C_BRAND = '#2f4a7d'; /* tokens-ok */
 const BUTTON = `display:inline-block;padding:12px 24px;border-radius:999px;background:${C_BRAND};color:#ffffff;font-weight:600;text-decoration:none`; /* tokens-ok */
 
 /** The manage page link. The token rides in the fragment so it never reaches a server log. */
-export function registrationManageUrl(origin: string, locale: Locale, token: string): string {
-  return `${origin}/${locale}/register/manage#t=${token}`;
+export function registrationManageUrl(origin: string, locale: Locale, token: string, campusSlug?: string | null): string {
+  // The campus selector keeps the link on the registration's own campus when it is opened with no campus cookie.
+  return `${origin}/${locale}/register/manage${campusQuery(campusSlug)}#t=${token}`;
+}
+
+const campusQuery = (slug?: string | null): string => (slug ? `?campus=${encodeURIComponent(slug)}` : '');
+
+/** The slug of the campus a registration belongs to (not secret), or null when unknown. */
+export async function registrationCampusSlug(db: AppDb, registrationId: number): Promise<string | null> {
+  const row = await db
+    .prepare(`SELECT c.slug AS slug FROM registrations r JOIN campuses c ON c.id = r.campus_id WHERE r.id = ?1`)
+    .bind(registrationId)
+    .first<{ slug: string }>();
+  return row?.slug ?? null;
 }
 
 /** The QR image URL for a confirmed registration, or null when it has no usable confirmation number. */
-export function registrationQrUrl(origin: string, eventId: number, confirmationNo: string | null): string | null {
+export function registrationQrUrl(origin: string, eventId: number, confirmationNo: string | null, campusSlug?: string | null): string | null {
   return confirmationNo && CONFIRMATION_NO_RE.test(confirmationNo)
-    ? `${origin}/register/qr/${eventId}/${confirmationNo}.png`
+    ? `${origin}/register/qr/${eventId}/${confirmationNo}.png${campusQuery(campusSlug)}`
     : null;
 }
 

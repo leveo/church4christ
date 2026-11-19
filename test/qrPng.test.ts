@@ -80,7 +80,7 @@ describe('qrPng', () => {
 
 describe('GET /register/qr/<event>/<confirmation>.png', () => {
   const call = (eventId: string, confirmation: string, modules: string[] = ['registration']) =>
-    GET({ params: { eventId, confirmation }, locals: { modules: new Set(modules), rawDb: env.DB } } as never) as Promise<Response>;
+    GET({ params: { eventId, confirmation }, locals: { modules: new Set(modules), db: env.DB } } as never) as Promise<Response>;
 
   it('serves a registration\'s QR as an immutable public PNG', async () => {
     const eventId = await saveEvent(env.DB, { title_en: 'QR event', starts_at: '2036-01-01 10:00:00', active: 1 });

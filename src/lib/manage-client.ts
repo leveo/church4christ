@@ -36,6 +36,9 @@ export function initManagePage(root: Document = document, fetcher: typeof fetch 
     return;
   }
 
+  // The page's own campus selector rides along, so the API resolves the registration's campus.
+  const campus = new URLSearchParams(root.location?.search ?? window.location.search).get('campus');
+  const apiUrl = campus ? `/api/register/manage?campus=${encodeURIComponent(campus)}` : '/api/register/manage';
   let busy = false;
   let first = true;
   // The last edit attempt, shown again if the server bounces it.
@@ -57,7 +60,7 @@ export function initManagePage(root: Document = document, fetcher: typeof fetch 
 
   const post = async (action: string, extra: Record<string, unknown> = {}): Promise<Response | null> => {
     try {
-      return await fetcher('/api/register/manage', {
+      return await fetcher(apiUrl, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         cache: 'no-store',

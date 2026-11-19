@@ -59,7 +59,7 @@ async function resetRegistrationData(): Promise<void> {
 beforeEach(resetRegistrationData);
 
 /** A free registration lands on its manage page; the token is in the fragment only. */
-const MANAGE_LOCATION = /^\/en\/register\/manage\?new=1#t=[A-Za-z0-9_-]{43}$/;
+const MANAGE_LOCATION = /^\/en\/register\/manage\?new=1&campus=[a-z0-9-]+#t=[A-Za-z0-9_-]{43}$/;
 const tokenOf = (location: string | null): string => /#t=([A-Za-z0-9_-]{43})$/.exec(location ?? '')?.[1] ?? '';
 
 async function register(personId: number, email: string, eventId = 920): Promise<Response> {

@@ -144,8 +144,8 @@ export function seatsLeft(event: { capacity: number | null; taken_count: number 
 // ── Redirect targets ────────────────────────────────────────────────────────
 
 /** Where a freshly created registration lands. The token rides in the fragment only: it never reaches a server log. */
-export function manageLanding(locale: string, token: string): string {
-  return `/${locale}/register/manage?new=1#t=${token}`;
+export function manageLanding(locale: string, token: string, campusSlug?: string | null): string {
+  return `/${locale}/register/manage?new=1${campusSlug ? `&campus=${encodeURIComponent(campusSlug)}` : ''}#t=${token}`;
 }
 
 /** Where a replayed submission (the token exists only on the call that created the row) lands. */

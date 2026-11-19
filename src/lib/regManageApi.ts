@@ -10,7 +10,7 @@ import { formatCents } from './money';
 import { t } from './i18n';
 import { registrationICalendar } from './ical';
 import { listQuestions } from './regDb';
-import { registrationQrUrl } from './regEmails';
+import { registrationCampusSlug, registrationQrUrl } from './regEmails';
 import {
   cancelAttendee,
   cancelRegistrationSelf,
@@ -94,7 +94,7 @@ export async function buildRegistrationView(
       amountText: paid ? formatCents(reg.amount_cents, reg.currency, locale) : null,
       paid,
     },
-    qrUrl: registrationQrUrl('', event.id, reg.confirmation_no),
+    qrUrl: registrationQrUrl('', event.id, reg.confirmation_no, await registrationCampusSlug(db, registrationId)),
     attendees: s.attendees.map((a) => ({ id: a.id, name: a.name, active: a.status === 'active' })),
     // Answers show for the people who gave them; the labels are localized by the summary.
     answers: s.answers.map((a) => ({ label: a.label, value: a.value })),

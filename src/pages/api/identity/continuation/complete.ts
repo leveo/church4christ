@@ -54,11 +54,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
       return redirect(`/${locale}/identity/continue?error=invalid`, headers);
     }
     headers.append('set-cookie', clearIdentityContinuationCookieHeader(import.meta.env.PROD));
-    if (delivery.status === 'already_claimed' && result.replay === true) return businessRedirect(pending, result, locale, headers);
+    if (delivery.status === 'already_claimed' && result.replay === true) return businessRedirect(pending, result, locale, headers, locals.campus?.slug);
     if (delivery.status !== 'claimed') return redirect(`/${locale}/identity/continue?error=invalid`, headers);
     const jwt = await mintSession(vars.SESSION_SECRET, { id: result.personId, sessionEpoch: delivery.sessionEpoch }, { authMethod: 'email_otp' });
     headers.append('set-cookie', sessionCookie(jwt, import.meta.env.PROD));
-    return businessRedirect(pending, result, locale, headers);
+    return businessRedirect(pending, result, locale, headers, locals.campus?.slug);
   } catch {
     return redirect(`/${locale}/identity/continue?error=invalid`, headers);
   }
@@ -69,6 +69,7 @@ function businessRedirect(
   result: Awaited<ReturnType<typeof completeGivingContinuation>> | Awaited<ReturnType<typeof completeRegistrationContinuation>>,
   locale: string,
   headers: Headers,
+  campusSlug?: string,
 ): Response {
     if (pending.kind === 'giving' && result.status === 'redirect' && 'url' in result) return redirect(result.url, headers);
     if (pending.kind === 'registration' && result.status === 'redirect' && 'resolution' in result
@@ -76,7 +77,7 @@ function businessRedirect(
     // A freshly created free registration opens on its manage page; the token exists only in this
     // result and rides in the fragment. A replay has no token and keeps the plain confirmation page.
     if (pending.kind === 'registration' && result.status === 'done' && 'manageToken' in result && result.manageToken) {
-      return redirect(manageLanding(locale, result.manageToken), headers);
+      return redirect(manageLanding(locale, result.manageToken, campusSlug), headers);
     }
     if (pending.kind === 'registration' && 'registrationStatus' in result && result.registrationStatus === 'waitlist') {
       return redirect(`/${locale}/register/done?ok=1&status=waitlist`, headers);

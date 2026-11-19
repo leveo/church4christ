@@ -231,7 +231,7 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
       }
       // The confirmed-or-waitlisted registration opens on its manage page (the token only exists
       // on the creating call and rides in the fragment); a replay lands on the member's own page.
-      return redirect(created.manageToken ? manageLanding(locale, created.manageToken) : myEventLanding(locale, created.id));
+      return redirect(created.manageToken ? manageLanding(locale, created.manageToken, locals.campus?.slug) : myEventLanding(locale, created.id));
     }
 
     await deps.attachIdentitySource(locals.rawDb, deps.identityEnv, {

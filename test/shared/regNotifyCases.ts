@@ -56,7 +56,7 @@ export function defineRegNotifyCases(label: string, getDb: () => AppDb, backend:
       expect(m.html).toContain('Fall &lt;Retreat&gt; &amp; Picnic'); // escaped once in the HTML
       expect(m.html).toContain('Ada &lt;b&gt;Lovelace&lt;/b&gt;');
       expect(m.html).not.toContain('<b>Lovelace');
-      expect(m.html).toContain(`https://church.example/register/qr/${eventId}/${created.confirmationNo}.png`);
+      expect(m.html).toContain(`https://church.example/register/qr/${eventId}/${created.confirmationNo}.png?campus=`);
       expect(m.text).toContain(`${created.confirmationNo}`);
       expect(m.text).toContain('Fall <Retreat> & Picnic');
       expect(m.attachments).toHaveLength(1);
@@ -64,7 +64,7 @@ export function defineRegNotifyCases(label: string, getDb: () => AppDb, backend:
       expect(String(m.attachments![0].content)).toContain(`UID:registration-${created.id}@church.example`);
       // The link carries the creation token and still works afterwards.
       expect(tokenIn(m.html)).toBe(created.manageToken);
-      expect(m.html).toContain('https://church.example/en/register/manage#t=');
+      expect(m.html).toMatch(/https:\/\/church\.example\/en\/register\/manage\?campus=[a-z0-9-]+#t=/);
       expect((await findRegistrationByToken(getDb(), created.manageToken))?.id).toBe(created.id);
       expect((await row(created.id))!.confirmation_sent_at).not.toBeNull();
       // email_log holds no token.
