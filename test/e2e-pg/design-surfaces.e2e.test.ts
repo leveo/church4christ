@@ -262,7 +262,9 @@ describe('PostgreSQL design surfaces: public and serving', () => {
   it('renders the real free registration and its dynamic question', async () => {
     const html = await rendered(`/en/register/${fixture.registrationId}`);
     expect(html).toContain(fixture.registrationTitle);
-    expect(html).toContain('action="/api/identity/continuation/start"');
+    // The guest form posts to its own review step first; the continuation-start
+    // action appears only on the review page's Confirm button.
+    expect(html).toContain('name="step" value="review"');
     expect(html).toContain('name="flow" value="registration"');
     expect(html).toContain('Dietary needs');
   });
