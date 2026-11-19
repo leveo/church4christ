@@ -267,8 +267,8 @@ const actionBtn =
       {editId && <input type="hidden" name="id" value={editId} />}
       {hasErrors && <p class={noticeErr}>{t(lang, 'admin.form.fixErrors')}</p>}
 
-      <LocaleFields name="title" label={t(lang, 'admin.reg.titleEn')} values={titleValues} lang={lang} error={errors[`title_${defaultLocale}`]} />
-      <LocaleFields name="description" label={t(lang, 'admin.reg.descEn')} values={descValues} lang={lang} multiline rows={3} />
+      <div><LocaleFields name="title" label={t(lang, 'admin.reg.titleEn')} values={titleValues} lang={lang} error={errors[`title_${defaultLocale}`]} /></div>
+      <div><LocaleFields name="description" label={t(lang, 'admin.reg.descEn')} values={descValues} lang={lang} multiline rows={3} /></div>
       <div class="grid gap-4 sm:grid-cols-2">
         <label class="block">
           <span class={lab}>{t(lang, 'admin.reg.starts')}</span>

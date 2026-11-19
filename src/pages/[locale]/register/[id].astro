@@ -117,7 +117,7 @@ const when = event ? stamp(event.starts_at) : '';
       </section>
       <section class="gathering-registration-form" aria-labelledby="registration-details-heading">
         <h2 id="registration-details-heading">{copy.yourDetails}</h2>
-        <ol class="gathering-flow" aria-label={copy.registrationSteps}>{[copy.reviewDetails, copy.fillDetails, copy.confirm].map((label, i) => <li aria-current={i === (isFull ? 0 : 1) ? 'step' : undefined}><b aria-hidden="true">{i + 1}</b>{label}</li>)}</ol>
+        <ol class="gathering-flow" aria-label={copy.registrationSteps}>{[copy.reviewDetails, copy.fillDetails, copy.confirm].map((label, i) => <li aria-current={i === (isFull && !waitlistOffered || event.phase !== 'open' ? 0 : 1) ? 'step' : undefined}><b aria-hidden="true">{i + 1}</b>{label}</li>)}</ol>
 
         {errorKey && <p class={`${noticeErr} mt-6`}>{t(locale, errorKey)}</p>}
 
