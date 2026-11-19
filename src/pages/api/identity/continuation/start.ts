@@ -73,6 +73,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const eventId = Number(form.get('event_id'));
       const event = await getOpenEvent(locals.db, locale, eventId);
       if (!event) throw new Error('identity_continuation_invalid');
+      // Paid registration needs Stripe + Postgres; on D1 a priced event is refused.
+      if (locals.dbBackend === 'd1' && event.price_cents !== null && event.price_cents > 0) {
+        return redirect(`/${locale}/register/${event.id}?error=paid_unavailable`, headers);
+      }
       const questions = await listQuestions(locals.db, locale, eventId);
       const answerForm: Record<string, string | string[]> = {};
       for (const question of questions) answerForm[String(question.id)] = form.getAll(String(question.id)).map(String);

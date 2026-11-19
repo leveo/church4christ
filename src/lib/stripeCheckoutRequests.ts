@@ -1,6 +1,7 @@
 import { isSupportedLocale, type SupportedLocale } from './locales';
 import type { AppDb, AppStatement } from './appDb';
 import { sha256Utf8 } from './stripeWebhookInbox';
+import { EVENT_LOCK_AND_NUMBER_SQL, confirmationNoSql, seatsTakenSql } from './regDb';
 
 export interface StripeCheckoutParams {
   mode: 'payment';
@@ -756,11 +757,17 @@ export async function resolveRegistrationCheckoutRequest(
     db
       .prepare(`SELECT id FROM reg_events WHERE id = ?1 FOR UPDATE`)
       .bind(normalized.eventId),
+    // Take the next confirmation number (the same counter the free path uses).
+    db.prepare(EVENT_LOCK_AND_NUMBER_SQL).bind(normalized.eventId),
+    // The key is derived from the browser request id, so a retry converges on the
+    // same registration; ':' keeps it outside the client key alphabet. A paid
+    // registration never waitlists: the capacity guard below refuses it instead.
     db
       .prepare(
         `INSERT INTO registrations
-           (id, event_id, person_id, name, email, status, amount_cents, currency, submission_key)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7, ?8)`,
+           (id, event_id, person_id, name, email, status, amount_cents, currency, submission_key, confirmation_no, party_size)
+         SELECT ?1, e.id, ?3, ?4, ?5, 'pending', ?6, ?7, ?8, ${confirmationNoSql('e')}, 1
+         FROM reg_events e WHERE e.id = ?2`,
       )
       .bind(
         registrationId,
@@ -770,8 +777,11 @@ export async function resolveRegistrationCheckoutRequest(
         normalized.email,
         normalized.amountCents,
         normalized.currency,
-        `checkout-${registrationId}`,
+        `checkout:${requestId}`,
       ),
+    db
+      .prepare(`INSERT INTO reg_attendees (registration_id, sort, name, person_id) VALUES (?1, 0, ?2, ?3)`)
+      .bind(registrationId, normalized.name, normalized.personId),
   ];
   for (const [questionId, value] of normalized.answers) {
     statements.push(
@@ -801,9 +811,8 @@ export async function resolveRegistrationCheckoutRequest(
          END AS capacity_guard
          FROM reg_events e
          CROSS JOIN (
-           SELECT count(*)::integer AS taken
-           FROM registrations r
-           WHERE r.event_id = ?1 AND r.status IN ('pending','confirmed')
+           SELECT ${seatsTakenSql('e2.id')}::integer AS taken
+           FROM reg_events e2 WHERE e2.id = ?1
          ) held
          WHERE e.id = ?1
          FOR UPDATE OF e`,

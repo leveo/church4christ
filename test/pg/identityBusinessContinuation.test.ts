@@ -147,8 +147,8 @@ describe.skipIf(!hasPg)('identity business continuation claims (PostgreSQL)', ()
   });
 
   it('serializes concurrent free registration completion at capacity one in PostgreSQL', async () => {
-    const [event] = await sql.unsafe(`INSERT INTO reg_events(starts_at,capacity,price_cents,currency,closes_at,active)
-      VALUES('2032-02-01 00:00:00',1,0,'usd','2032-01-31 00:00:00',1) RETURNING id`);
+    const [event] = await sql.unsafe(`INSERT INTO reg_events(starts_at,capacity,price_cents,currency,closes_at,active,waitlist_enabled)
+      VALUES('2032-02-01 00:00:00',1,0,'usd','2032-01-31 00:00:00',1,0) RETURNING id`);
     await sql.unsafe("INSERT INTO reg_event_i18n(event_id,locale,title) VALUES($1,'en','PG Free Event')", [event.id]);
     // Widen the INSERT statement snapshot window. Without the event-row mutex,
     // both transactions evaluate capacity before either insert commits.
@@ -188,6 +188,38 @@ describe.skipIf(!hasPg)('identity business continuation claims (PostgreSQL)', ()
       await sql.unsafe('DROP TRIGGER IF EXISTS identity_test_delay_registration_insert ON registrations');
       await sql.unsafe('DROP FUNCTION IF EXISTS identity_test_delay_registration_insert()');
     }
+  });
+
+  it('waitlists the second of two concurrent free guest completions at capacity one in PostgreSQL', async () => {
+    const [event] = await sql.unsafe(`INSERT INTO reg_events(starts_at,capacity,price_cents,currency,closes_at,active,waitlist_enabled)
+      VALUES('2032-02-01 00:00:00',1,0,'usd','2032-01-31 00:00:00',1,1) RETURNING id`);
+    await sql.unsafe("INSERT INTO reg_event_i18n(event_id,locale,title) VALUES($1,'en','PG Waitlist Event')", [event.id]);
+    const intents = [crypto.randomUUID(), crypto.randomUUID()];
+    const begun = await Promise.all(intents.map((intentId, index) => beginRegistrationContinuation(db, identityEnv, {
+      campusId: 1, intentId,
+      event: { id: event.id, title: 'PG Waitlist Event', starts_at: '2032-02-01 00:00:00', closes_at: '2032-01-31 00:00:00',
+        price_cents: 0, currency: 'usd', active: 1 },
+      name: `PG Waitlist ${index}`, email: `pg-waitlist-${index}-${intentId}@example.test`, locale: 'en', answers: [],
+      now: '2032-01-01 00:00:00',
+      requestContext: identityTrustedRequestContext(new Headers({ 'CF-Connecting-IP': `203.0.113.${160 + index}` }), intentId),
+    })));
+    const ready = begun.filter(
+      (result): result is Extract<(typeof begun)[number], { status: 'verification_required' }> => result.status === 'verification_required',
+    );
+    expect(ready).toHaveLength(2);
+    const results = await Promise.all(ready.map((result, index) => completeRegistrationContinuation(db, identityEnv, {
+      campusId: 1, intentId: intents[index], publicId: result.delivery.publicId, code: result.delivery.code,
+      appOrigin: 'https://church.example', now: '2032-01-01 00:01:00',
+    })));
+    expect(results.map((r) => r.status)).toEqual(['done', 'done']);
+    expect(results.map((r) => r.registrationStatus).sort()).toEqual(['confirmed', 'waitlist']);
+    const rows = await sql.unsafe(`SELECT status,confirmation_no,
+      (SELECT count(*)::int FROM reg_attendees a WHERE a.registration_id=r.id) attendees
+      FROM registrations r WHERE event_id=$1 ORDER BY id`, [event.id]);
+    expect(rows.map((r) => [r.status, r.attendees]).sort()).toEqual([['confirmed', 1], ['waitlist', 1]]);
+    expect(new Set(rows.map((r) => r.confirmation_no)).size).toBe(2);
+    const [{ receipts }] = await sql.unsafe(`SELECT count(*)::int receipts FROM identity_business_intent_receipts WHERE intent_id IN ($1,$2)`, intents);
+    expect(receipts).toBe(2);
   });
 
   it('revalidates checkbox, select, yes/no, and text answers by question id instead of display order in PostgreSQL', async () => {

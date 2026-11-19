@@ -209,7 +209,8 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
     );
 
     const [registration] = await sql.unsafe(
-      `SELECT event_id, name, email, status, amount_cents, currency FROM registrations WHERE id=$1`,
+      `SELECT event_id, name, email, status, amount_cents, currency, submission_key, confirmation_no, party_size
+       FROM registrations WHERE id=$1`,
       [result.registrationId],
     );
     expect(registration).toMatchObject({
@@ -219,7 +220,12 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
       status: 'pending',
       amount_cents: 2500,
       currency: 'usd',
+      submission_key: `checkout:${REQUEST_A}`, // derived from the request id, so a retry converges
+      confirmation_no: expect.stringMatching(/^R\d\d-0001$/),
+      party_size: 1,
     });
+    expect(await sql.unsafe(`SELECT name, status, sort FROM reg_attendees WHERE registration_id=$1`, [result.registrationId]))
+      .toEqual([{ name: 'Ada Lovelace', status: 'active', sort: 0 }]);
     expect(await sql.unsafe(`SELECT question_id, value FROM reg_answers WHERE registration_id=$1`, [result.registrationId]))
       .toEqual([{ question_id: questionId, value: 'Blue' }]);
 
@@ -237,6 +243,28 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
     });
     expect(request.request_sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(request.request_json).not.toMatch(/secret|signature|authorization|card|headers/i);
+  });
+
+  it('numbers paid registrations from the shared per-event counter and counts party_size against capacity', async () => {
+    const eventId = await event(4);
+    await sql.unsafe(
+      `INSERT INTO registrations (event_id, name, email, status, submission_key, party_size, confirmation_no)
+       VALUES ($1, 'Big party', 'party@example.com', 'confirmed', 'party-key-0000001', 3, 'R00-0099')`,
+      [eventId],
+    );
+    await sql.unsafe(`UPDATE reg_events SET next_confirmation = 100 WHERE id = $1`, [eventId]);
+
+    // 3 seats held + this 1 = 4 of 4: fits, and takes number 100.
+    const first = await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId));
+    expect(first.kind).toBe('create');
+    const [row] = await sql.unsafe(`SELECT confirmation_no FROM registrations WHERE id=$1`, [(first as { registrationId: number }).registrationId]);
+    expect(row.confirmation_no).toMatch(/^R\d\d-0100$/);
+
+    // One more would be 5 of 4: refused, and nothing (not even the counter) is written.
+    await expect(resolveRegistrationCheckoutRequest(db, input(REQUEST_B, eventId, { email: 'late@example.com' })))
+      .rejects.toThrow('event_full');
+    expect(await sql.unsafe(`SELECT count(*)::int n FROM registrations WHERE event_id=$1`, [eventId])).toEqual([{ n: 2 }]);
+    expect(await sql.unsafe(`SELECT next_confirmation FROM reg_events WHERE id=$1`, [eventId])).toEqual([{ next_confirmation: 101 }]);
   });
 
   it('returns a capacity-one Stripe cancellation to an owned actionable retry with the same UUID', async () => {

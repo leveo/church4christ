@@ -52,10 +52,11 @@ function context(
     displayName: String(data.get('name') ?? 'Ada Lovelace'),
     email: String(data.get('email') ?? 'ada@example.com'),
   },
+  extraLocals: Record<string, unknown> = {},
 ) {
   return {
     request: new Request('https://church.example/api/register/submit', { method: 'POST', body: data }),
-    locals: { modules: new Set(['registration']), locale: 'en', user, rawDb: {}, campusMode: 'single', db: {} },
+    locals: { modules: new Set(['registration']), locale: 'en', user, rawDb: {}, campusMode: 'single', db: {}, ...extraLocals },
   } as never;
 }
 
@@ -65,7 +66,7 @@ function deps(overrides: Record<string, unknown> = {}) {
     getOpenEvent: vi.fn(async () => event(2500)),
     listQuestions: vi.fn(async () => []),
     validateAnswers: vi.fn(() => []),
-    createRegistration: vi.fn(async () => 41),
+    createRegistration: vi.fn(async () => ({ id: 41, status: 'confirmed' as const, confirmationNo: 'R26-0001' })),
     resolveRequest: vi.fn(async () => ({ kind: 'create', registrationId: 41, requestId: REQUEST_ID, requestJson: savedJson })),
     continueRequest: vi.fn(async () => ({ kind: 'create', registrationId: 41, requestId: REQUEST_ID, requestJson: savedJson })),
     createCheckout: vi.fn(async () => ({
@@ -352,5 +353,79 @@ describe('stable registration Checkout browser identity', () => {
       expect(location).toBe('/en/register/7?error=invalid');
       expect(new URL(location, 'https://church.example').searchParams.has('checkoutRequestId')).toBe(false);
     }
+  });
+});
+
+describe('registration submit: D1 paid refusal, waitlist, submission key', () => {
+  const user = { id: 9, displayName: 'Ada Lovelace', email: 'ada@example.com' };
+  const run = (dependencies: ReturnType<typeof deps>, data: FormData, locals: Record<string, unknown> = {}) =>
+    createRegistrationSubmitHandler(dependencies as never)(context(data, user, locals));
+
+  it('refuses a priced event on D1 before any identity, registration or Stripe work', async () => {
+    const dependencies = deps({ getOpenEvent: vi.fn(async () => event(2500)) });
+    const response = await run(dependencies, form(), { dbBackend: 'd1' });
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe('/en/register/7?error=paid_unavailable');
+    for (const name of ['attachIdentitySource', 'createRegistration', 'resolveRequest', 'createCheckout'] as const) {
+      expect(dependencies[name]).not.toHaveBeenCalled();
+    }
+  });
+
+  it('still takes a free event on D1 and keeps the paid flow on Postgres', async () => {
+    const free = deps({ getOpenEvent: vi.fn(async () => event(0)) });
+    expect((await run(free, form(), { dbBackend: 'd1' })).headers.get('location')).toBe('/en/register/done?ok=1');
+    expect(free.createRegistration).toHaveBeenCalledOnce();
+
+    const paid = deps({ getOpenEvent: vi.fn(async () => event(2500)) });
+    const response = await run(paid, form(), { dbBackend: 'supabase' });
+    expect(paid.resolveRequest).toHaveBeenCalledOnce();
+    expect(response.headers.get('location')).toBe('https://checkout.stripe.com/c/pay/cs_test_route');
+  });
+
+  it('sends a waitlisted free registration to the done page with status=waitlist', async () => {
+    const dependencies = deps({
+      getOpenEvent: vi.fn(async () => event(0)),
+      createRegistration: vi.fn(async () => ({ id: 42, status: 'waitlist' as const, confirmationNo: 'R26-0002' })),
+    });
+    const response = await run(dependencies, form(), { dbBackend: 'd1' });
+    expect(response.headers.get('location')).toBe('/en/register/done?ok=1&status=waitlist');
+  });
+
+  it('maps event_full to the full error', async () => {
+    const dependencies = deps({
+      getOpenEvent: vi.fn(async () => event(0)),
+      createRegistration: vi.fn(async () => { throw new Error('event_full'); }),
+    });
+    expect((await run(dependencies, form())).headers.get('location')).toBe('/en/register/7?error=full');
+  });
+
+  it('passes a server-derived submission key and allows the waitlist for a free event', async () => {
+    const dependencies = deps({ getOpenEvent: vi.fn(async () => event(0)) });
+    await run(dependencies, form());
+    expect(dependencies.createRegistration).toHaveBeenCalledWith({}, expect.objectContaining({
+      eventId: 7, status: 'confirmed', amountCents: 0, allowWaitlist: true, submissionKey: `form:${REQUEST_ID}`,
+    }));
+  });
+
+  it.each(['abcdefghij123456', 'A_b-C_d-E_f-G_h-I_j-K_l-M_n-O_p-Q_r-S_t-U_v-W_x-Y_z-0123456789ab'.slice(0, 64), 'x'.repeat(16)])(
+    'accepts a well-formed client submission_key (%s)',
+    async (clientKey) => {
+      const dependencies = deps({ getOpenEvent: vi.fn(async () => event(0)) });
+      await run(dependencies, form({ submission_key: clientKey }));
+      expect(dependencies.createRegistration).toHaveBeenCalledWith({}, expect.objectContaining({ submissionKey: clientKey }));
+    },
+  );
+
+  it.each([
+    ['too short', 'abc123'],
+    ['too long', 'k'.repeat(65)],
+    ['a colon (the server namespace)', 'srv:abcdefghijklmnop'],
+    ['a space', 'abcdefgh ijklmnop'],
+    ['a slash', 'abcdefgh/ijklmnop'],
+    ['empty', ''],
+  ])('ignores a malformed client submission_key (%s) and falls back to the derived one', async (_label, clientKey) => {
+    const dependencies = deps({ getOpenEvent: vi.fn(async () => event(0)) });
+    await run(dependencies, form({ submission_key: clientKey }));
+    expect(dependencies.createRegistration).toHaveBeenCalledWith({}, expect.objectContaining({ submissionKey: `form:${REQUEST_ID}` }));
   });
 });

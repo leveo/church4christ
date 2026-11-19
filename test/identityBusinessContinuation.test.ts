@@ -49,7 +49,10 @@ async function replayThroughCompletionRoute(input: {
   } as never) as Promise<Response>;
 }
 
-async function createD1RegistrationSchema(eventId: number, capacity: number | null): Promise<void> {
+// The Registration tables come from the real migrations (0050); the CREATE TABLE
+// IF NOT EXISTS statements below only matter for a database that lacks them.
+// `waitlist` is off by default so the existing capacity cases keep their meaning.
+async function createD1RegistrationSchema(eventId: number, capacity: number | null, waitlist = false): Promise<void> {
   await env.DB.batch([
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS reg_events (
       id INTEGER PRIMARY KEY, starts_at TEXT NOT NULL, ends_at TEXT, location TEXT,
@@ -83,8 +86,8 @@ async function createD1RegistrationSchema(eventId: number, capacity: number | nu
       value TEXT NOT NULL, PRIMARY KEY(registration_id,question_id)
     )`),
   ]);
-  await env.DB.prepare(`INSERT INTO reg_events(id,starts_at,capacity,price_cents,currency,closes_at,active)
-    VALUES(?1,'2032-02-01 00:00:00',?2,0,'usd','2032-01-31 00:00:00',1)`).bind(eventId, capacity).run();
+  await env.DB.prepare(`INSERT INTO reg_events(id,starts_at,capacity,price_cents,currency,closes_at,active,waitlist_enabled)
+    VALUES(?1,'2032-02-01 00:00:00',?2,0,'usd','2032-01-31 00:00:00',1,?3)`).bind(eventId, capacity, waitlist ? 1 : 0).run();
   await env.DB.prepare("INSERT INTO reg_event_i18n(event_id,locale,title) VALUES(?1,'en','Free Event')").bind(eventId).run();
 }
 
@@ -151,6 +154,73 @@ describe('identity business continuations', () => {
     expect(saved).toMatchObject({ event_id: eventId, status: 'confirmed', child_state: 'consumed', intent_state: 'consumed' });
     expect(saved?.business_record_key).toBe(String(saved?.registration_id));
     expect(saved?.receipt_key).toBe(String(saved?.registration_id));
+  });
+
+  it('waitlists a free guest registration when the event filled up first, and replays the waitlist outcome', async () => {
+    const eventId = 810_020;
+    await createD1RegistrationSchema(eventId, 1, true);
+    const intents = [crypto.randomUUID(), crypto.randomUUID()];
+    const complete = async (intentId: string, index: number) => {
+      const begun = await beginFreeRegistration(intentId, eventId, `waitlist-${index}-${intentId}@example.test`);
+      if (begun.status !== 'verification_required') throw new Error('expected verification');
+      const result = await completeRegistrationContinuation(env.DB, continuationEnv, {
+        campusId: 1, intentId, publicId: begun.delivery.publicId, code: begun.delivery.code,
+        appOrigin: 'https://church.example', now: '2032-01-01 00:01:00',
+      });
+      return { begun, result };
+    };
+    const first = await complete(intents[0], 0);
+    const second = await complete(intents[1], 1);
+    expect(first.result).toMatchObject({ status: 'done', registrationStatus: 'confirmed' });
+    expect(second.result).toMatchObject({ status: 'done', registrationStatus: 'waitlist' });
+
+    const rows = await env.DB.prepare(`SELECT status,confirmation_no,party_size,submission_key,
+      (SELECT count(*) FROM reg_attendees a WHERE a.registration_id=r.id) attendees
+      FROM registrations r WHERE event_id=?1 ORDER BY confirmation_no`).bind(eventId)
+      .all<{ status: string; confirmation_no: string; party_size: number; submission_key: string; attendees: number }>();
+    expect(rows.results.map((r) => [r.status, r.confirmation_no, r.party_size, r.attendees])).toEqual([
+      ['confirmed', 'R32-0001', 1, 1],
+      ['waitlist', 'R32-0002', 1, 1],
+    ]);
+    expect(rows.results[1].submission_key).toBe(`continuation:${intents[1]}`);
+    // The waitlisted guest still consumed their intent and has a receipt.
+    expect(await env.DB.prepare(`SELECT count(*) n FROM identity_business_intents WHERE intent_id IN (?1,?2) AND state='consumed'`)
+      .bind(...intents).first<number>('n')).toBe(2);
+
+    // Replaying the waitlisted guest's completion lands on the waitlist message.
+    expect(await claimSignupSessionDelivery(env.DB, continuationEnv, {
+      campusId: 1, operationId: intents[1], publicId: second.begun.delivery.publicId, code: second.begun.delivery.code,
+      now: '2032-01-01 00:01:00',
+    })).not.toBeNull();
+    const replay = await replayThroughCompletionRoute({
+      kind: 'registration', intentId: intents[1], publicId: second.begun.delivery.publicId, code: second.begun.delivery.code,
+      returnPath: `/en/register/${eventId}`,
+    });
+    expect(replay.status).toBe(303);
+    expect(replay.headers.get('location')).toBe('/en/register/done?ok=1&status=waitlist');
+  });
+
+  it('a full free event with the waitlist off aborts the whole batch: nothing inserted, counter untouched, claim released', async () => {
+    const eventId = 810_021;
+    await createD1RegistrationSchema(eventId, 1, false);
+    const run = async (intentId: string, label: string) => {
+      const begun = await beginFreeRegistration(intentId, eventId, `${label}-${intentId}@example.test`);
+      if (begun.status !== 'verification_required') throw new Error('expected verification');
+      return completeRegistrationContinuation(env.DB, continuationEnv, {
+        campusId: 1, intentId, publicId: begun.delivery.publicId, code: begun.delivery.code,
+        appOrigin: 'https://church.example', now: '2032-01-01 00:01:00',
+      });
+    };
+    expect((await run(crypto.randomUUID(), 'a')).status).toBe('done');
+    const counter = await env.DB.prepare('SELECT next_confirmation n FROM reg_events WHERE id=?1').bind(eventId).first<number>('n');
+    const losing = crypto.randomUUID();
+    expect(await run(losing, 'b')).toEqual({ status: 'invalid' });
+    expect(await env.DB.prepare('SELECT count(*) n FROM registrations WHERE event_id=?1').bind(eventId).first<number>('n')).toBe(1);
+    expect(await env.DB.prepare('SELECT count(*) n FROM reg_attendees a JOIN registrations r ON r.id=a.registration_id WHERE r.event_id=?1')
+      .bind(eventId).first<number>('n')).toBe(1);
+    expect(await env.DB.prepare('SELECT next_confirmation n FROM reg_events WHERE id=?1').bind(eventId).first<number>('n')).toBe(counter);
+    expect(await env.DB.prepare('SELECT state FROM identity_registration_continuations WHERE intent_id=?1').bind(losing).first<string>('state'))
+      .toBe('ready');
   });
 
   it('serializes concurrent free registrations at capacity one on real D1', async () => {
