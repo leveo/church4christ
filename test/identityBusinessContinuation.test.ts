@@ -247,6 +247,33 @@ describe('identity business continuations', () => {
     expect(replay.headers.get('location')).toBe('/en/register/done?ok=1&status=waitlist');
   });
 
+  it('a guest who completes registration lands on the manage page with the token in the fragment only', async () => {
+    const eventId = 810_031;
+    await createD1RegistrationSchema(eventId, 5, false);
+    await env.DB.prepare('UPDATE reg_events SET max_party_size=3 WHERE id=?1').bind(eventId).run();
+    const intentId = crypto.randomUUID();
+    // Real clock: the route completes with the current time, so the intent must be current too.
+    const begun = await beginRegistrationContinuation(env.DB, continuationEnv, {
+      campusId: 1, intentId, event: { ...freeEvent(eventId), max_party_size: 3 }, name: 'Guest Parent', email: `guest-${intentId}@example.test`,
+      locale: 'en', answers: [], party: { phone: '555 0100', attendees: [{ name: 'Guest Parent' }, { name: 'Guest Child' }] },
+      requestContext: identityTrustedRequestContext(new Headers({ 'CF-Connecting-IP': '203.0.113.121' }), intentId),
+    });
+    if (begun.status !== 'verification_required') throw new Error('expected verification');
+    const response = await replayThroughCompletionRoute({
+      kind: 'registration', intentId, publicId: begun.delivery.publicId, code: begun.delivery.code,
+      returnPath: `/en/register/${eventId}`,
+    });
+    expect(response.status).toBe(303);
+    const location = response.headers.get('location') ?? '';
+    expect(location).toMatch(/^\/en\/register\/manage\?new=1#t=[A-Za-z0-9_-]{43}$/);
+    expect(new URL(location, 'https://church.example').search).toBe('?new=1');
+    const token = /#t=(.{43})$/.exec(location)![1];
+    const ref = await findRegistrationByToken(env.DB, token);
+    expect(ref).not.toBeNull();
+    const people = await env.DB.prepare(`SELECT name FROM reg_attendees WHERE registration_id=?1 ORDER BY sort`).bind(ref!.id).all<{ name: string }>();
+    expect(people.results.map((a) => a.name)).toEqual(['Guest Parent', 'Guest Child']);
+  });
+
   it('a full free event with the waitlist off aborts the whole batch: nothing inserted, counter untouched, claim released', async () => {
     const eventId = 810_021;
     await createD1RegistrationSchema(eventId, 1, false);

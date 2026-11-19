@@ -151,6 +151,8 @@ export interface RenderOptions {
   isNew?: boolean;
   /** Edit-form validation problems from the last attempt. */
   errors?: ViewError[];
+  /** What was typed in the last attempt (edit-form field names): shown instead of the stored values, so a bounced edit loses nothing. */
+  fields?: Record<string, string[]>;
 }
 
 const STATUS_CHIP: Record<ViewStatus, string> = {
@@ -241,14 +243,17 @@ export function renderRegistrationView(view: RegistrationView, o: RenderOptions)
   // Edit form.
   if (view.canEdit) {
     const err = (path: string) => errorsByPath.get(path);
-    const field = (id: string, name: string, label: string, value: string, path: string, extra = '') => {
+    const typed = o.fields;
+    const field = (id: string, name: string, label: string, stored: string, path: string, extra = '') => {
       const e = err(path);
+      const value = typed && name in typed ? (typed[name][0] ?? '') : stored;
       return `<label class="block"><span class="${lab}">${esc(label)}</span><input id="${esc(id)}" name="${esc(name)}" class="${tin}" value="${esc(value)}"${extra}${e ? ` aria-invalid="true" aria-describedby="${esc(id)}-err"` : ''}>${e ? `<p id="${esc(id)}-err" class="${errorText}">${esc(e)}</p>` : ''}</label>`;
     };
     const people = active
       .map((a, i) => field(`e-attendee-${a.id}`, `attendee_${a.id}`, L(lb, 'register.party.person', { n: i + 1 }), a.name, `attendees.${i}.name`, ' maxlength="120"'))
       .join('');
     const questions = view.questions
+      .map((q) => (typed && `a_${q.id}` in typed ? { ...q, value: typed[`a_${q.id}`] } : q))
       .map((q) => renderQuestionField(q, { name: `a_${q.id}`, id: `e-q-${q.id}`, error: err(`q.${q.id}`), yes: L(lb, 'register.yes'), no: L(lb, 'register.no') }))
       .join('');
     out.push(

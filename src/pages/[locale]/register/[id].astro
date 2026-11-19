@@ -169,6 +169,8 @@ const hiddenFields: Array<[string, string]> = event
       ['event_id', String(event.id)],
       ['checkoutRequestId', checkoutRequestId],
       ['submission_key', submissionKey],
+      // The honeypot rides along, so a bot that fills it is still caught after the review step.
+      ['website', val('website')],
       ...(user ? ([['identitySource', '1']] as Array<[string, string]>) : ([['flow', 'registration'], ['identityIntentId', identityIntentId]] as Array<[string, string]>)),
       ['name', user ? user.displayName : val('name')],
       ['email', user ? user.email : val('email')],
@@ -227,7 +229,7 @@ const when = event ? stamp(event.starts_at) : '';
         <img src={posterSrc ?? DESIGN_IMAGES.events} alt="" width="1200" height="750" class="mt-5" />
         <p class="gathering-eyebrow">{copy.eventDetails}</p>
         <h1 class="mt-3 font-display text-heading-md font-bold">{event.title}</h1>
-        <div class="mt-5 flex items-center gap-4"><DateBadge date={event.starts_at} locale={locale} /><p class="text-sm text-ink-muted">{when}</p></div>
+        <div class="mt-5 flex items-center gap-4"><DateBadge date={utcToDatetimeLocal(event.starts_at)} locale={locale} /><p class="text-sm text-ink-muted">{when}</p></div>
         {event.location && <p class="text-sm text-ink-muted">{event.location}</p>}
         <p class="mt-2 text-sm">
           <span class="font-semibold">{t(locale, 'register.price')}:</span> {priceLabel}

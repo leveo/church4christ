@@ -416,7 +416,7 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
 
     const csv = await registrationsCsv(db, 'en', ev);
     const lines = csv.split('\r\n');
-    expect(lines[0]).toBe('Confirmation,Name,Email,Status,Party size,Amount,Registered,Comment');
+    expect(lines[0]).toBe('Confirmation,Name,Email,Status,Party size,Amount,Registered,Comment,People,Phone');
     expect(lines[1]).toMatch(/^R\d\d-0002,Second Reg,/); // newest first (id tiebreak)
     expect(lines[2]).toMatch(/^R\d\d-0001,First Reg,/);
     expect(lines[2]).toContain('15.00'); // integer cents → dollars

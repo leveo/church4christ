@@ -32,10 +32,11 @@ if (!ref) {
 const here = localePath(locale, `/my/events/${id}`);
 
 let errors: ViewError[] = [];
+let typed: Record<string, string[]> | undefined;
 let denied = false;
 let view = null;
 if (Astro.request.method === 'POST') {
-  let bag = {};
+  let bag: Record<string, string[]> = {};
   try {
     bag = bagFromFormData(await Astro.request.formData());
   } catch {
@@ -66,6 +67,7 @@ if (Astro.request.method === 'POST') {
     }
     if (outcome.kind === 'invalid') {
       errors = outcome.errors;
+      typed = bag;
       view = outcome.view;
     } else if (outcome.kind === 'not_allowed') {
       denied = true;
@@ -88,6 +90,7 @@ const html = renderRegistrationView(view, {
   notice,
   isNew: Astro.url.searchParams.get('new') === '1',
   errors,
+  fields: typed,
 });
 ---
 

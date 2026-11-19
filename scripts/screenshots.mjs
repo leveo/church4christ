@@ -341,6 +341,20 @@ const LEGACY_CAPTURE_ROWS = [
       { wait: '[data-confirmation]' },
     ],
   })),
+  // The lower half of the manage page: the edit form and the cancel section (registers for real, like manage.png).
+  {
+    path: '/en/register/920', out: 'docs/images/registration/manage-edit.png', backend: 'd1', sessionIdentity: DAVID,
+    finalPath: '/en/register/manage', anchorSelector: '#reg-edit', anchorMargin: 40, expectedText: 'Doors open at 5:30 pm',
+    interact: [
+      { wait: '[data-household]:not([hidden])' },
+      { click: '[data-chip][data-name="Amy Chen"]' },
+      { click: '[data-chip][data-name="Mia Chen"]' },
+      { fill: { 'input[name="phone"]': '(555) 010-2020', 'select[name="921"]': 'Main dish' } },
+      { submit: '[data-register-form]' },
+      { submit: 'form[action="/api/register/submit"]' },
+      { wait: '[data-confirmation]' },
+    ],
+  },
   { path: '/admin/registration?edit=920', out: 'docs/images/registration/admin-editor-party.png', admin: true, backend: 'd1', anchorSelector: 'input[name="max_party_size"]', anchorMargin: 120, expectedText: 'Max people per registration' },
   // Children's check-in (Task 8). The kiosk needs no session — the token in
   // the URL is the gate — so it captures in the same admin-bypass pass. The

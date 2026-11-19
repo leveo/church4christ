@@ -417,6 +417,13 @@ describe('Registration on D1: a family signs up, reviews, manages and cancels on
     const waitlisted = await register(...GRACE);
     expect(waitlisted.headers.get('location')).toMatch(MANAGE_LOCATION);
     expect(await env.DB.prepare(`SELECT status FROM registrations WHERE person_id = ?1`).bind(GRACE[0]).first<string>('status')).toBe('waitlist');
+    // Each registration was mailed its confirmation once (the double submit sent nothing more), with no token in the log.
+    const confirmations = (await env.DB.prepare(`SELECT kind, to_email FROM email_log ORDER BY id`).all<{ kind: string; to_email: string }>()).results;
+    expect(confirmations.map((m) => [m.kind, m.to_email])).toEqual([
+      ['regConfirm', SARAH[1]],
+      ['regConfirm', GRACE[1]],
+    ]);
+    expect(await env.DB.prepare(`SELECT count(*) n FROM registrations WHERE confirmation_sent_at IS NOT NULL`).first<number>('n')).toBe(2);
     await env.DB.prepare(`DELETE FROM email_log`).run();
 
     // ... is promoted when Sarah says one person cannot come.

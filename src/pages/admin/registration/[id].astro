@@ -149,7 +149,7 @@ const h2 = 'font-display text-heading-sm font-bold';
                   <td class={`${td} font-medium`}><div class="gathering-identity"><AvatarInitials name={r.name} sizeClass="h-8 w-8 text-xs" />{r.name}</div></td>
                   <td class={`${td} break-all`}>{r.email}</td>
                   <td class={`${td} tabular-nums`}>{r.party_size}</td>
-                  <td class={td} data-people>{r.people.length > 1 ? r.people.join(', ') : ''}</td>
+                  <td class={td} data-people>{r.people.length > 1 || (r.people.length === 1 && r.people[0] !== r.name) ? r.people.join(', ') : ''}</td>
                   <td class={`${td} whitespace-nowrap`}>{r.phone ?? ''}</td>
                   <td class={td}><span class="gathering-roster-status" data-status={r.status}>{t(lang, `admin.reg.status.${r.status}`)}</span></td>
                   <td class={`${td} tabular-nums`}>{formatCents(r.amount_cents, event.currency)}</td>

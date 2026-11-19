@@ -38,13 +38,16 @@ export function initManagePage(root: Document = document, fetcher: typeof fetch 
 
   let busy = false;
   let first = true;
-  const show = (view: RegistrationView, extra: { notice?: 'saved' | 'cancelled' | null; errors?: ViewError[] } = {}): void => {
+  // The last edit attempt, shown again if the server bounces it.
+  let lastFields: Record<string, string[]> | undefined;
+  const show = (view: RegistrationView, extra: { notice?: 'saved' | 'cancelled' | null; errors?: ViewError[]; fields?: Record<string, string[]> } = {}): void => {
     container.innerHTML = renderRegistrationView(view, {
       mode: 'token',
       labels,
       isNew: first && isNew,
       notice: extra.notice ?? null,
       errors: extra.errors,
+      fields: extra.fields,
     });
     first = false;
     const focus = container.querySelector<HTMLElement>('[aria-invalid="true"]') ?? container.querySelector<HTMLElement>('#e-summary');
@@ -78,7 +81,7 @@ export function initManagePage(root: Document = document, fetcher: typeof fetch 
     }
     if (res.ok && 'view' in body && 'ok' in body) return show(body.view, { notice: body.notice });
     const fail = body as ApiFail;
-    if (res.status === 422 && fail.view) return show(fail.view, { errors: fail.errors });
+    if (res.status === 422 && fail.view) return show(fail.view, { errors: fail.errors, fields: lastFields });
     if (res.status === 409 && fail.view) {
       show(fail.view);
       const note = root.createElement('p');
@@ -126,6 +129,7 @@ export function initManagePage(root: Document = document, fetcher: typeof fetch 
     if (action === 'update') {
       const fields: Record<string, string[]> = {};
       for (const [key, value] of data.entries()) if (typeof value === 'string') (fields[key] ??= []).push(value);
+      lastFields = fields;
       void run('update', { fields });
     } else if (action === 'cancel_attendee') {
       void run('cancel_attendee', { attendee_id: Number(data.get('attendee_id')) });

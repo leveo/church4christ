@@ -83,6 +83,22 @@ describe('renderRegistrationView', () => {
     expect(bad).toContain('id="e-q-11-err"');
   });
 
+  it('shows what was typed beside the error, so a bounced edit loses nothing', () => {
+    const html = renderRegistrationView(view(), {
+      mode: 'session',
+      action: '/en/my/events/9',
+      labels,
+      errors: [{ path: 'contact.phone', code: 'invalid' }],
+      fields: { name: ['Ada Typed'], phone: ['call me'], attendee_2: ['Byron Typed'], a_11: ['Typed answer'] },
+    });
+    expect(html).toContain('value="Ada Typed"');
+    expect(html).toContain('value="call me"');
+    expect(html).toContain('value="Byron Typed"');
+    expect(html).toContain('value="Typed answer"');
+    expect(html).not.toContain('value="Ada"'); // the stored name is replaced, not shown twice
+    expect(html).toContain('aria-describedby="e-phone-err"');
+  });
+
   it('shows no actions on a cancelled registration', () => {
     const html = renderRegistrationView(view({ registration: { ...view().registration, status: 'cancelled' }, canEdit: false, canCancel: false }), { mode: 'token', labels });
     expect(html).not.toContain('data-reg-form');

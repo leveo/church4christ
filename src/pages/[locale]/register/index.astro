@@ -52,7 +52,7 @@ const when = (e: RegPublicEvent) => stamp(e.starts_at);
       events.length > 0 ? (
         <ul class="gathering-registration-list">
           {events.map((e) => (
-            <li class="gathering-registration-card"><DateBadge date={e.starts_at} locale={locale} /><div>
+            <li class="gathering-registration-card"><DateBadge date={utcToDatetimeLocal(e.starts_at)} locale={locale} /><div>
               {mediaPath(e.poster) && <img src={mediaPath(e.poster)!} alt="" class="gathering-registration-card-poster" loading="lazy" />}
               <div class="flex items-start justify-between gap-3">
                 <h2 class="font-display text-lg font-bold">
