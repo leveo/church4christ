@@ -11,6 +11,7 @@ import { IDENTITY_CONTINUATION_COOKIE, clearIdentityContinuationCookieHeader, op
 import { mintSession, sessionCookie } from '../../../../lib/session';
 import { parseLocale } from '../../../../lib/locales';
 import { sendConfirmation } from '../../../../lib/regNotify';
+import { manageLanding } from '../../../../lib/regPublic';
 
 export const prerender = false;
 type ContinuationEnv = IdentityBusinessContinuationEnv & EmailEnv & { SESSION_SECRET?: string; APP_ORIGIN?: string };
@@ -72,6 +73,11 @@ function businessRedirect(
     if (pending.kind === 'giving' && result.status === 'redirect' && 'url' in result) return redirect(result.url, headers);
     if (pending.kind === 'registration' && result.status === 'redirect' && 'resolution' in result
       && result.resolution?.kind === 'redirect') return redirect(result.resolution.checkoutUrl, headers);
+    // A freshly created free registration opens on its manage page; the token exists only in this
+    // result and rides in the fragment. A replay has no token and keeps the plain confirmation page.
+    if (pending.kind === 'registration' && result.status === 'done' && 'manageToken' in result && result.manageToken) {
+      return redirect(manageLanding(locale, result.manageToken), headers);
+    }
     if (pending.kind === 'registration' && 'registrationStatus' in result && result.registrationStatus === 'waitlist') {
       return redirect(`/${locale}/register/done?ok=1&status=waitlist`, headers);
     }

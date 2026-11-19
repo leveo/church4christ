@@ -86,10 +86,39 @@ const { mode = 'admin' } = Astro.props;
   .gathering-kiosk :global(.kiosk-checkout input), .gathering-kiosk :global(.kiosk-checkout button) { min-height: 3.25rem; }
   .gathering-kiosk :global(.kiosk-choice > span:active), .gathering-kiosk :global(.kiosk-result:active), .gathering-kiosk :global(.kiosk-search-panel button:active) { transform: scale(.98); opacity: .85; }
   .gathering-kiosk :global(.kiosk-checkout input) { font-family: var(--font-mono); font-size: 1.5rem; }
+  /* Registration party flow: person rows, the review summary and the registrant's own page. */
+  .gathering-surface :global(.reg-party) { padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); min-width: 0; }
+  .gathering-surface :global(.reg-person-you) { font-size: .875rem; font-weight: 600; }
+  .gathering-surface :global(.reg-person-row) { display: flex; align-items: flex-end; gap: .5rem; flex-wrap: wrap; }
+  .gathering-surface :global(.reg-person-row[hidden]), .gathering-surface :global([data-household][hidden]), .gathering-surface :global([data-add-person][hidden]), .gathering-surface :global([data-remove-person][hidden]) { display: none; }
+  .gathering-surface :global(.reg-chip) { min-height: 2.75rem; padding: .4rem .9rem; border: 1px solid var(--color-border); border-radius: var(--radius-full); background: var(--color-surface-raised); font-size: .875rem; font-weight: 600; color: var(--color-ink); }
+  .gathering-surface :global(.reg-chip[aria-pressed="true"]) { border-color: var(--color-primary); background: var(--color-primary-soft); color: var(--color-on-primary-soft); }
+  .gathering-surface :global(.reg-facts) { display: grid; gap: .85rem; margin: 0; }
+  .gathering-surface :global(.reg-facts > div) { display: grid; grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr); gap: .25rem 1rem; align-items: baseline; }
+  .gathering-surface :global(.reg-facts dt) { font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--color-ink-muted); }
+  .gathering-surface :global(.reg-facts dd) { margin: 0; font-size: .9375rem; overflow-wrap: anywhere; }
+  .gathering-surface :global(.reg-manage) { max-width: 44rem; margin-inline: auto; padding-block: 2rem 4rem; display: block; }
+  .gathering-surface :global(.reg-manage > div), .gathering-surface :global(.reg-view) { display: grid; gap: 1rem; }
+  .gathering-surface :global(.reg-card) { padding: 1.25rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-raised); min-width: 0; }
+  .gathering-surface :global(.reg-card h2) { font-size: 1rem; font-weight: 650; margin-bottom: .75rem; }
+  .gathering-surface :global(.reg-head) { display: grid; gap: .5rem; }
+  .gathering-surface :global(.reg-head h1) { overflow-wrap: anywhere; }
+  .gathering-surface :global(.reg-number) { font-family: var(--font-mono); font-size: 1.125rem; font-weight: 700; letter-spacing: .04em; color: var(--color-primary); }
+  .gathering-surface :global(.reg-banner) { padding: .9rem 1.1rem; border: 1px solid var(--color-success); border-radius: var(--radius-sm); background: var(--color-success-soft); color: var(--color-success); font-weight: 600; }
+  .gathering-surface :global(.reg-qr) { display: grid; justify-items: start; gap: .5rem; margin: 1.25rem 0 0; color: var(--color-ink); }
+  .gathering-surface :global(.reg-qr img) { width: 10rem; height: 10rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-raised); padding: .35rem; }
+  .gathering-surface :global(.reg-qr figcaption) { font-size: .8125rem; color: var(--color-ink-muted); }
+  .gathering-surface :global(.reg-notes) { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--color-border); font-size: .875rem; color: var(--color-ink-muted); white-space: pre-line; }
+  .gathering-surface :global(.reg-people) { display: grid; gap: .5rem; padding: 0; list-style: none; }
+  .gathering-surface :global(.reg-person) { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; padding: .5rem 0; border-bottom: 1px solid var(--color-border); }
+  .gathering-surface :global(.reg-person-gone > span:first-child) { text-decoration: line-through; color: var(--color-ink-muted); }
+  .gathering-surface :global(.reg-actions) { display: flex; flex-wrap: wrap; gap: .75rem; }
+  .gathering-surface :global(.reg-danger) { border-color: var(--color-danger); }
+  .gathering-surface :global(.reg-error-summary) { padding: .75rem 1rem; border: 1px solid var(--color-danger); border-radius: var(--radius-sm); background: var(--color-danger-soft); color: var(--color-danger); font-weight: 600; }
   @media (max-width: 900px) { .gathering-surface :global(.gathering-registration-detail) { grid-template-columns: 1fr; gap: 1.5rem; } .gathering-surface :global(.gathering-registration-about) { position: static; } .gathering-surface :global(.gathering-registration-about > img) { aspect-ratio: 2.4; } .gathering-surface :global(.gathering-kiosk-panel) { grid-template-columns: 1fr; } }
   @media (max-width: 640px) { .gathering-surface :global(.gathering-registration-list) { grid-template-columns: 1fr; } .gathering-surface :global(.gathering-registration-card) { padding: 1rem; gap: 1rem; } .gathering-surface :global(.gathering-registration-form) { padding: 1.25rem; } .gathering-surface :global(.gathering-children-banner) { grid-template-columns: 1fr; } .gathering-surface :global(.gathering-children-banner img) { display: none; } .gathering-kiosk :global(.kiosk-welcome) { padding: .75rem; min-height: 0; margin: .5rem 0; } .gathering-kiosk :global(.kiosk-scene), .gathering-kiosk :global(.kiosk-welcome p), .gathering-kiosk :global(.gathering-flow) { display: none; } .gathering-kiosk :global(.kiosk-welcome h1) { font-size: 1.5rem; } .gathering-kiosk :global(.kiosk-search-panel) { padding: 1rem; } .gathering-kiosk :global(.kiosk-search-panel input) { font-size: 1rem; } .gathering-kiosk :global(.kiosk-section) { padding: 1rem; } .gathering-surface :global(.gathering-complete) { margin: 2rem 1rem; padding: 1.5rem; } }
 </style>
 
 <style>
-  @media (max-width: 480px) { .gathering-kiosk :global(.kiosk-section > .grid) { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 480px) { .gathering-kiosk :global(.kiosk-section > .grid) { grid-template-columns: minmax(0, 1fr); } .gathering-surface :global(.reg-facts > div) { grid-template-columns: minmax(0, 1fr); } }
 </style>

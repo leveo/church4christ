@@ -1649,21 +1649,41 @@ interface RosterRow {
   amount_cents: number;
   confirmation_no: string | null;
   party_size: number;
+  phone: string | null;
   created_at: string;
 }
 
-const ROSTER_SELECT = `SELECT id, name, email, status, amount_cents, confirmation_no, party_size, created_at
+const ROSTER_SELECT = `SELECT id, name, email, status, amount_cents, confirmation_no, party_size, phone, created_at
        FROM registrations WHERE event_id = ?1
        ORDER BY created_at DESC, id DESC`;
 
+/** The names of the people still on each of an event's registrations (registration id -> names in
+ *  form order). Joined in code, not SQL, so the same statement serves D1 and Postgres. */
+async function activePeopleByRegistration(db: AppDb, eventId: number): Promise<Map<number, string[]>> {
+  const { results } = await db
+    .prepare(
+      `SELECT a.registration_id AS registration_id, a.name AS name
+       FROM reg_attendees a
+       JOIN registrations r ON r.id = a.registration_id
+       WHERE r.event_id = ?1 AND a.status = 'active'
+       ORDER BY a.registration_id, a.sort, a.id`,
+    )
+    .bind(eventId)
+    .all<{ registration_id: number; name: string }>();
+  const byReg = new Map<number, string[]>();
+  for (const row of results) (byReg.get(row.registration_id) ?? byReg.set(row.registration_id, []).get(row.registration_id)!).push(row.name);
+  return byReg;
+}
+
 /** The registration roster for an event, newest first (every status, waitlist
- *  included), each row carrying its confirmation number, party size and its
- *  answers as localized { label, value } pairs (question sort order). */
+ *  included), each row carrying its confirmation number, party size, phone, the
+ *  names of its people and its answers as localized { label, value } pairs
+ *  (question sort order). */
 export async function listRegistrations(
   db: AppDb,
   locale: Locale,
   eventId: number,
-): Promise<Array<RosterRow & { answers: Array<{ label: string; value: string }> }>> {
+): Promise<Array<RosterRow & { people: string[]; answers: Array<{ label: string; value: string }> }>> {
   const { results: regs } = await db.prepare(ROSTER_SELECT).bind(eventId).all<RosterRow>();
 
   const { select, joins } = i18nJoin('reg_question_i18n', 'q', 'question_id', ['label'], locale);
@@ -1686,13 +1706,16 @@ export async function listRegistrations(
     list.push({ label: a.label ?? '', value: a.value });
     byReg.set(a.registration_id, list);
   }
-  return regs.map((r) => ({ ...r, answers: byReg.get(r.id) ?? [] }));
+  const people = await activePeopleByRegistration(db, eventId);
+  return regs.map((r) => ({ ...r, people: people.get(r.id) ?? [], answers: byReg.get(r.id) ?? [] }));
 }
 
 /**
  * The event roster as RFC4180 CSV: header Confirmation,Name,Email,Status,Party
  * size,Amount,Registered followed by one column per question (localized label,
  * question sort order), rows newest first (every status, waitlist included).
+ * People (the names still on the registration, joined with "; ") and Phone follow
+ * the question columns, so existing exports keep their column order.
  * Amount is a plain dollars string - cents are integers, so
  * (amount_cents/100).toFixed(2) is exact. Each field goes through the shared
  * csvCell: spreadsheet formula injection is neutralized (a leading = + - @ / tab /
@@ -1722,7 +1745,8 @@ export async function registrationsCsv(db: AppDb, locale: Locale, eventId: numbe
     byReg.set(a.registration_id, m);
   }
 
-  const header = ['Confirmation', 'Name', 'Email', 'Status', 'Party size', 'Amount', 'Registered', ...questions.map((q) => q.label)];
+  const people = await activePeopleByRegistration(db, eventId);
+  const header = ['Confirmation', 'Name', 'Email', 'Status', 'Party size', 'Amount', 'Registered', ...questions.map((q) => q.label), 'People', 'Phone'];
   const lines = [header.map(csvCell).join(',')];
   for (const r of regs) {
     const m = byReg.get(r.id) ?? new Map<number, string>();
@@ -1735,6 +1759,8 @@ export async function registrationsCsv(db: AppDb, locale: Locale, eventId: numbe
       (r.amount_cents / 100).toFixed(2),
       r.created_at,
       ...questions.map((q) => m.get(q.id) ?? ''),
+      (people.get(r.id) ?? []).join('; '),
+      r.phone ?? '',
     ];
     lines.push(cells.map(csvCell).join(','));
   }

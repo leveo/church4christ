@@ -63,7 +63,7 @@ const spotsLeft = (e: RegEvent) => (e.capacity !== null ? Math.max(0, e.capacity
               <li class="member-event-ticket rounded-lg border border-border bg-surface-raised p-5">
                 <time datetime={r.starts_at} class="event-date"><strong>{r.starts_at.slice(8, 10)}</strong><span>{formatDate(r.starts_at.slice(0, 10), locale)}</span></time><div>
                 <div class="flex flex-wrap items-center gap-2">
-                  <span class="font-semibold">{r.event_title}</span>
+                  <a href={localePath(locale, `/my/events/${r.id}`)} class="font-semibold hover:underline">{r.event_title}</a>
                   <span class={`${badge} ${statusChip[r.status]}`}>{t(locale, `portal.events.status.${r.status}`)}</span>
                 </div>
                 <p class="mt-1 text-sm text-ink-muted">{when(r.starts_at)}</p>

@@ -5,6 +5,7 @@ import {
   createRegistrationSubmitHandler,
 } from '../src/pages/api/register/submit';
 import { StripeError } from '../src/lib/stripe';
+import { validateSubmission } from '../src/lib/regManage';
 import {
   checkoutRequestIdForRender,
   newCheckoutRequestId,
@@ -65,7 +66,10 @@ function deps(overrides: Record<string, unknown> = {}) {
     stripeEnv: { STRIPE_MODE: 'test', STRIPE_SECRET_KEY: 'sk_test_route', APP_ORIGIN: 'http://localhost:4321' },
     getOpenEvent: vi.fn(async () => event(2500)),
     listQuestions: vi.fn(async () => []),
-    validateAnswers: vi.fn(() => []),
+    validateSubmission: vi.fn(validateSubmission),
+    // The household check needs a database; the fake keeps the contact's own link and drops nothing else.
+    restrictAttendeePersons: vi.fn(async (_db: unknown, contactPersonId: number | null, attendees: Array<{ name: string; personId: number | null }>) =>
+      attendees.map((a, i) => ({ name: a.name, personId: i === 0 ? contactPersonId : a.personId }))),
     createRegistration: vi.fn(async () => ({ id: 41, status: 'confirmed' as const, confirmationNo: 'R26-0001' })),
     resolveRequest: vi.fn(async () => ({ kind: 'create', registrationId: 41, requestId: REQUEST_ID, requestJson: savedJson })),
     continueRequest: vi.fn(async () => ({ kind: 'create', registrationId: 41, requestId: REQUEST_ID, requestJson: savedJson })),
@@ -231,7 +235,7 @@ describe('stable registration Checkout browser identity', () => {
     expect(dependencies.continueRequest).toHaveBeenCalledWith({}, REQUEST_ID, 7);
     expect(dependencies.resolveRequest).not.toHaveBeenCalled();
     expect(dependencies.listQuestions).not.toHaveBeenCalled();
-    expect(dependencies.validateAnswers).not.toHaveBeenCalled();
+    expect(dependencies.validateSubmission).not.toHaveBeenCalled();
   });
 
   it('continues durable checkout state even when the event is no longer open or currently paid', async () => {
@@ -373,7 +377,8 @@ describe('registration submit: D1 paid refusal, waitlist, submission key', () =>
 
   it('still takes a free event on D1 and keeps the paid flow on Postgres', async () => {
     const free = deps({ getOpenEvent: vi.fn(async () => event(0)) });
-    expect((await run(free, form(), { dbBackend: 'd1' })).headers.get('location')).toBe('/en/register/done?ok=1');
+    // No manage token in this fake result = a replayed submission, which lands on the member's own page.
+    expect((await run(free, form(), { dbBackend: 'd1' })).headers.get('location')).toBe('/en/my/events/41?new=1');
     expect(free.createRegistration).toHaveBeenCalledOnce();
 
     const paid = deps({ getOpenEvent: vi.fn(async () => event(2500)) });
@@ -382,13 +387,29 @@ describe('registration submit: D1 paid refusal, waitlist, submission key', () =>
     expect(response.headers.get('location')).toBe('https://checkout.stripe.com/c/pay/cs_test_route');
   });
 
-  it('sends a waitlisted free registration to the done page with status=waitlist', async () => {
+  it('sends a free registration (confirmed or waitlisted) to its manage page with the token in the fragment only', async () => {
+    const token = 'W'.repeat(43);
+    for (const status of ['confirmed', 'waitlist'] as const) {
+      const dependencies = deps({
+        getOpenEvent: vi.fn(async () => event(0)),
+        createRegistration: vi.fn(async () => ({ id: 42, status, confirmationNo: 'R26-0002', manageToken: token })),
+        sendConfirmation: vi.fn(async () => true),
+      });
+      const response = await run(dependencies, form(), { dbBackend: 'd1' });
+      expect(response.status).toBe(303);
+      const location = response.headers.get('location')!;
+      expect(location).toBe(`/en/register/manage?new=1#t=${token}`);
+      expect(new URL(location, 'https://church.example').search).toBe('?new=1');
+    }
+  });
+
+  it('sends a replayed submission (no token) to the member’s own registration page', async () => {
     const dependencies = deps({
       getOpenEvent: vi.fn(async () => event(0)),
-      createRegistration: vi.fn(async () => ({ id: 42, status: 'waitlist' as const, confirmationNo: 'R26-0002' })),
+      createRegistration: vi.fn(async () => ({ id: 43, status: 'confirmed' as const, confirmationNo: 'R26-0003', manageToken: null })),
     });
     const response = await run(dependencies, form(), { dbBackend: 'd1' });
-    expect(response.headers.get('location')).toBe('/en/register/done?ok=1&status=waitlist');
+    expect(response.headers.get('location')).toBe('/en/my/events/43?new=1');
   });
 
   it('maps event_full to the full error', async () => {
@@ -459,7 +480,96 @@ describe('registration submit: confirmation email', () => {
 
     const waitlisted = freeDeps({ id: 42, status: 'waitlist', confirmationNo: 'R26-0002', manageToken: 'U'.repeat(43) });
     const response = await createRegistrationSubmitHandler(waitlisted as never)(context(form()));
-    expect(response.headers.get('location')).toContain('status=waitlist');
+    expect(response.headers.get('location')).toBe(`/en/register/manage?new=1#t=${'U'.repeat(43)}`);
     expect(waitlisted.sendConfirmation).toHaveBeenCalledOnce();
+  });
+});
+
+describe('registration submit: a party, validation and household links', () => {
+  const user = { id: 9, displayName: 'Ada Lovelace', email: 'ada@example.com' };
+  const partyEvent = (priceCents: number | null) => ({ ...event(priceCents), max_party_size: 4 });
+  const run = (dependencies: ReturnType<typeof deps>, data: FormData, locals: Record<string, unknown> = {}) =>
+    createRegistrationSubmitHandler(dependencies as never)(context(data, user, locals));
+  const sink = () => vi.fn(async () => true);
+
+  it('writes the whole party and the phone, then lands on the manage page', async () => {
+    const dependencies = deps({
+      getOpenEvent: vi.fn(async () => partyEvent(0)),
+      createRegistration: vi.fn(async () => ({ id: 50, status: 'confirmed' as const, confirmationNo: 'R26-0050', manageToken: 'M'.repeat(43) })),
+      sendConfirmation: sink(),
+    });
+    const response = await run(
+      dependencies,
+      form({ phone: '+1 555 0100', person_name_1: 'Byron Lovelace', person_id_1: '12', person_name_2: '', person_name_3: 'Anne Isabella' }),
+    );
+    expect(response.headers.get('location')).toBe(`/en/register/manage?new=1#t=${'M'.repeat(43)}`);
+    expect(dependencies.restrictAttendeePersons).toHaveBeenCalledWith(expect.anything(), 9, [
+      { name: 'Ada Lovelace', personId: null },
+      { name: 'Byron Lovelace', personId: 12 },
+      { name: 'Anne Isabella', personId: null },
+    ]);
+    expect(dependencies.createRegistration).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      personId: 9,
+      phone: '+1 555 0100',
+      attendees: [
+        { name: 'Ada Lovelace', personId: 9 },
+        { name: 'Byron Lovelace', personId: 12 },
+        { name: 'Anne Isabella', personId: null },
+      ],
+    }));
+  });
+
+  it('uses what restrictAttendeePersons returns, so a forged household link is dropped', async () => {
+    const dependencies = deps({
+      getOpenEvent: vi.fn(async () => partyEvent(0)),
+      restrictAttendeePersons: vi.fn(async (_db: unknown, _id: number, attendees: Array<{ name: string }>) =>
+        attendees.map((a) => ({ name: a.name, personId: null }))),
+      sendConfirmation: sink(),
+    });
+    await run(dependencies, form({ person_name_1: 'Stranger', person_id_1: '999' }));
+    const written = (dependencies.createRegistration.mock.calls as unknown as Array<[unknown, { attendees: Array<{ personId: number | null }> }]>)[0][1];
+    expect(written.attendees.every((a) => a.personId === null)).toBe(true);
+  });
+
+  it('sends a failed validation back to the form with the same body (307) and writes nothing', async () => {
+    const dependencies = deps({ getOpenEvent: vi.fn(async () => partyEvent(0)) });
+    const response = await run(dependencies, form({ phone: 'call me', person_name_1: 'x'.repeat(121) }));
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toBe('/en/register/7');
+    expect(response.headers.get('location')).not.toContain('?');
+    for (const name of ['attachIdentitySource', 'createRegistration', 'resolveRequest'] as const) {
+      expect(dependencies[name]).not.toHaveBeenCalled();
+    }
+  });
+
+  it('refuses more people than the event allows', async () => {
+    const dependencies = deps({ getOpenEvent: vi.fn(async () => ({ ...event(0), max_party_size: 2 })) });
+    // The form only reads rows up to max_party_size, so a larger party cannot even be posted: row 3 is ignored.
+    await run(dependencies, form({ person_name_1: 'Byron', person_name_2: 'Anne' }));
+    const written = (dependencies.createRegistration.mock.calls as unknown as Array<[unknown, { attendees: unknown[] }]>)[0][1];
+    expect(written.attendees).toHaveLength(2);
+  });
+
+  it('charges the per-person price for the party: the request carries the people, the checkout multiplies', async () => {
+    const dependencies = deps({ getOpenEvent: vi.fn(async () => partyEvent(2500)) });
+    await run(dependencies, form({ person_name_1: 'Byron Lovelace', phone: '555 0100' }), { dbBackend: 'supabase' });
+    expect(dependencies.resolveRequest).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      amountCents: 2500,
+      party: {
+        phone: '555 0100',
+        attendees: [
+          { name: 'Ada Lovelace', personId: 9 },
+          { name: 'Byron Lovelace', personId: null },
+        ],
+      },
+    }));
+  });
+
+  it('an old single-person form still registers one person', async () => {
+    const dependencies = deps({ getOpenEvent: vi.fn(async () => event(0)), sendConfirmation: sink() });
+    await run(dependencies, form());
+    expect(dependencies.createRegistration).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      attendees: [{ name: 'Ada Lovelace', personId: 9 }],
+    }));
   });
 });

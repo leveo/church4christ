@@ -15,9 +15,10 @@ import {
 import {
   getOpenEvent,
   listQuestions,
-  validateAnswers,
   createRegistration,
 } from '../../../lib/regDb';
+import { restrictAttendeePersons, validateSubmission } from '../../../lib/regManage';
+import { bagFromFormData, manageLanding, myEventLanding, submissionFromBag } from '../../../lib/regPublic';
 import { parseLocale, type Locale } from '../../../lib/locales';
 import { continuationPayloadDigest, signedInExistingIdentitySourceContext, signedInIdentitySourceContext, type IdentityBusinessContinuationEnv } from '../../../lib/identityBusinessContinuation';
 import { classifyRegistrationCheckoutFailure } from '../../../lib/registrationCheckoutFailure';
@@ -31,7 +32,8 @@ interface RegistrationSubmitDeps {
   stripeEnv: StripeEnv;
   getOpenEvent: typeof getOpenEvent;
   listQuestions: typeof listQuestions;
-  validateAnswers: typeof validateAnswers;
+  validateSubmission: typeof validateSubmission;
+  restrictAttendeePersons: typeof restrictAttendeePersons;
   createRegistration: typeof createRegistration;
   sendConfirmation: typeof sendConfirmation;
   resolveRequest: typeof resolveRegistrationCheckoutRequest;
@@ -49,7 +51,8 @@ const defaultDeps: RegistrationSubmitDeps = {
   stripeEnv: env as unknown as StripeEnv,
   getOpenEvent,
   listQuestions,
-  validateAnswers,
+  validateSubmission,
+  restrictAttendeePersons,
   createRegistration,
   sendConfirmation,
   resolveRequest: resolveRegistrationCheckoutRequest,
@@ -165,14 +168,21 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
     email = user.email;
 
     const questions = await deps.listQuestions(locals.db, locale, eventId);
-    const answerForm: Record<string, string | string[]> = {};
-    for (const question of questions) answerForm[String(question.id)] = form.getAll(String(question.id)).map(String);
-    let answers: Array<[number, string]>;
-    try {
-      answers = deps.validateAnswers(questions, answerForm);
-    } catch {
-      return back(locale, eventId, 'invalid');
-    }
+    // The whole submission (contact, people, answers) is validated by the same function the
+    // review step ran. The contact is the signed-in account; only the phone is typed. A
+    // failure sends the SAME body back to the form (307), which re-validates and shows every
+    // problem inline, so nothing the person typed is lost and no value rides in a URL.
+    const checked = deps.validateSubmission(
+      event,
+      questions,
+      submissionFromBag(bagFromFormData(form), questions, event.max_party_size ?? 1, { name, email }),
+    );
+    if (!checked.ok) return redirect307(`/${locale}/register/${eventId}`);
+    const answers = checked.value.answers;
+    // Household links are only honoured for the contact's own household (a forged person id is dropped).
+    const attendees = await deps.restrictAttendeePersons(locals.db, user.id, checked.value.attendees);
+    const phone = checked.value.contact.phone;
+    const party = { phone, attendees: attendees.map((a) => ({ name: a.name, personId: a.personId })) };
 
     let requestId: string;
     try {
@@ -191,7 +201,7 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
       try {
         await deps.attachIdentitySource(locals.rawDb, deps.identityEnv, {
           campusId, source: 'registration', intentId: requestId, personId: user.id, sessionEpoch: epoch,
-          sourceDigest: await continuationPayloadDigest({ eventId, name, email, amountCents: 0, currency: event.currency, locale, answers }), name, email,
+          sourceDigest: await continuationPayloadDigest({ eventId, name, email, amountCents: 0, currency: event.currency, locale, answers, party }), name, email,
         });
         created = await deps.createRegistration(locals.db, {
           eventId,
@@ -202,6 +212,8 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
           amountCents: 0,
           currency: event.currency,
           answers,
+          attendees,
+          phone,
           submissionKey,
           locale,
           allowWaitlist: true,
@@ -217,12 +229,14 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
       if (created.manageToken && (created.status === 'confirmed' || created.status === 'waitlist')) {
         await deps.sendConfirmation(env as unknown as RegNotifyEnv, locals.db, created.id, { manageToken: created.manageToken });
       }
-      return redirect(`/${locale}/register/done?ok=1${created.status === 'waitlist' ? '&status=waitlist' : ''}`);
+      // The confirmed-or-waitlisted registration opens on its manage page (the token only exists
+      // on the creating call and rides in the fragment); a replay lands on the member's own page.
+      return redirect(created.manageToken ? manageLanding(locale, created.manageToken) : myEventLanding(locale, created.id));
     }
 
     await deps.attachIdentitySource(locals.rawDb, deps.identityEnv, {
       campusId, source: 'registration', intentId: requestId, personId: user.id, sessionEpoch: epoch,
-      sourceDigest: await continuationPayloadDigest({ eventId, name, email, amountCents: event.price_cents!, currency: event.currency, locale, answers }), name, email,
+      sourceDigest: await continuationPayloadDigest({ eventId, name, email, amountCents: event.price_cents!, currency: event.currency, locale, answers, party }), name, email,
     });
 
     let resolution: Awaited<ReturnType<typeof resolveRegistrationCheckoutRequest>>;
@@ -233,9 +247,11 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
         personId,
         name,
         email,
+        // The per-person price: the checkout multiplies it by the party.
         amountCents: event.price_cents!,
         currency: event.currency,
         answers,
+        party,
         eventTitle: event.title,
         locale,
         appOrigin: deps.stripeEnv.APP_ORIGIN ?? '',
@@ -278,6 +294,10 @@ function backWaiting(locale: string, eventId: number, requestId: string): Respon
     checkoutRequestId: parseCheckoutRequestId(requestId),
   });
   return redirect(`/${locale}/register/${eventId}?${query.toString()}`);
+}
+/** 307 keeps the method and the body: the browser re-POSTs the same form to the register page. */
+function redirect307(location: string): Response {
+  return new Response(null, { status: 307, headers: { location, 'cache-control': 'no-store' } });
 }
 function backToList(locale: string): Response {
   return redirect(`/${locale}/register`);

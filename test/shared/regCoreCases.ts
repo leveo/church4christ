@@ -518,18 +518,24 @@ export function defineRegCoreCases(label: string, getDb: () => AppDb): void {
       await saveQuestions(getDb(), id, [{ sort: 0, type: 'text', required: 0, label_en: 'Note', label_zh: '' }]);
       const [q] = await listQuestions(getDb(), 'en', id);
       await register(id, { name: 'First', partySize: 1, answers: [[q.id, 'hi']] });
-      await register(id, { name: 'Second', partySize: 2 });
+      await register(id, { name: 'Second', attendees: [{ name: 'Second' }, { name: 'Sec Two' }], phone: '555 0100' });
 
       const roster = await listRegistrations(getDb(), 'en', id);
       expect(roster.map((r) => [r.name, r.status, r.confirmation_no, r.party_size]).sort()).toEqual([
         ['First', 'confirmed', 'CSV-0001', 1],
         ['Second', 'waitlist', 'CSV-0002', 2],
       ]);
+      // The roster carries the people still on each registration and the phone.
+      expect(roster.map((r) => [r.name, r.people, r.phone]).sort()).toEqual([
+        ['First', ['First'], null],
+        ['Second', ['Second', 'Sec Two'], '555 0100'],
+      ]);
       const lines = (await registrationsCsv(getDb(), 'en', id)).split('\r\n');
-      expect(lines[0]).toBe('Confirmation,Name,Email,Status,Party size,Amount,Registered,Note');
+      // People and Phone are appended AFTER the question columns, so existing columns keep their place.
+      expect(lines[0]).toBe('Confirmation,Name,Email,Status,Party size,Amount,Registered,Note,People,Phone');
       const rows = lines.slice(1).sort();
-      expect(rows[0]).toMatch(/^CSV-0001,First,ada@example\.com,confirmed,1,0\.00,[\d: -]+,hi$/);
-      expect(rows[1]).toMatch(/^CSV-0002,Second,ada@example\.com,waitlist,2,0\.00,[\d: -]+,$/);
+      expect(rows[0]).toMatch(/^CSV-0001,First,ada@example\.com,confirmed,1,0\.00,[\d: -]+,hi,First,$/);
+      expect(rows[1]).toMatch(/^CSV-0002,Second,ada@example\.com,waitlist,2,0\.00,[\d: -]+,,Second; Sec Two,555 0100$/);
     });
 
     it('the member list returns waitlist rows with their confirmation number and hides cancelled ones', async () => {

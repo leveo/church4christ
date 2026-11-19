@@ -123,6 +123,8 @@ const h2 = 'font-display text-heading-sm font-bold';
           <th class={th}>{t(lang, 'admin.reg.name')}</th>
           <th class={th}>{t(lang, 'admin.reg.email')}</th>
           <th class={th}>{t(lang, 'admin.reg.partySize')}</th>
+          <th class={th}>{t(lang, 'admin.reg.people')}</th>
+          <th class={th}>{t(lang, 'admin.reg.phone')}</th>
           <th class={th}>{t(lang, 'admin.reg.status')}</th>
           <th class={th}>{t(lang, 'admin.reg.amount')}</th>
           <th class={th}>{t(lang, 'admin.reg.registered')}</th>
@@ -134,7 +136,7 @@ const h2 = 'font-display text-heading-sm font-bold';
         {
           roster.length === 0 ? (
             <tr>
-              <td class={`${td} text-ink-muted`} colspan={8 + rosterQuestions.length}>
+              <td class={`${td} text-ink-muted`} colspan={10 + rosterQuestions.length}>
                 {t(lang, 'admin.reg.rosterEmpty')}
               </td>
             </tr>
@@ -147,6 +149,8 @@ const h2 = 'font-display text-heading-sm font-bold';
                   <td class={`${td} font-medium`}><div class="gathering-identity"><AvatarInitials name={r.name} sizeClass="h-8 w-8 text-xs" />{r.name}</div></td>
                   <td class={`${td} break-all`}>{r.email}</td>
                   <td class={`${td} tabular-nums`}>{r.party_size}</td>
+                  <td class={td} data-people>{r.people.length > 1 ? r.people.join(', ') : ''}</td>
+                  <td class={`${td} whitespace-nowrap`}>{r.phone ?? ''}</td>
                   <td class={td}><span class="gathering-roster-status" data-status={r.status}>{t(lang, `admin.reg.status.${r.status}`)}</span></td>
                   <td class={`${td} tabular-nums`}>{formatCents(r.amount_cents, event.currency)}</td>
                   <td class={`${td} text-ink-muted tabular-nums`}>{r.created_at.slice(0, 16)}</td>

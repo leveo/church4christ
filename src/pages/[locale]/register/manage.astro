@@ -1,0 +1,41 @@
+---
+import GatheringSurface from '../../../components/gatherings/GatheringSurface.astro';
+
+// The private "manage my registration" page, reached from the confirmation email or
+// right after registering. The page itself carries no personal data: the token lives in
+// the URL fragment (never sent to a server), and the bundled script posts it to
+// /api/register/manage and renders the answer. Without JavaScript it explains where else
+// to go. noindex, no SEO links, never cached. Owned by the `registration` module.
+import Base from '../../../layouts/Base.astro';
+import { parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { VIEW_LABEL_KEYS } from '../../../lib/regViewHtml';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+Astro.response.headers.set('cache-control', 'no-store');
+const labels = Object.fromEntries(VIEW_LABEL_KEYS.map((key) => [key, t(locale, key)]));
+// "<" is escaped so no label can close the script element.
+const labelsJson = JSON.stringify(labels).replace(/</gu, '\\u003c');
+const isNew = Astro.url.searchParams.get('new') === '1';
+---
+
+<Base title={t(locale, 'register.manage.title')} locale={locale} noindex={true} privateMetadata={true}>
+  <GatheringSurface mode="public">
+    <div class="container-content reg-manage">
+      <div id="reg-manage" data-locale={locale} data-new={isNew ? '1' : '0'}>
+        <p class="gathering-registration-note" role="status">{t(locale, 'register.manage.loading')}</p>
+        <noscript><p class="gathering-registration-note">{t(locale, 'register.manage.noJs')}</p></noscript>
+      </div>
+      <script type="application/json" id="reg-manage-labels" is:inline set:html={labelsJson} />
+    </div>
+  </GatheringSurface>
+</Base>
+
+<script>
+  import { initManagePage } from '../../../lib/manage-client';
+  initManagePage();
+</script>

@@ -1,0 +1,102 @@
+---
+// One of the signed-in member's own registrations: the same summary and actions as the
+// private manage link (details, QR, people, answers, edit, cancel one person or everyone,
+// calendar file), authorized by the session instead of a token. Ownership is the
+// registration's person or account email (findRegistrationForPerson); anyone else's id is
+// a 404. Plain server-rendered forms, post-redirect-get on success, no JavaScript needed.
+// Owned by the `registration` module.
+import { env } from 'cloudflare:workers';
+import Member from '../../../../layouts/Member.astro';
+import GatheringSurface from '../../../../components/gatherings/GatheringSurface.astro';
+import { localePath, parseLocale } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import { findRegistrationForPerson } from '../../../../lib/regManage';
+import { buildRegistrationView, performManageAction } from '../../../../lib/regManageApi';
+import { notifyAfterRelease, type RegNotifyEnv } from '../../../../lib/regNotify';
+import { bagFirst, bagFromFormData } from '../../../../lib/regPublic';
+import { renderRegistrationView, VIEW_LABEL_KEYS, type ViewError } from '../../../../lib/regViewHtml';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+const id = Number(Astro.params.id);
+const user = Astro.locals.user;
+if (!locale || !user || !Astro.locals.modules.has('registration') || !Number.isSafeInteger(id) || id <= 0) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const db = Astro.locals.db;
+const ref = await findRegistrationForPerson(db, id, user.id, user.email);
+if (!ref) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const here = localePath(locale, `/my/events/${id}`);
+
+let errors: ViewError[] = [];
+let denied = false;
+let view = null;
+if (Astro.request.method === 'POST') {
+  let bag = {};
+  try {
+    bag = bagFromFormData(await Astro.request.formData());
+  } catch {
+    bag = {};
+  }
+  const action = bagFirst(bag, 'action');
+  const notify = (input: { cancelledId?: number; attendeeName?: string; promoted: number[] }) =>
+    notifyAfterRelease(env as unknown as RegNotifyEnv, db, input);
+  const request =
+    action === 'update' ? ({ action: 'update', fields: bag } as const)
+    : action === 'cancel_all' ? ({ action: 'cancel_all' } as const)
+    : action === 'cancel_attendee' ? ({ action: 'cancel_attendee', attendeeId: Number(bagFirst(bag, 'attendee_id')) } as const)
+    : action === 'ics' ? ({ action: 'ics', host: Astro.url.host } as const)
+    : null;
+  if (request) {
+    const outcome = await performManageAction(db, ref, locale, request, notify);
+    if (outcome.kind === 'ics') {
+      return new Response(outcome.content, {
+        headers: {
+          'content-type': 'text/calendar; charset=utf-8',
+          'content-disposition': `attachment; filename="${outcome.filename}"`,
+          'cache-control': 'no-store',
+        },
+      });
+    }
+    if (outcome.kind === 'view') {
+      return Astro.redirect(`${here}${outcome.notice ? `?${outcome.notice === 'saved' ? 'saved' : 'cancelled'}=1` : ''}`, 303);
+    }
+    if (outcome.kind === 'invalid') {
+      errors = outcome.errors;
+      view = outcome.view;
+    } else if (outcome.kind === 'not_allowed') {
+      denied = true;
+      view = outcome.view;
+    }
+  }
+}
+view ??= await buildRegistrationView(db, id, locale);
+if (!view) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+Astro.response.headers.set('cache-control', 'no-store');
+const labels = Object.fromEntries(VIEW_LABEL_KEYS.map((key) => [key, t(locale, key)]));
+const notice = Astro.url.searchParams.get('saved') === '1' ? 'saved' : Astro.url.searchParams.get('cancelled') === '1' ? 'cancelled' : null;
+const html = renderRegistrationView(view, {
+  mode: 'session',
+  action: here,
+  labels,
+  notice,
+  isNew: Astro.url.searchParams.get('new') === '1',
+  errors,
+});
+---
+
+<Member active="events" title={t(locale, 'register.manage.title')} locale={locale} noindex>
+  <GatheringSurface mode="public">
+    <div class="member-content reg-manage">
+      <a href={localePath(locale, '/my/events')} class="text-sm text-ink-muted hover:underline">← {t(locale, 'portal.events.title')}</a>
+      {denied && <p class="gathering-registration-note mt-4" role="alert">{t(locale, 'register.manage.notAllowed')}</p>}
+      <div class="reg-view mt-4" set:html={html} />
+    </div>
+  </GatheringSurface>
+</Member>
