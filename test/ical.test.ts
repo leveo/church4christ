@@ -136,6 +136,8 @@ describe('regToICalEvent', () => {
       ends_at: '2026-07-12 16:00:00',
       location: 'Camp Hall',
       status: 'confirmed',
+      confirmation_no: 'R26-0001',
+      party_size: 1,
       amount_cents: 0,
       currency: 'usd',
       created_at: '2026-06-01 00:00:00',
@@ -158,6 +160,12 @@ describe('regToICalEvent', () => {
   it('appends " (?)" to a pending registration, mirroring the serving convention', () => {
     const e = regToICalEvent(regOf({ status: 'pending' }), 'church.example');
     expect(e.summary).toBe('Fall Retreat (?)');
+  });
+
+  it('marks waitlist and review registrations as unconfirmed too', () => {
+    expect(regToICalEvent(regOf({ status: 'waitlist' }), 'church.example').summary).toBe('Fall Retreat (?)');
+    expect(regToICalEvent(regOf({ status: 'review' }), 'church.example').summary).toBe('Fall Retreat (?)');
+    expect(regToICalEvent(regOf({ status: 'confirmed' }), 'church.example').summary).toBe('Fall Retreat');
   });
 
   it('falls back to all-day on the start date when ends_at is missing', () => {

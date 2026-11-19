@@ -109,8 +109,8 @@ export function occurrenceToICalEvent(o: PersonOccurrence, host: string): ICalEv
  * compress the span onto the start day or — when the end time-of-day is
  * earlier than the start's — emit an RFC-invalid DTEND < DTSTART, so it
  * renders as an all-day span from the start date through the end date
- * instead (see {@link ICalEvent.endDate}). A still-pending registration
- * (Checkout not yet confirmed) gets a ' (?)' summary suffix, mirroring the
+ * instead (see {@link ICalEvent.endDate}). A registration that is not confirmed
+ * (Checkout pending, under review, or on the waitlist) gets a ' (?)' summary suffix, mirroring the
  * serving section's unconfirmed-assignment convention.
  */
 export function regToICalEvent(r: MyRegistration, host: string): ICalEvent {
@@ -124,7 +124,7 @@ export function regToICalEvent(r: MyRegistration, host: string): ICalEvent {
     uid: `c4c-reg-${r.id}@${host}`,
     date,
     endDate: !timed && endDate && endDate !== date ? endDate : undefined,
-    summary: `${r.event_title}${r.status === 'pending' ? ' (?)' : ''}`,
+    summary: `${r.event_title}${r.status === 'confirmed' ? '' : ' (?)'}`,
     description: r.location ?? undefined,
     startTime: timed ? startTime : null,
     endTime: timed ? endTimeOfDay : null,

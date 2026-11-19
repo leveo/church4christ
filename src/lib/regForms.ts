@@ -7,17 +7,19 @@
 // datetime-local string.
 import { parseAmountToCents } from './givingCheckout';
 import { datetimeLocalToUtc } from './dates';
-import type { RegQuestion } from './regDb';
+import type { RegQuestion, LocalizedEventTexts } from './regDb';
+import { CONFIRMATION_PREFIX_RE } from './regDb';
+import { getRuntimeDefaultLocale, SUPPORTED_LOCALES, type Locale } from './locales';
 
 // ── Event editor ───────────────────────────────────────────────────────────
 
-/** The normalized event fields ready for saveEvent (locale titles/descriptions,
- *  UTC datetimes, integer-cent price with NULL = free). */
+/** The normalized event fields ready for saveEvent (per-language titles and
+ *  descriptions, UTC datetimes, integer-cent price with NULL = free). `titles`
+ *  holds every language the form submitted, blank ones included (saveEvent deletes
+ *  a blanked language). The optional fields are undefined when the form did not
+ *  send them, so an older form never resets them. */
 export interface RegEventInput {
-  title_en: string;
-  title_zh: string;
-  description_en: string;
-  description_zh: string;
+  titles: LocalizedEventTexts;
   starts_at: string;
   ends_at: string | null;
   location: string | null;
@@ -26,6 +28,10 @@ export interface RegEventInput {
   opens_at: string | null;
   closes_at: string | null;
   active: number;
+  visible_from?: string | null;
+  waitlist_enabled?: number;
+  confirmation_prefix?: string | null;
+  poster?: string | null;
 }
 
 export type RegEventFormResult =
@@ -33,7 +39,10 @@ export type RegEventFormResult =
   | { ok: false; errors: Record<string, string> };
 
 /**
- * Parse the event create/edit form. Title (en) is required; a datetime-local
+ * Parse the event create/edit form. Fields are `title_<locale>` and
+ * `description_<locale>` for every supported language (title_en, title_zh, ...);
+ * the installation's default language title is required, the others optional (a
+ * blank one removes that language). A datetime-local
  * `starts_at` is required and every datetime is converted to the app's UTC text
  * (an unparseable one errors). Capacity is blank = unlimited (NULL) or a positive
  * whole number. Price is dollars: blank OR zero means FREE (price_cents NULL,
@@ -61,13 +70,37 @@ export function parseRegEventForm(fd: FormData): RegEventFormResult {
     return utc;
   }
 
-  const title_en = get('title_en');
-  if (title_en === '') errors.title_en = 'errors.required';
+  const titles: LocalizedEventTexts = {};
+  for (const locale of SUPPORTED_LOCALES) {
+    if (!fd.has(`title_${locale}`) && !fd.has(`description_${locale}`)) continue;
+    titles[locale] = { title: get(`title_${locale}`), description: get(`description_${locale}`) };
+  }
+  const defaultLocale = getRuntimeDefaultLocale();
+  if ((titles[defaultLocale]?.title ?? '') === '') errors[`title_${defaultLocale}`] = 'errors.required';
 
   const starts_at = dt('starts_at', true);
   const ends_at = dt('ends_at', false);
   const opens_at = dt('opens_at', false);
   const closes_at = dt('closes_at', false);
+  // Optional lifecycle fields: undefined = the form did not send the field.
+  const visible_from = fd.has('visible_from') ? dt('visible_from', false) : undefined;
+
+  // A checkbox pairs with a hidden "0" before it (getAll().at(-1) is the winner),
+  // or the field may be a 1/0 select; absent = leave the stored value alone.
+  let waitlist_enabled: number | undefined;
+  if (fd.has('waitlist_enabled')) {
+    const last = String(fd.getAll('waitlist_enabled').at(-1) ?? '').trim().toLowerCase();
+    waitlist_enabled = ['', '0', 'off', 'false', 'no'].includes(last) ? 0 : 1;
+  }
+
+  let confirmation_prefix: string | null | undefined;
+  if (fd.has('confirmation_prefix')) {
+    const raw = get('confirmation_prefix').toUpperCase();
+    if (raw === '') confirmation_prefix = null;
+    else if (!CONFIRMATION_PREFIX_RE.test(raw)) errors.confirmation_prefix = 'errors.invalidOption';
+    else confirmation_prefix = raw;
+  }
+  const poster = fd.has('poster') ? get('poster') || null : undefined;
 
   const capRaw = get('capacity');
   let capacity: number | null = null;
@@ -88,10 +121,7 @@ export function parseRegEventForm(fd: FormData): RegEventFormResult {
   return {
     ok: true,
     data: {
-      title_en,
-      title_zh: get('title_zh'),
-      description_en: get('description_en'),
-      description_zh: get('description_zh'),
+      titles,
       starts_at: starts_at as string,
       ends_at,
       location: get('location') || null,
@@ -100,6 +130,10 @@ export function parseRegEventForm(fd: FormData): RegEventFormResult {
       opens_at,
       closes_at,
       active: fd.get('active') !== null ? 1 : 0,
+      ...(visible_from !== undefined ? { visible_from } : {}),
+      ...(waitlist_enabled !== undefined ? { waitlist_enabled } : {}),
+      ...(confirmation_prefix !== undefined ? { confirmation_prefix } : {}),
+      ...(poster !== undefined ? { poster } : {}),
     },
   };
 }
@@ -113,8 +147,8 @@ export interface QuestionInput {
   type: RegQuestion['type'];
   required: number;
   options: string[] | null;
-  label_en: string;
-  label_zh: string;
+  /** Every language the form submitted, blank ones included (saveQuestions deletes a blanked language). */
+  labels: Partial<Record<Locale, string>>;
 }
 
 export type QuestionsFormResult =
@@ -125,14 +159,15 @@ const QUESTION_TYPES: readonly RegQuestion['type'][] = ['text', 'textarea', 'sel
 const NEEDS_OPTIONS = new Set<string>(['select', 'checkbox']);
 
 /**
- * Parse the question-builder's indexed fields (`q[0][type]`, `q[0][label_en]`, …)
- * into saveQuestions input, in ascending index order. A wholly-empty row (an
- * untouched "add row") is dropped, mirroring the repeat-row convention. Otherwise
- * label (en) is required — a blank one rejects with 'missing_label'; an
+ * Parse the question-builder's indexed fields (`q[0][type]`, `q[0][label_<locale>]`
+ * for every supported language, …) into saveQuestions input, in ascending index
+ * order. A wholly-empty row (an untouched "add row") is dropped, mirroring the
+ * repeat-row convention. Otherwise the default language's label is required — a
+ * blank one rejects with 'missing_label'; an
  * unrecognized type rejects with 'bad_type'. Options are split one-per-line,
  * trimmed, and empties dropped — kept only for select/checkbox, null elsewhere.
- * `label_zh` passes through as-is (saveQuestions deletes the zh row when blank, so
- * an empty zh never persists as ''). A numeric `id` marks a surviving question
+ * Other languages pass through as-is (saveQuestions deletes a blanked language's
+ * row, so an empty label never persists as ''). A numeric `id` marks a surviving question
  * (its answers are preserved); `sort` falls back to the row's position when blank.
  */
 export function parseQuestionsForm(fd: FormData): QuestionsFormResult {
@@ -150,14 +185,16 @@ export function parseQuestionsForm(fd: FormData): QuestionsFormResult {
   let position = 0;
   for (const idx of [...rows.keys()].sort((a, b) => a - b)) {
     const row = rows.get(idx)!;
-    const label_en = (row.label_en ?? '').trim();
-    const label_zh = (row.label_zh ?? '').trim();
+    const labels: Partial<Record<Locale, string>> = {};
+    for (const locale of SUPPORTED_LOCALES) {
+      if (row[`label_${locale}`] !== undefined) labels[locale] = (row[`label_${locale}`] ?? '').trim();
+    }
     const optionsRaw = row.options ?? '';
 
     // Drop an untouched row rather than erroring on it.
-    if (label_en === '' && label_zh === '' && optionsRaw.trim() === '') continue;
+    if (Object.values(labels).every((label) => label === '') && optionsRaw.trim() === '') continue;
 
-    if (label_en === '') return { ok: false, error: 'missing_label' };
+    if ((labels[getRuntimeDefaultLocale()] ?? '') === '') return { ok: false, error: 'missing_label' };
     const type = (row.type ?? '').trim();
     if (!QUESTION_TYPES.includes(type as RegQuestion['type'])) return { ok: false, error: 'bad_type' };
 
@@ -178,8 +215,7 @@ export function parseQuestionsForm(fd: FormData): QuestionsFormResult {
       type: type as RegQuestion['type'],
       required: (row.required ?? '') !== '' ? 1 : 0,
       options,
-      label_en,
-      label_zh,
+      labels,
     });
     position++;
   }

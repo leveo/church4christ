@@ -31,9 +31,11 @@ const registrationOn = Astro.locals.modules.has('registration');
 const myRegistrations = registrationOn ? await listRegistrationsForPerson(db, locale, user.id, user.email) : [];
 const openEvents = registrationOn ? await listOpenEvents(db, locale) : [];
 
-const statusChip: Record<'pending' | 'confirmed', string> = {
+const statusChip: Record<'pending' | 'review' | 'confirmed' | 'waitlist', string> = {
   pending: 'bg-warn-soft text-warn',
+  review: 'bg-warn-soft text-warn',
   confirmed: 'bg-success-soft text-success',
+  waitlist: 'bg-warn-soft text-warn',
 };
 
 const when = (startsAt: string) => `${formatDate(startsAt.slice(0, 10), locale)} ${startsAt.slice(11, 16)}`;
