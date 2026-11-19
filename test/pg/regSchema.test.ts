@@ -214,6 +214,33 @@ describe.skipIf(!hasPg)('Postgres registration schema', () => {
     const left = await sql.unsafe('SELECT count(*)::int AS n FROM reg_attendees WHERE registration_id = $1', [reg.id]);
     expect(left[0].n).toBe(0);
   });
+
+  it('adds the party columns with their constraints (0043)', async () => {
+    const [event] = await sql.unsafe("INSERT INTO reg_events (starts_at) VALUES ('2027-01-01 09:00:00') RETURNING id, max_party_size, allow_self_edit");
+    expect([event.max_party_size, event.allow_self_edit]).toEqual([1, 1]);
+    const eventId = Number(event.id);
+    await expect(sql.unsafe('UPDATE reg_events SET max_party_size = 0 WHERE id = $1', [eventId])).rejects.toMatchObject({ code: '23514' });
+    await expect(sql.unsafe('UPDATE reg_events SET max_party_size = 21 WHERE id = $1', [eventId])).rejects.toMatchObject({ code: '23514' });
+    await sql.unsafe('UPDATE reg_events SET max_party_size = 20 WHERE id = $1', [eventId]);
+    await expect(sql.unsafe('UPDATE reg_events SET allow_self_edit = 2 WHERE id = $1', [eventId])).rejects.toMatchObject({ code: '23514' });
+
+    await sql.unsafe("INSERT INTO reg_event_i18n (event_id, locale, title, notes) VALUES ($1, 'en', 'T', 'Bring a Bible')", [eventId]);
+    const [reg] = await sql.unsafe(
+      "INSERT INTO registrations (event_id, name, email, submission_key, locale, phone, manage_token_hash) " +
+        "VALUES ($1, 'P', 'p@example.com', 'k-party', 'zh', '555', $2) RETURNING locale, phone, confirmation_sent_at, cancelled_at",
+      [eventId, 'a'.repeat(64)],
+    );
+    expect(reg).toMatchObject({ locale: 'zh', phone: '555', confirmation_sent_at: null, cancelled_at: null });
+    await expect(sql.unsafe("UPDATE registrations SET locale = 'xx' WHERE submission_key = 'k-party'")).rejects.toMatchObject({ code: '23503' });
+    await expect(
+      sql.unsafe(
+        "INSERT INTO registrations (event_id, name, email, submission_key, manage_token_hash) VALUES ($1, 'Q', 'q@example.com', 'k-party-2', $2)",
+        [eventId, 'a'.repeat(64)],
+      ),
+    ).rejects.toMatchObject({ code: '23505' });
+    // many registrations may have no token
+    await sql.unsafe("INSERT INTO registrations (event_id, name, email, submission_key) VALUES ($1, 'R', 'r@example.com', 'k-n1'), ($1, 'S', 's@example.com', 'k-n2')", [eventId]);
+  });
 });
 
 // 0042 on a database that already holds registrations: migrate through 0041 in a
@@ -285,5 +312,65 @@ describe.skipIf(!hasPg)('Postgres registration v2 backfill (0042)', () => {
       [703, 'Third', null, 'active', 0, 1],
       [704, 'Fourth', null, 'active', 0, 1],
     ]);
+  });
+});
+
+// 0043 on a database that already holds registrations and a guest continuation: nothing is
+// backfilled, every existing event is single-person with self-service on, and the party
+// column joins the continuation's immutable set.
+describe.skipIf(!hasPg)('Postgres registration party migration (0043) on existing data', () => {
+  const sql = hasPg ? pgClient() : (null as never);
+  const repo = resolve(process.cwd());
+  const scratch = hasPg ? mkdtempSync(join(tmpdir(), 'c4c-reg-party-')) : '';
+  const run = () =>
+    execFileSync('node', [join(repo, 'scripts/db/migrate-supabase.mjs')], {
+      cwd: scratch,
+      env: { ...process.env, SUPABASE_DB_URL: DATABASE_URL },
+      encoding: 'utf8',
+    });
+
+  beforeAll(async () => {
+    await resetSchema(sql);
+    mkdirSync(join(scratch, 'migrations-supabase'));
+    for (const file of readdirSync(join(repo, 'migrations-supabase'))) {
+      if (file.endsWith('.sql') && file < '0043') cpSync(join(repo, 'migrations-supabase', file), join(scratch, 'migrations-supabase', file));
+    }
+    run();
+    await sql.unsafe(`
+      INSERT INTO reg_events (id, starts_at, capacity) VALUES (901, '2026-08-01 09:00:00', 10);
+      INSERT INTO reg_event_i18n (event_id, locale, title) VALUES (901, 'en', 'Old event');
+      INSERT INTO registrations (id, event_id, name, email, status, submission_key, confirmation_no)
+        VALUES (951, 901, 'Old', 'old@example.com', 'confirmed', 'legacy-951', 'R26-0001');
+    `);
+    cpSync(join(repo, 'migrations-supabase/0043_registration_party.sql'), join(scratch, 'migrations-supabase/0043_registration_party.sql'));
+    run();
+  });
+  afterAll(async () => {
+    await sql?.end();
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it('leaves existing events single-person with self-service on, and existing registrations without a token, locale or phone', async () => {
+    const [event] = await sql.unsafe('SELECT max_party_size, allow_self_edit FROM reg_events WHERE id = 901');
+    expect([event.max_party_size, event.allow_self_edit]).toEqual([1, 1]);
+    const [reg] = await sql.unsafe('SELECT party_size, manage_token_hash, locale, phone, confirmation_sent_at, cancelled_at FROM registrations WHERE id = 951');
+    expect(reg).toEqual({ party_size: 1, manage_token_hash: null, locale: null, phone: null, confirmation_sent_at: null, cancelled_at: null });
+    const [i18n] = await sql.unsafe("SELECT notes FROM reg_event_i18n WHERE event_id = 901 AND locale = 'en'");
+    expect(i18n.notes).toBeNull();
+  });
+
+  it('puts continuation party_json in the immutable column set and keeps the locale foreign key', async () => {
+    const [trigger] = await sql.unsafe(
+      "SELECT pg_get_triggerdef(oid) AS def FROM pg_trigger WHERE tgname = 'identity_registration_continuation_identity_immutable'",
+    );
+    expect(trigger.def).toContain('party_json');
+    const columns = await sql.unsafe(
+      "SELECT column_name, is_nullable FROM information_schema.columns WHERE table_name = 'identity_registration_continuations' AND column_name = 'party_json'",
+    );
+    expect(columns.map((c) => [c.column_name, c.is_nullable])).toEqual([['party_json', 'YES']]);
+    const [fk] = await sql.unsafe(
+      "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'registrations_locale_locale_fk'",
+    );
+    expect(fk.def).toBe('FOREIGN KEY (locale) REFERENCES supported_locales(code)');
   });
 });
