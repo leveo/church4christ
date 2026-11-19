@@ -16,7 +16,9 @@ import DateBadge from '../../../components/gatherings/DateBadge.astro';
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
 import { parseQuestionsForm } from '../../../lib/regForms';
-import { getEventAdmin, listQuestions, listQuestionsAdmin, listRegistrations, saveQuestions, cancelRegistration, type RegQuestionAdmin } from '../../../lib/regDb';
+import { getEventAdmin, listQuestions, listQuestionsAdmin, listRegistrations, saveQuestions, type RegQuestionAdmin } from '../../../lib/regDb';
+import { cancelAndNotify, type RegNotifyEnv } from '../../../lib/regNotify';
+import { env } from 'cloudflare:workers';
 import { listEventAdmins, addEventAdmin, removeEventAdmin, listPeopleWithAccount } from '../../../lib/prayerDb';
 import { formatCents } from '../../../lib/money';
 import { tin, lab, card, btn, btnSecondary, rowBtn, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
@@ -43,7 +45,10 @@ if (Astro.request.method === 'POST') {
   const action = String(fd.get('action') ?? '');
   if (action === 'cancel') {
     const rid = String(fd.get('registration_id') ?? '');
-    if (/^\d+$/.test(rid)) await cancelRegistration(db, Number(rid));
+    // Cancelling frees seats: waitlisted registrations move up (free events), and both they
+    // and the cancelled registrant are emailed. Awaited (the db client is drained after the
+    // redirect) and never throws.
+    if (/^\d+$/.test(rid)) await cancelAndNotify(env as unknown as RegNotifyEnv, db, Number(rid));
     return Astro.redirect(`/admin/registration/${eventId}?cancelled=1`, 303);
   }
   if (hasPortal && (action === 'addEventAdmin' || action === 'removeEventAdmin')) {

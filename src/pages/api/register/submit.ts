@@ -21,6 +21,7 @@ import {
 import { parseLocale, type Locale } from '../../../lib/locales';
 import { continuationPayloadDigest, signedInExistingIdentitySourceContext, signedInIdentitySourceContext, type IdentityBusinessContinuationEnv } from '../../../lib/identityBusinessContinuation';
 import { classifyRegistrationCheckoutFailure } from '../../../lib/registrationCheckoutFailure';
+import { sendConfirmation, type RegNotifyEnv } from '../../../lib/regNotify';
 
 export const prerender = false;
 
@@ -32,6 +33,7 @@ interface RegistrationSubmitDeps {
   listQuestions: typeof listQuestions;
   validateAnswers: typeof validateAnswers;
   createRegistration: typeof createRegistration;
+  sendConfirmation: typeof sendConfirmation;
   resolveRequest: typeof resolveRegistrationCheckoutRequest;
   continueRequest: typeof continueRegistrationCheckoutRequest;
   createCheckout: typeof createRegistrationCheckoutFromParams;
@@ -49,6 +51,7 @@ const defaultDeps: RegistrationSubmitDeps = {
   listQuestions,
   validateAnswers,
   createRegistration,
+  sendConfirmation,
   resolveRequest: resolveRegistrationCheckoutRequest,
   continueRequest: continueRegistrationCheckoutRequest,
   createCheckout: createRegistrationCheckoutFromParams,
@@ -200,11 +203,19 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
           currency: event.currency,
           answers,
           submissionKey,
+          locale,
           allowWaitlist: true,
         });
       } catch (error) {
         if ((error as Error).message === 'event_full') return back(locale, eventId, 'full');
         throw error;
+      }
+      // The confirmation carries the manage link, which only exists in this call (a
+      // replayed submission has no token and is not mailed again). Awaited rather than
+      // deferred: on Postgres the request's client is drained once the redirect returns.
+      // Never throws; a failed send is retried by the daily sweep.
+      if (created.manageToken && (created.status === 'confirmed' || created.status === 'waitlist')) {
+        await deps.sendConfirmation(env as unknown as RegNotifyEnv, locals.db, created.id, { manageToken: created.manageToken });
       }
       return redirect(`/${locale}/register/done?ok=1${created.status === 'waitlist' ? '&status=waitlist' : ''}`);
     }

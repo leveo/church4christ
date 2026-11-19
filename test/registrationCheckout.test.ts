@@ -429,3 +429,37 @@ describe('registration submit: D1 paid refusal, waitlist, submission key', () =>
     expect(dependencies.createRegistration).toHaveBeenCalledWith({}, expect.objectContaining({ submissionKey: `form:${REQUEST_ID}` }));
   });
 });
+
+describe('registration submit: confirmation email', () => {
+  const freeDeps = (created: Record<string, unknown>) => {
+    const sendConfirmation = vi.fn(async () => true);
+    return {
+      ...deps({
+        getOpenEvent: vi.fn(async () => event(0)),
+        createRegistration: vi.fn(async () => created),
+        sendConfirmation,
+      }),
+      sendConfirmation,
+    };
+  };
+
+  it('mails the confirmation with the creation-time manage token and the form language', async () => {
+    const dependencies = freeDeps({ id: 41, status: 'confirmed', confirmationNo: 'R26-0001', manageToken: 'T'.repeat(43) });
+    const response = await createRegistrationSubmitHandler(dependencies as never)(context(form({ locale: 'zh' })));
+    expect(response.status).toBe(303);
+    expect(dependencies.createRegistration).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ locale: 'zh' }));
+    expect(dependencies.sendConfirmation).toHaveBeenCalledOnce();
+    expect(dependencies.sendConfirmation).toHaveBeenCalledWith(expect.anything(), expect.anything(), 41, { manageToken: 'T'.repeat(43) });
+  });
+
+  it('does not mail a replayed submission (no token), and mails a waitlisted one', async () => {
+    const replay = freeDeps({ id: 41, status: 'confirmed', confirmationNo: 'R26-0001', manageToken: null });
+    await createRegistrationSubmitHandler(replay as never)(context(form()));
+    expect(replay.sendConfirmation).not.toHaveBeenCalled();
+
+    const waitlisted = freeDeps({ id: 42, status: 'waitlist', confirmationNo: 'R26-0002', manageToken: 'U'.repeat(43) });
+    const response = await createRegistrationSubmitHandler(waitlisted as never)(context(form()));
+    expect(response.headers.get('location')).toContain('status=waitlist');
+    expect(waitlisted.sendConfirmation).toHaveBeenCalledOnce();
+  });
+});

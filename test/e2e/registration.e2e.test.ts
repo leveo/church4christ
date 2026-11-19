@@ -149,6 +149,40 @@ describe('Registration on D1: filling an event', () => {
     expect(mine).toContain('On the waitlist');
   });
 
+  it('emails each registrant, serves the QR image, and an admin cancel promotes the waitlist and mails both', async () => {
+    await enableRegistration();
+    await env.DB.prepare(`DELETE FROM email_log`).run();
+    for (const [id, email] of MEMBERS) await register(id, email);
+    const mails = async () =>
+      (await env.DB.prepare(`SELECT to_email, kind, status, detail FROM email_log ORDER BY id`).all<{ to_email: string; kind: string; status: string; detail: string }>()).results;
+    let logged = await mails();
+    expect(logged.map((m) => m.kind)).toEqual(['regConfirm', 'regConfirm', 'regConfirm', 'regConfirm']);
+    expect(logged.map((m) => m.to_email)).toEqual(MEMBERS.map(([, email]) => email));
+    const sent = await env.DB.prepare(`SELECT count(*) AS n FROM registrations WHERE event_id = 920 AND confirmation_sent_at IS NOT NULL`).first<number>('n');
+    expect(sent).toBe(4);
+    expect(JSON.stringify(logged)).not.toMatch(/[A-Za-z0-9_-]{43}/); // no manage token in the log
+
+    // The QR image is public, immutable, and cacheable even for a signed-in viewer.
+    const first = await env.DB.prepare(`SELECT id, confirmation_no FROM registrations WHERE event_id = 920 ORDER BY id`).first<{ id: number; confirmation_no: string }>();
+    const png = await SELF.fetch(`${ORIGIN}/register/qr/920/${first!.confirmation_no}.png`, { headers: { cookie: await sessionCookie(...MEMBERS[0]) } });
+    expect(png.status).toBe(200);
+    expect(png.headers.get('content-type')).toBe('image/png');
+    expect(png.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect((await SELF.fetch(`${ORIGIN}/register/qr/920/R99-9999.png`)).status).toBe(404);
+
+    // Admin cancel frees a seat: the waitlisted member is promoted and both are emailed.
+    await env.DB.prepare(`DELETE FROM email_log`).run();
+    const res = await post('/admin/registration/920', new URLSearchParams({ action: 'cancel', registration_id: String(first!.id) }).toString(), { cookie: await ADMIN() });
+    expect(res.status).toBe(303);
+    logged = await mails();
+    expect(logged.map((m) => [m.kind, m.to_email])).toEqual([
+      ['regCancelled', MEMBERS[0][1]],
+      ['regPromoted', MEMBERS[3][1]],
+    ]);
+    const statuses = (await env.DB.prepare(`SELECT status FROM registrations WHERE event_id = 920 ORDER BY id`).all<{ status: string }>()).results.map((r) => r.status);
+    expect(statuses).toEqual(['cancelled', 'confirmed', 'confirmed', 'confirmed']);
+  });
+
   it('with the waitlist off, a full event refuses the next registration', async () => {
     await enableRegistration();
     await env.DB.prepare(`UPDATE reg_events SET waitlist_enabled = 0 WHERE id = 920`).run();

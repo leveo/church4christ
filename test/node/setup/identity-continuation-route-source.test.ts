@@ -28,6 +28,20 @@ describe('identity continuation completion recovery route', () => {
     expect(complete.slice(replayBranch, mint)).not.toContain('sessionCookie(');
   });
 
+  it('mails a fresh free registration its confirmation with the one-time manage token, before session delivery', () => {
+    const send = complete.indexOf('await sendConfirmation(vars, locals.rawDb, result.registrationId, { manageToken: result.manageToken })');
+    const sessionClaim = complete.indexOf('const delivery = await resolveSignupSessionDelivery');
+    expect(send).toBeGreaterThan(-1);
+    expect(send).toBeLessThan(sessionClaim);
+    expect(complete.slice(Math.max(0, send - 260), send)).toContain("result.status === 'done'");
+  });
+
+  it('runs the registration confirmation sweep in the daily reminder branch, isolated from the other passes', () => {
+    const branch = worker.slice(worker.indexOf('case REMINDER_CRON'), worker.indexOf('case DIGEST_CRON'));
+    expect(branch).toMatch(/try \{ await sendPlanningReminders\(vars, db\); \}\s*finally \{ await sweepUnsentConfirmations\(vars, db\); \}/);
+    expect(branch).toContain('try { await sendReminders(vars, db); }');
+  });
+
   it('never treats a registration id as an event route id', () => {
     expect(complete).not.toMatch(/register\/\$\{result\.resolution\?\.registrationId/);
     expect(complete).not.toContain("pending.kind === 'registration' && result.status === 'waiting'");

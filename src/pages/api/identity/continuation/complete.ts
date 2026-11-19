@@ -10,6 +10,7 @@ import { resolveSignupSessionDelivery } from '../../../../lib/identityAccount';
 import { IDENTITY_CONTINUATION_COOKIE, clearIdentityContinuationCookieHeader, openIdentityContinuationCookie } from '../../../../lib/identityContinuationCookie';
 import { mintSession, sessionCookie } from '../../../../lib/session';
 import { parseLocale } from '../../../../lib/locales';
+import { sendConfirmation } from '../../../../lib/regNotify';
 
 export const prerender = false;
 type ContinuationEnv = IdentityBusinessContinuationEnv & EmailEnv & { SESSION_SECRET?: string; APP_ORIGIN?: string };
@@ -34,6 +35,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // claim; the member can submit the same OTP again without exposing a
     // checkout id or confusing a registration id with an event route id.
     if (result.status === 'waiting') return redirect(`/${locale}/identity/continue?error=waiting`, headers);
+    // A freshly created free registration: mail its confirmation now, with the manage
+    // link that only exists in this result. Awaited (the db client is drained once the
+    // response returns) and never throws; the daily sweep retries a failed send.
+    if (pending.kind === 'registration' && result.status === 'done' && 'manageToken' in result
+      && result.registrationId !== undefined && result.manageToken) {
+      await sendConfirmation(vars, locals.rawDb, result.registrationId, { manageToken: result.manageToken });
+    }
     if (!('personId' in result) || !result.personId || !('sessionEpoch' in result) || result.sessionEpoch === undefined) {
       return redirect(`/${locale}/identity/continue?error=invalid`, headers);
     }

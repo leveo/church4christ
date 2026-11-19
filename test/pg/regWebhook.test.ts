@@ -116,6 +116,28 @@ describe.skipIf(!hasPg)('handleStripeEvent — registration branch (Postgres)', 
     expect(row.stripe_payment_intent_id).toBe('pi_done');
   });
 
+  it('tells the confirmation hook once, on the first confirm only (a redelivery does not resend)', async () => {
+    const { reg } = await pendingReg('cs_hook');
+    const event = ev('checkout.session.completed', {
+      id: 'cs_hook', mode: 'payment', payment_status: 'paid', amount_total: 2000, currency: 'usd', payment_intent: 'pi_hook',
+      metadata: { kind: 'registration', registration_id: String(reg) },
+    });
+    const confirmed: number[] = [];
+    const deps = { db, env: ENV, onRegistrationConfirmed: async (id: number) => { confirmed.push(id); } };
+    expect(await handleStripeEvent(deps, event)).toEqual(processed('registration_confirmed'));
+    expect(await handleStripeEvent(deps, event)).toEqual(processed('registration_confirmed'));
+    expect(confirmed).toEqual([reg]);
+
+    // A hook that throws never fails the event.
+    const { reg: other } = await pendingReg('cs_hook2');
+    const throwing = ev('checkout.session.completed', {
+      id: 'cs_hook2', mode: 'payment', payment_status: 'paid', amount_total: 2000, currency: 'usd', payment_intent: 'pi_hook2',
+      metadata: { kind: 'registration', registration_id: String(other) },
+    });
+    expect(await handleStripeEvent({ ...deps, onRegistrationConfirmed: async () => { throw new Error('mail down'); } }, throwing))
+      .toEqual(processed('registration_confirmed'));
+  });
+
   it('checkout.session.expired cancels the pending registration and frees the held seat', async () => {
     const { eid, reg } = await pendingReg('cs_exp', { title_en: 'Capped', title_zh: '限额', capacity: 1 });
     // The pending row holds the only seat.
