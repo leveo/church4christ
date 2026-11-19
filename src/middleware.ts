@@ -412,8 +412,11 @@ export const onRequest = defineMiddleware(async (context, next) => {
       // Any page rendered with a user is personal — never store it in a shared
       // cache. /media/ and /cal/ are long-cacheable public assets (R2 media, iCal
       // feed) that set their own caching even when a user is attached, so exempt
-      // them from the personal no-store (those routes land in a later slice).
-      const isCacheable = pathname.startsWith('/media/') || pathname.startsWith('/cal/');
+      // them from the personal no-store (those routes land in a later slice). The
+      // registration QR image is the same kind of public asset (a function of the
+      // URL alone, whoever asks).
+      const isCacheable = pathname.startsWith('/media/') || pathname.startsWith('/cal/')
+        || pathname.startsWith('/register/qr/');
       if (context.locals.user && !isCacheable) res.headers.set('cache-control', 'no-store');
     }
     return finish(res);

@@ -30,6 +30,16 @@ export interface SendEmailInput {
   detail?: string;
   /** Keep proof material out of console logs even when EMAIL_DEV_LOG is enabled. */
   redactDevLogBody?: boolean;
+  /** Files sent with the message (e.g. a calendar invite). Absent: the mail is exactly as before. */
+  attachments?: EmailAttachment[];
+}
+
+export interface EmailAttachment {
+  filename: string;
+  /** Full media type, parameters included (e.g. `text/calendar; charset=utf-8; method=PUBLISH`). */
+  contentType: string;
+  /** Text is sent as UTF-8. */
+  content: string | Uint8Array;
 }
 
 const FROM_NAME = 'Church4Christ';
@@ -69,14 +79,42 @@ function headerSafe(value: string): string {
   return value.replace(/[\r\n]+/g, ' ');
 }
 
-/** Build a multipart/alternative MIME message (base64 text + html parts). */
-function buildMime(from: string, msg: SendEmailInput): string {
+/** base64 wrapped at 76 characters per line (RFC 2045). */
+function base64Lines(bytes: Uint8Array): string {
+  return (base64(bytes).match(/.{1,76}/g) ?? []).join('\r\n');
+}
+
+/** A header-safe media type: no CR/LF, and nothing that could end the header value early. */
+function contentTypeSafe(value: string): string {
+  return headerSafe(value).replace(/[^\x20-\x7E]/g, '').trim() || 'application/octet-stream';
+}
+
+/** `filename` / `filename*` parameters for a Content-Disposition (RFC 2231 for non-ASCII). */
+function dispositionFilename(raw: string): string {
+  const cleaned = headerSafe(raw).replace(/[\\/:*?"<>|\x00-\x1f\x7f]/g, '_').trim() || 'attachment';
+  // eslint-disable-next-line no-control-regex
+  if (/^[\x20-\x7E]*$/.test(cleaned)) return `filename="${cleaned}"`;
+  const ascii = cleaned.replace(/[^\x20-\x7E]/g, '_');
+  const encoded = [...new TextEncoder().encode(cleaned)]
+    .map((b) => (/[A-Za-z0-9!#$&+.^_`|~-]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : `%${b.toString(16).toUpperCase().padStart(2, '0')}`))
+    .join('');
+  return `filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
+/** Build the MIME message: multipart/alternative (base64 text + html parts), wrapped
+ *  in multipart/mixed when there are attachments. */
+export function buildMime(from: string, msg: SendEmailInput): string {
   const boundary = `b_${crypto.randomUUID().replace(/-/g, '')}`;
+  const attachments = msg.attachments ?? [];
+  const mixed = attachments.length > 0 ? `m_${crypto.randomUUID().replace(/-/g, '')}` : null;
   const lines = [
     `From: ${FROM_NAME} <${headerSafe(from)}>`,
     `To: ${headerSafe(msg.to)}`,
     `Subject: ${encodeHeader(headerSafe(msg.subject))}`,
     'MIME-Version: 1.0',
+    ...(mixed
+      ? [`Content-Type: multipart/mixed; boundary="${mixed}"`, '', `--${mixed}`]
+      : []),
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
     '',
     `--${boundary}`,
@@ -90,8 +128,23 @@ function buildMime(from: string, msg: SendEmailInput): string {
     '',
     b64utf8(msg.html),
     `--${boundary}--`,
-    '',
   ];
+  if (mixed) {
+    for (const file of attachments) {
+      const bytes = typeof file.content === 'string' ? new TextEncoder().encode(file.content) : file.content;
+      lines.push(
+        '',
+        `--${mixed}`,
+        `Content-Type: ${contentTypeSafe(file.contentType)}`,
+        'Content-Transfer-Encoding: base64',
+        `Content-Disposition: attachment; ${dispositionFilename(file.filename)}`,
+        '',
+        base64Lines(bytes),
+      );
+    }
+    lines.push(`--${mixed}--`);
+  }
+  lines.push('');
   return lines.join('\r\n');
 }
 
