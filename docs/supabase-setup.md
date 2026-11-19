@@ -1,8 +1,8 @@
 # Supabase setup — Giving and Registration (Stripe test and live)
 
-Setup is capability-driven: selections among the 20 D1-compatible modules (including
-**Member Portal**) choose D1 unless you explicitly override the backend. **Giving** and
-**Registration** require Postgres, so setup selects **Supabase** when either is enabled.
+Setup is capability-driven: selections among the 21 D1-compatible modules (including
+**Member Portal** and free **Registration**) choose D1 unless you explicitly override the backend. **Giving** and
+**paid Registration** require Postgres, so setup selects **Supabase** when Giving is enabled.
 Stripe runs in **test mode by default**: the installer accepts test keys, and live mode is a
 separate, explicit opt-in described in [section 7](#7-stripe-setup-and-go-live-giving-and-registration).
 Production email remains on the Cloudflare Email binding. Before remote sending, the sender domain
@@ -45,8 +45,7 @@ time-zone rules; they are separate from this database requirement.
 
 ## 1. Which database should I pick?
 
-Both offer a Free plan for eligible usage. Choose Supabase to enable Giving or Registration (and the
-Registration-dependent parts of Member Portal); the other 19 modules work on either database.
+Both offer a Free plan for eligible usage. Choose Supabase to enable Giving or paid Registration; the other 20 modules, including free Registration and all of Member Portal, work on either database.
 
 | | **D1** (default) | **Supabase** (Postgres) |
 |---|---|---|
@@ -54,10 +53,10 @@ Registration-dependent parts of Member Portal); the other 19 modules work on eit
 | **Setup effort** | Simplest (this is what `deploy.md` covers) | A few more steps (this page) |
 | **Giving — offline/manual ledger** | Not available | **Implemented** |
 | **Giving — Stripe online/recurring** | Not available | **Implemented** — test mode by default; live mode after the go-live checklist |
-| **Registration — free events** | Not available | **Implemented** |
-| **Registration — paid via Stripe** | Not available | **Implemented** — shares the same Stripe mode; verify with the checklist before live use |
-| **Member Portal** (household, groups, calendar, prayer) | **Available** (without event prayers, event admins, or My registrations) | **Available** (complete) |
-| **Other 19 modules** | Yes | Yes |
+| **Registration — free events** | **Available** (module is off after an upgrade until enabled) | **Implemented** |
+| **Registration — paid via Stripe** | Not available (the price field is disabled) | **Implemented** — shares the same Stripe mode; verify with the checklist before live use |
+| **Member Portal** (household, groups, calendar, prayer) | **Available** (event prayers, event admins, and My registrations need Registration enabled) | **Available** (complete) |
+| **Other 20 modules** | Yes | Yes |
 | **Backups** | Optional nightly D1 → R2 copy you configure (`deploy.md` step 9) | Free: manual dumps; Pro: automatic daily backups with 7-day retention as of August 2026 |
 | **Plan considerations** | Cloudflare allowances and email plan rules apply | Supabase limits, continuity needs, and Cloudflare/email plan rules all apply |
 
@@ -71,8 +70,8 @@ check [Supabase pricing](https://supabase.com/pricing),
 [database backups](https://supabase.com/docs/guides/platform/backups), and
 [Free project pausing](https://supabase.com/docs/guides/platform/free-project-pausing).
 
-Giving and Registration are **force-disabled on D1**, even if legacy
-settings say they are on. New setup writes explicit selected settings for all 22 modules.
+Giving and paid Registration are **not available on D1**. Giving is force-disabled on D1, even if legacy
+settings say it is on, and D1 refuses a priced Registration event. New setup writes explicit selected settings for all 22 modules.
 
 ---
 
@@ -411,7 +410,7 @@ The generated Supabase Worker runs webhook-inbox and pending-Checkout recovery o
 `*/5 * * * *` (every five minutes) and, on the same tick, drains queued giving statements
 (about ten emails per run). The operations page gives admins and finance users bounded,
 audited recovery controls without rendering raw webhook payloads, Checkout request JSON,
-customer email, secrets, or Checkout URLs. D1 does not support Giving, Registration, Stripe
+customer email, secrets, or Checkout URLs. D1 does not support Giving, paid Registration, Stripe
 operations, or this schedule.
 
 See [`docs/features/giving.md`](./features/giving.md) and

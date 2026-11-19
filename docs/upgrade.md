@@ -477,3 +477,40 @@ binding or secret, and no behavior changes** for existing content.
   writes only `en`/`zh` works against either schema.
 - **Recovery.** There is no down migration. Restore the pre-upgrade backup as in section 5 if you
   must go back.
+
+## Upgrading 1.6.0 to the next release (Unreleased)
+
+This release moves Registration onto Cloudflare D1 for free events and adds event stages, a
+waitlist, duplicate event, confirmation numbers, and a poster. It adds one forward migration
+on each database. There is no new binding, secret, or cron trigger. Back up first (section 2
+above), apply the migration, then deploy.
+
+### Registration on D1
+
+- **Apply `migrations/0050_registration_d1.sql`** with your normal D1 step
+  (`npm run db:migrate:remote`, or the `wrangler d1 migrations apply` command above) before
+  deploying the new build. It creates the Registration tables, plus `group_reg_events` and
+  `event_admins`, which the Member Portal's event prayers and the event-admins panel use.
+- **Registration stays off after the upgrade.** On a database that already has data, the
+  migration records `module.registration = 0`. An administrator turns it on in
+  **Settings → Modules** when ready. A fresh install follows the module choice made in setup.
+  An explicit saved choice is never changed.
+- **Free events only on D1.** The price field is disabled and a priced event is refused. Paid
+  events still need Supabase and Stripe.
+- **Setup doctor** now expects the registration tables, `group_reg_events`, and
+  `event_admins` on D1. Run the migration before running doctor.
+- **Identity merge:** on D1, a person who is an event admin cannot be merged away. The merge
+  shows a conflict, as it already did on Supabase.
+
+### Registration on Supabase (PostgreSQL)
+
+- **Apply `migrations-supabase/0042_registration_v2.sql`** with `npm run db:migrate:supabase`.
+  It adds the new columns and fills them in for registrations you already have: a legacy
+  idempotency key, one attendee row each, and a confirmation number per event such as
+  `R26-0001`, counted in registration id order. Each event's next number is set after the
+  last one. Existing registrations keep their status and answers. Back up first: the
+  migration updates every registration row.
+- **CSV export columns changed.** The roster CSV is now: Confirmation, Name, Email, Status,
+  Party size, Amount, Registered, then one column per question. If a script or spreadsheet
+  reads the old export by column position, update it.
+- There is no down migration. Restore the pre-upgrade backup as in section 5 if you must go back.

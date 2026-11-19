@@ -10,6 +10,38 @@ than published to npm.
 
 ## [Unreleased]
 
+### Added
+
+- Registration now runs on Cloudflare D1 for free events. Paid events still need
+  Supabase (PostgreSQL) and Stripe; on D1 the admin price field is disabled and a priced event
+  is refused. Events have four stages (Hidden, Preview, Open, Closed) with **Open now**,
+  **Close now**, **Hide**, and **Show** buttons and a **Visible from** time. Admins can duplicate
+  an event (details and questions, not registrations; the copy starts hidden), write titles,
+  descriptions, and question labels in every enabled site language, and add an optional poster
+  image and an optional confirmation-number prefix. Seat limits no longer allow overselling.
+  Free events can use a waitlist (on by default per event, can be turned off; paid events never
+  waitlist). Waitlist promotion is not automatic yet and is planned for a later release. Every
+  registration gets a confirmation number such as `R26-0001` and a party size. Guests still
+  verify their email before registering. See [docs/features/registration.md](docs/features/registration.md).
+
+### Changed
+
+- Operator impact for Registration (see [Upgrading](docs/upgrade.md#upgrading-160-to-the-next-release-unreleased)):
+  - D1: apply `migrations/0050_registration_d1.sql`. It creates the registration tables plus
+    `group_reg_events` and `event_admins` (used by the Member Portal's event prayers and the
+    event-admins panel). Existing D1 installations keep Registration **off** after upgrading
+    (the migration writes `module.registration = 0`) until an administrator enables it in
+    **Settings → Modules**. Fresh installs follow setup's module choice. The setup doctor now
+    expects these tables on D1.
+  - Postgres: apply `migrations-supabase/0042_registration_v2.sql`. It adds columns and
+    backfills existing registrations with a legacy idempotency key, one attendee row each, and
+    a per-event confirmation number in id order.
+  - The roster CSV column order changed to Confirmation, Name, Email, Status, Party size,
+    Amount, Registered, then the questions. Update any script that reads exports by position.
+  - Identity merge: on D1, a person who is an event admin is now a hard merge conflict, the
+    same as on Postgres.
+  - Setup treats only Giving (not Registration) as requiring Postgres.
+
 ### Fixed
 
 - Maintainers: CI now prints the Vitest results for the Postgres steps as well as writing the

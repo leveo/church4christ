@@ -105,7 +105,7 @@ member's profile as activity history.
 - **Data layer:** `src/lib/groupDb.ts` (groups, membership, join requests, people search,
   profile activity), `src/lib/groupEventDb.ts` (events + occurrence generation),
   `src/lib/groupAttendance.ts` (tokens, attendance upsert, the cron pass),
-  `src/lib/groupRegDb.ts` (Supabase-only Registration links). Form parsing in
+  `src/lib/groupRegDb.ts` (Registration links). Form parsing in
   `src/lib/groupForms.ts` / `groupEventForms.ts`.
 - **Attendance links:** minted by the hourly cron (`0 * * * *` in `wrangler.jsonc` →
   `sendAttendanceEmails` in `src/worker.ts`), which first tops up occurrences (+35 days), then

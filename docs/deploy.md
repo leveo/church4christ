@@ -22,7 +22,7 @@ hand it this file (see the README's "Build it with an AI assistant").
 
 > **Choose the setup path before you deploy.** For the recommended guided path, stay on
 > this page and run `npm run setup`; it selects D1 for Website / Website + Community and
-> Supabase for Full Church or any custom selection with Giving or Registration
+> Supabase for Full Church or any custom selection with Giving or paid Registration
 > (Member Portal alone stays on D1). The manual reference has an explicit [database fork](#manual-database-fork):
 > D1 uses the numbered D1 steps, while Supabase creates only R2 here, completes the
 > database steps in [`supabase-setup.md`](./supabase-setup.md), and resumes at email setup.

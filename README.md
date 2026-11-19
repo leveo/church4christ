@@ -253,7 +253,7 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/learning/genesis-1-en.png)](docs/features/learning.md) | **[Learning](docs/features/learning.md)** | Continue Sunday school and discipleship between meetings with bilingual videos, files, assignments, quizzes, and provider-synchronized status. |
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Page builder](docs/features/page-builder.md)** | Drag and drop your own custom pages together — multilingual, always on-theme, and published pages load with zero JavaScript. Optional; switching it off never breaks a page you already built. |
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Implemented: online gifts through Stripe (test mode by default, live after the go-live checklist), an offline ledger for checks and cash, and annual giving statements. |
-| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Implemented: free event sign-up, custom questions, and roster export, plus paid Stripe checkout in the same Stripe mode as Giving (verify with a small live registration before relying on it). |
+| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Implemented: free event sign-up on D1 or Supabase, custom questions, waitlist, event stages, and roster export, plus paid Stripe checkout on Supabase in the same Stripe mode as Giving (verify with a small live registration before relying on it). |
 | [![](docs/images/portal/member-opportunities.png)](docs/features/member-portal.md) | **[Member portal](docs/features/member-portal.md)** | One signed-in hub for current participation and open opportunities, plus household profiles, events, serving, calendar, giving, and scoped prayer. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Twelve languages](docs/features/i18n.md)** | Choose from 12 interface languages per site, with an English fallback and one-click Simplified-to-Traditional Chinese. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & automation](docs/features/email-automation.md)** | Sign-in links, reminders, and digests, with local logging and a paid-capable production configuration. |
@@ -347,7 +347,7 @@ limited to the full `/admin` area.
 The portal runs on both the default D1 backend and the optional **Supabase (Postgres)**
 backend. Households, groups, protected group files, and church/group/private prayer
 moderation work on D1. Event-scope prayers, event administrators, and "My registrations"
-need Registration, which is Supabase-only. Learn more in
+need Registration, which runs on D1 for free events once enabled. Learn more in
 [**`docs/features/member-portal.md`**](docs/features/member-portal.md).
 
 ---
@@ -382,7 +382,7 @@ tagline, address, time zone, primary and secondary colors, optional PNG/JPEG/Web
 (up to 2 MiB), language, first administrator, and demo-content choice. Check only the
 features you need.
 The recommended selection uses D1 as its database; the application still runs on
-Cloudflare Workers and stores media in R2. **Giving and Registration**
+Cloudflare Workers and stores media in R2. **Giving and paid Registration**
 are advanced options requiring an explicit switch to Supabase-compatible PostgreSQL.
 
 Saving writes `.church/preferences.json` and any uploaded logo under `.church/`, which
@@ -430,8 +430,8 @@ the [identity review or recovery workflow](docs/features/member-identity.md) bef
 
 The terminal-only `npm run setup` remains available. Setup offers **Website** (8 focused
 publishing modules), **Website + Community** (18 modules; Member Portal can be added on D1), and
-**Full Church** (21 modules; Service Planning is switched on separately). Giving and
-Registration select Supabase automatically; D1-compatible selections choose D1 unless you
+**Full Church** (21 modules; Service Planning is switched on separately). Giving
+selects Supabase automatically (free Registration runs on D1); D1-compatible selections choose D1 unless you
 explicitly override the backend. Account requirements depend on Local versus Deploy mode,
 as detailed below. For automation, pass all answers with `--yes`; add `--json` for one
 machine-readable result. For a human-readable noninteractive run, use the same complete
@@ -456,7 +456,7 @@ pricing pages before deployment.
 | Profile | Included scope | Cost and readiness notes |
 |---|---|---|
 | **Local evaluation** | Website or community modules with local D1; full modules with compatible local Postgres | No hosted-service charge is required for local D1 evaluation. You still provide the computer, development time, and any optional external services. |
-| **D1 website/community** | Cloudflare Worker, D1, and R2 for up to 20 D1-compatible modules | A modest deployment can fit within Cloudflare free allowances. Traffic, storage, operations beyond allowances, a domain, and other services can cost money; check [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/). Production email is separate. |
+| **D1 website/community** | Cloudflare Worker, D1, and R2 for up to 21 D1-compatible modules | A modest deployment can fit within Cloudflare free allowances. Traffic, storage, operations beyond allowances, a domain, and other services can cost money; check [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/). Production email is separate. |
 | **Production email** | Transactional sign-in links, reminders, requests, and digests to arbitrary recipients | The repository supports a paid-capable Cloudflare email configuration. Arbitrary-recipient sending requires Workers Paid, currently a minimum **$5/month** including **3,000 emails**, then **$0.35 per 1,000 emails**. These amounts are subject to change; check [Cloudflare Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/). |
 | **Supabase/full modules** | Cloudflare deployment plus Supabase/Postgres for the 21 Full Church modules, including Member Portal, Giving, and Registration | Cloudflare costs still apply, and the selected [Supabase plan](https://supabase.com/pricing) may add subscription or usage charges. As of August 2026, Supabase Free has no automatic daily backups, and low-activity Free projects may be [automatically paused](https://supabase.com/docs/guides/platform/free-project-pausing) based on activity over a seven-day period. For production, take regular off-site database dumps and perform restore drills, or select a paid plan whose [backup options](https://supabase.com/docs/guides/platform/backups) meet your continuity requirements. Pricing and service policies are subject to change. Stripe starts in test mode; live payments are an explicit opt-in after the go-live checklist in [`docs/supabase-setup.md`](docs/supabase-setup.md). |
 
@@ -496,8 +496,8 @@ inventory, rehearse in staging, and review the [`Unreleased` changelog](CHANGELO
 applying forward migrations. Maintainers preparing a release should follow
 the [release process](docs/release-process.md).
 
-**Choosing your database.** The 20 D1-compatible modules exclude
-**Giving** and **Registration**, which require Postgres. Account requirements follow the
+**Choosing your database.** The 21 D1-compatible modules exclude
+**Giving**, which requires Postgres, and **paid Registration**, which does too. Account requirements follow the
 mode: local D1 needs no external account; deployed D1 needs a Cloudflare account; local
 Supabase needs a Supabase account or compatible local Postgres database; deployed Supabase
 needs both Cloudflare and Supabase. There is no automated D1↔Supabase content migration yet,
@@ -506,8 +506,8 @@ so choose the production database before entering real content. See
 
 **Stripe starts in test mode; live mode is an explicit opt-in.** Stripe hosts payment pages,
 receipts, the Billing Portal, refunds, and disputes; this application stores only amounts,
-funds, dates, status, and Stripe ids. Giving and Registration are Supabase-only; D1 does not
-support those modules. When setup asks for either module, import an `sk_test_…` key and
+funds, dates, status, and Stripe ids. Giving and paid Registration are Supabase-only; D1 does not
+support them. When setup asks for either module, import an `sk_test_…` key and
 `whsec_…` signing secret with the one-shot `CHURCH_SETUP_STRIPE_SECRET_KEY` and
 `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET` environment variables; setup stores the runtime secrets
 and writes `STRIPE_MODE=test`. To take real donations, follow the go-live checklist in the
