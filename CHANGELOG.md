@@ -10,37 +10,12 @@ than published to npm.
 
 ## [Unreleased]
 
-### Added
-
-- An `event-registration` setup preset for churches that only want event sign-up. It turns on
-  Registration alone and runs on the default Cloudflare D1 database, where every event is free:
-  `npm run onboard -- --preset event-registration`. Paid events need Supabase (PostgreSQL) and
-  Stripe from the start (`--backend supabase`); Event Logistics stays a later opt-in in
-  **Settings → Modules**. A new `church-event-registration` entry in `config/editions.json`
-  describes the matching single-feature edition. See [docs/editions.md](docs/editions.md).
-- With the Events module off and Registration on, the home page lists the events people can sign
-  up for in the upcoming-events spot. The admin dashboard has a **Registration** shortcut.
-
-### Changed
-
-- Operator impact: none for existing installations. No migrations, bindings, secrets, or module
-  defaults change. The `event-registration` preset only affects new installations, and its
-  module list (Registration) is fixed from this release on.
-
-### Fixed
-
-- Registration on D1: the admin menu no longer links to **Stripe operations**, which failed there
-  because its tables exist only on Postgres, and the payment operations permission is no longer
-  offered. Super admins can give a staff member the **Registration** area again; the checkbox was
-  disabled on D1. The setup doctor no longer asks a D1 site to configure Stripe, which it cannot
-  use. Without the Member Portal, pressing **Register** twice lands on the confirmation page
-  instead of a missing **My events** page.
-
 ## [1.7.0] - 2026-11-20
 
 Upgrading from 1.6.0: see [Upgrading 1.6.0 to 1.7.0](docs/upgrade.md#upgrading-160-to-170).
 This release is about event registration: free events on D1, household and group sign-up,
 an event builder, a back office with a phone check-in desk, and an optional event logistics module.
+Registration can also be installed on its own with the new `event-registration` preset.
 
 ### Added
 
@@ -143,9 +118,20 @@ an event builder, a back office with a phone check-in desk, and an optional even
   New copy in German, Spanish, French, Portuguese, Japanese, Korean, Vietnamese, Indonesian,
   Malay and Hindi is AI-assisted; community review welcome. See
   [docs/features/event-logistics.md](docs/features/event-logistics.md).
+- An `event-registration` setup preset for churches that only want event sign-up. It turns on
+  Registration alone and runs on the default Cloudflare D1 database, where every event is free:
+  `npm run onboard -- --preset event-registration`. Paid events need Supabase (PostgreSQL) and
+  Stripe from the start (`--backend supabase`); Event Logistics stays a later opt-in in
+  **Settings → Modules**. A new `church-event-registration` entry in `config/editions.json`
+  describes the matching single-feature edition. See [docs/editions.md](docs/editions.md).
+- With the Events module off and Registration on, the home page lists the events people can sign
+  up for in the upcoming-events spot. The admin dashboard has a **Registration** shortcut.
 
 ### Changed
 
+- Operator impact for the `event-registration` preset: none for existing installations. No
+  migrations, bindings, secrets, or module defaults change. The preset only affects new
+  installations, and its module list (Registration) is fixed from this release on.
 - Operator impact for Registration event logistics (see [Upgrading](docs/upgrade.md#registration-event-logistics)):
   - D1: apply `migrations/0054_registration_logistics.sql`. Postgres: apply
     `migrations-supabase/0046_registration_logistics.sql`. Both add defaulted columns to
@@ -217,6 +203,12 @@ an event builder, a back office with a phone check-in desk, and an optional even
 
 ### Fixed
 
+- Registration on D1: the admin menu no longer links to **Stripe operations**, which failed there
+  because its tables exist only on Postgres, and the payment operations permission is no longer
+  offered. Super admins can give a staff member the **Registration** area again; the checkbox was
+  disabled on D1. The setup doctor no longer asks a D1 site to configure Stripe, which it cannot
+  use. Without the Member Portal, pressing **Register** twice lands on the confirmation page
+  instead of a missing **My events** page.
 - Maintainers: CI now prints the Vitest results for the Postgres steps as well as writing the
   JSON report, so a failing test is named in the log. Postgres tests pin their session to UTC, so
   identity-merge step-up checks no longer fail on a local server whose time zone is not UTC.
