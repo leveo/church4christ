@@ -12,7 +12,7 @@ import { memberCopy } from '../../../i18n/designMember';
 import MemberPageHeader from '../../../components/ui/MemberPageHeader.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
-import { formatDate } from '../../../lib/dates';
+import { formatDate, utcToDatetimeLocal } from '../../../lib/dates';
 import { formatCents } from '../../../lib/money';
 import { listOpenEvents, listRegistrationsForPerson, type RegEvent } from '../../../lib/regDb';
 import { isEventFull, offersWaitlist } from '../../../lib/regPhase';
@@ -39,7 +39,11 @@ const statusChip: Record<'pending' | 'review' | 'confirmed' | 'waitlist', string
   waitlist: 'bg-warn-soft text-warn',
 };
 
-const when = (startsAt: string) => `${formatDate(startsAt.slice(0, 10), locale)} ${startsAt.slice(11, 16)}`;
+const localDate = (startsAt: string) => utcToDatetimeLocal(startsAt).slice(0, 10);
+const when = (startsAt: string) => {
+  const [date, time] = utcToDatetimeLocal(startsAt).split('T');
+  return `${formatDate(date, locale)} ${time}`;
+};
 const priceLabel = (e: RegEvent) =>
   e.price_cents !== null && e.price_cents > 0 ? formatCents(e.price_cents, e.currency) : t(locale, 'register.free');
 const isFull = (e: RegEvent) => isEventFull(e);
@@ -61,9 +65,9 @@ const spotsLeft = (e: RegEvent) => (e.capacity !== null ? Math.max(0, e.capacity
           <ul class="mt-4 flex flex-col gap-4">
             {myRegistrations.map((r) => (
               <li class="member-event-ticket rounded-lg border border-border bg-surface-raised p-5">
-                <time datetime={r.starts_at} class="event-date"><strong>{r.starts_at.slice(8, 10)}</strong><span>{formatDate(r.starts_at.slice(0, 10), locale)}</span></time><div>
+                <time datetime={localDate(r.starts_at)} class="event-date"><strong>{localDate(r.starts_at).slice(8, 10)}</strong><span>{formatDate(localDate(r.starts_at), locale)}</span></time><div>
                 <div class="flex flex-wrap items-center gap-2">
-                  <span class="font-semibold">{r.event_title}</span>
+                  <a href={localePath(locale, `/my/events/${r.id}`)} class="font-semibold hover:underline">{r.event_title}</a>
                   <span class={`${badge} ${statusChip[r.status]}`}>{t(locale, `portal.events.status.${r.status}`)}</span>
                 </div>
                 <p class="mt-1 text-sm text-ink-muted">{when(r.starts_at)}</p>

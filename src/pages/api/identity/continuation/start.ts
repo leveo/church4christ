@@ -2,7 +2,9 @@ import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import type { EmailEnv } from '../../../../lib/email';
 import { getFund } from '../../../../lib/fundDb';
-import { getOpenEvent, listQuestions, validateAnswers } from '../../../../lib/regDb';
+import { getOpenEvent, listQuestions } from '../../../../lib/regDb';
+import { validateSubmission } from '../../../../lib/regManage';
+import { bagFromFormData, submissionFromBag } from '../../../../lib/regPublic';
 import {
   beginGivingContinuation,
   beginRegistrationContinuation,
@@ -78,11 +80,24 @@ export const POST: APIRoute = async ({ request, locals }) => {
         return redirect(`/${locale}/register/${event.id}?error=paid_unavailable`, headers);
       }
       const questions = await listQuestions(locals.db, locale, eventId);
-      const answerForm: Record<string, string | string[]> = {};
-      for (const question of questions) answerForm[String(question.id)] = form.getAll(String(question.id)).map(String);
-      const answers = validateAnswers(questions, answerForm);
+      // Contact, people and answers are validated by the function the review step ran. A problem
+      // sends the same body back to the form (307): it re-validates and shows each one inline, so
+      // nothing typed is lost and no value rides in a URL. Everything after this point still
+      // collapses into the neutral continuation screen.
+      const checked = validateSubmission(
+        event,
+        questions,
+        submissionFromBag(bagFromFormData(form), questions, event.max_party_size ?? 1),
+      );
+      if (!checked.ok) return redirect307(`/${locale}/register/${event.id}`, headers);
+      const { contact, attendees, answers } = checked.value;
+      // A guest has no household: people are names only. A single person with no phone stays a plain registration.
+      const party = attendees.length > 1 || contact.phone !== null
+        ? { phone: contact.phone, attendees: attendees.map((a) => ({ name: a.name })) }
+        : undefined;
       const begun = await beginRegistrationContinuation(locals.rawDb, vars, {
-        campusId, intentId, requestContext, event, name: String(form.get('name') ?? ''), email: String(form.get('email') ?? ''), locale, answers,
+        campusId, intentId, requestContext, event, name: contact.name, email: contact.email, locale, answers,
+        ...(party ? { party } : {}),
       });
       const publicId = begun.status === 'verification_required' ? begun.delivery.publicId : await signupOperationPublicId(locals.rawDb, campusId, begun.operationId);
       if (!publicId) throw new Error('identity_continuation_pending');
@@ -102,6 +117,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
   return redirect(`/${locale}/identity/continue`, headers);
 };
+
+function redirect307(location: string, headers: Headers): Response {
+  headers.set('location', location);
+  return new Response(null, { status: 307, headers });
+}
 
 function redirect(location: string, headers: Headers): Response {
   headers.set('location', location);

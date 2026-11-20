@@ -22,7 +22,7 @@ import {
 } from './stripeCheckoutRequests';
 import { classifyRegistrationCheckoutFailure } from './registrationCheckoutFailure';
 import {
-  listQuestions, readRegistrationInsert, registrationInsertStatements, seatsTakenSql, validateAnswers,
+  generateManageToken, listQuestions, readRegistrationInsert, registrationInsertStatements, seatsTakenSql, validateAnswers,
   type CreatedRegistration, type RegEvent, type RegQuestion, type RegStatus,
 } from './regDb';
 import { sha256Utf8 } from './stripeWebhookInbox';
@@ -61,7 +61,13 @@ export type NormalizedRegistrationContinuationInput = Readonly<{
   currency: string;
   locale: ContinuationLocale;
   answers: ReadonlyArray<readonly [number, string]>;
+  /** Present only when the guest registered a party; it is part of the payload digest. */
+  party?: Readonly<{ phone: string | null; attendees: ReadonlyArray<Readonly<{ name: string }>> }>;
 }>;
+
+/** The guest's party as stored in identity_registration_continuations.party_json. A guest
+ *  has no household, so attendees carry names only (never a person id). */
+export type RegistrationContinuationParty = { phone: string | null; attendees: Array<{ name: string }> };
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -122,6 +128,7 @@ export async function normalizeGivingContinuationInput(input: RawGivingContinuat
 export async function normalizeRegistrationContinuationInput(input: {
   eventId: number; name: string; email: string; amountCents: number; currency: string;
   locale: ContinuationLocale; answers: Array<[number, string]>;
+  party?: RegistrationContinuationParty;
 }): Promise<NormalizedRegistrationContinuationInput> {
   if (!validId(input.eventId) || !Number.isSafeInteger(input.amountCents) || input.amountCents < 0) {
     throw new Error('identity_continuation_registration_invalid');
@@ -137,8 +144,20 @@ export async function normalizeRegistrationContinuationInput(input: {
     return [questionId, text(answer, 'identity_continuation_answers_invalid', 2000)] as const;
   }).sort(([left], [right]) => left - right);
   if (answers.some((answer, index) => index > 0 && answers[index - 1][0] === answer[0])) throw new Error('identity_continuation_answers_invalid');
+  let party: NormalizedRegistrationContinuationInput['party'];
+  if (input.party !== undefined) {
+    if (!Array.isArray(input.party.attendees) || input.party.attendees.length < 1 || input.party.attendees.length > 20) {
+      throw new Error('identity_continuation_party_invalid');
+    }
+    const phone = input.party.phone == null ? null : (typeof input.party.phone === 'string' ? input.party.phone.trim() : '') || null;
+    if (phone !== null && phone.length > 40) throw new Error('identity_continuation_party_invalid');
+    party = Object.freeze({
+      phone,
+      attendees: Object.freeze(input.party.attendees.map((attendee) => Object.freeze({ name: text(attendee?.name, 'identity_continuation_party_invalid') }))),
+    });
+  }
   return Object.freeze({ eventId: input.eventId, name, email, amountCents: input.amountCents, currency,
-    locale: input.locale, answers: Object.freeze(answers) });
+    locale: input.locale, answers: Object.freeze(answers), ...(party ? { party } : {}) });
 }
 
 export async function continuationPayloadDigest(value: unknown): Promise<string> {
@@ -377,14 +396,19 @@ export async function beginGivingContinuation(db: AppDb, env: IdentityBusinessCo
 
 export async function beginRegistrationContinuation(db: AppDb, env: IdentityBusinessContinuationEnv, input: {
   campusId: number; intentId: string; requestContext: IdentityTrustedRequestContext; now?: string;
-  event: Pick<RegEvent, 'id' | 'title' | 'price_cents' | 'currency' | 'active' | 'closes_at' | 'starts_at'>;
+  event: Pick<RegEvent, 'id' | 'title' | 'price_cents' | 'currency' | 'active' | 'closes_at' | 'starts_at'> & { max_party_size?: number };
   name: string; email: string; locale: ContinuationLocale; answers: Array<[number, string]>;
+  /** A party of more than the contact; omitted = one person (and the payload digests as before). */
+  party?: RegistrationContinuationParty;
 }): Promise<{ status: 'verification_required'; intentId: string; operationId: string; delivery: { to: string; publicId: string; code: string; expiresAt: string } } | { status: 'pending'; intentId: string; operationId: string }> {
   if (!validId(input.campusId) || !validIntentId(input.intentId)) throw new Error('identity_continuation_invalid');
   if (input.event.active !== 1 || (input.event.closes_at ?? input.event.starts_at) <= nowUtc(input.now)) throw new Error('identity_continuation_event_closed');
   const normalized = await normalizeRegistrationContinuationInput({ eventId: input.event.id, name: input.name, email: input.email,
     amountCents: input.event.price_cents && input.event.price_cents > 0 ? input.event.price_cents : 0, currency: input.event.currency,
-    locale: input.locale, answers: input.answers });
+    locale: input.locale, answers: input.answers, party: input.party });
+  if (normalized.party && normalized.party.attendees.length > (input.event.max_party_size ?? 1)) {
+    throw new Error('identity_continuation_party_invalid');
+  }
   const questions = await listQuestions(db, normalized.locale, normalized.eventId);
   if (JSON.stringify(revalidateRegistrationAnswers(questions, [...normalized.answers])) !== JSON.stringify(normalized.answers)) {
     throw new Error('identity_continuation_answers_invalid');
@@ -396,9 +420,10 @@ export async function beginRegistrationContinuation(db: AppDb, env: IdentityBusi
   await createBaseIntent(db, { campusId: input.campusId, intentId: input.intentId, kind: 'registration', sourceRecordId: source.sourceRecordId,
     sourceVersion: source.version, sourceDigest: source.sourceDigest, payloadDigest, expiresAt: expiresAt(input.now) });
   try {
-    await db.prepare(`INSERT INTO identity_registration_continuations(intent_id,event_id,amount_cents,currency,locale,answers_json,question_digest,checkout_request_id)
-      VALUES(?1,?2,?3,?4,?5,?6,?7,?8)`).bind(input.intentId, normalized.eventId, normalized.amountCents, normalized.currency,
-      normalized.locale, JSON.stringify(normalized.answers), questionDigest, normalized.amountCents > 0 ? newCheckoutRequestId() : null).run();
+    await db.prepare(`INSERT INTO identity_registration_continuations(intent_id,event_id,amount_cents,currency,locale,answers_json,question_digest,checkout_request_id,party_json)
+      VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)`).bind(input.intentId, normalized.eventId, normalized.amountCents, normalized.currency,
+      normalized.locale, JSON.stringify(normalized.answers), questionDigest, normalized.amountCents > 0 ? newCheckoutRequestId() : null,
+      normalized.party ? JSON.stringify(normalized.party) : null).run();
   } catch {
     const existing = await db.prepare('SELECT intent_id,question_digest FROM identity_registration_continuations WHERE intent_id=?1')
       .bind(input.intentId).first<{ intent_id: string; question_digest: string }>();
@@ -652,7 +677,7 @@ export async function continuePaidRegistrationCheckout(
       registrationId: resolution.registrationId,
       sessionId: session.id,
       sessionUrl: session.url,
-      amountCents: price.unit_amount,
+      amountCents: price.unit_amount * resolution.requestJson.line_items[0].quantity,
       currency: price.currency,
     });
     if (attached) return { kind: 'redirect', registrationId: resolution.registrationId, checkoutUrl: session.url };
@@ -678,7 +703,10 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
 }): Promise<{ status: 'done' | 'redirect' | 'waiting' | 'review' | 'invalid'; personId?: number; sessionEpoch?: number;
   resolution?: CheckoutRequestResolution; replay?: true;
   /** For a free 'done' result: the registration's status ('waitlist' when the event filled up first). */
-  registrationStatus?: RegStatus }> {
+  registrationStatus?: RegStatus;
+  /** For a freshly created free registration: its id and the plaintext manage-link token (shown/sent
+   *  once; absent on a replay, because only the token's hash is stored). */
+  registrationId?: number; manageToken?: string }> {
   if (!validId(input.campusId) || !validIntentId(input.intentId)) return { status: 'invalid' };
   const intent = await loadRegistrationContinuation(db, input.campusId, input.intentId);
   if (!intent) return { status: 'invalid' };
@@ -718,9 +746,9 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
         registrationStatus: await savedRegistrationStatus(db, saved.registration_id) }
       : { status: 'waiting', personId: auth.personId, sessionEpoch: auth.sessionEpoch };
   }
-  const child = await db.prepare('SELECT event_id,amount_cents,currency,locale,answers_json,question_digest,checkout_request_id FROM identity_registration_continuations WHERE intent_id=?1')
+  const child = await db.prepare('SELECT event_id,amount_cents,currency,locale,answers_json,question_digest,checkout_request_id,party_json FROM identity_registration_continuations WHERE intent_id=?1')
     .bind(input.intentId).first<{ event_id: number; amount_cents: number; currency: string; locale: ContinuationLocale;
-      answers_json: string; question_digest: string; checkout_request_id: string | null }>();
+      answers_json: string; question_digest: string; checkout_request_id: string | null; party_json: string | null }>();
   if (!child) {
     await db.prepare(`UPDATE identity_registration_continuations SET state='ready',claim_token_hash=NULL,claim_expires_at=NULL,updated_at=datetime('now') WHERE intent_id=?1 AND state='creating' AND claim_token_hash=?2`).bind(input.intentId, claim.claimHash!).run();
     return { status: 'invalid' };
@@ -730,10 +758,10 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
     await db.prepare(`UPDATE identity_registration_continuations SET state='ready',claim_token_hash=NULL,claim_expires_at=NULL,updated_at=datetime('now') WHERE intent_id=?1 AND state='creating' AND claim_token_hash=?2`).bind(input.intentId, claim.claimHash!).run();
     return { status: 'invalid' };
   }
-  const event = await db.prepare(`SELECT e.id,COALESCE(el.title,en.title,'') title,e.price_cents,e.currency,e.active,e.closes_at,e.starts_at
+  const event = await db.prepare(`SELECT e.id,COALESCE(el.title,en.title,'') title,e.price_cents,e.currency,e.active,e.closes_at,e.starts_at,e.max_party_size
     FROM reg_events e LEFT JOIN reg_event_i18n el ON el.event_id=e.id AND el.locale=?2
     LEFT JOIN reg_event_i18n en ON en.event_id=e.id AND en.locale='en' WHERE e.id=?1`)
-    .bind(child.event_id, child.locale).first<Pick<RegEvent, 'id' | 'title' | 'price_cents' | 'currency' | 'active' | 'closes_at' | 'starts_at'>>();
+    .bind(child.event_id, child.locale).first<Pick<RegEvent, 'id' | 'title' | 'price_cents' | 'currency' | 'active' | 'closes_at' | 'starts_at' | 'max_party_size'>>();
   const release = () => db.prepare(`UPDATE identity_registration_continuations SET state='ready',claim_token_hash=NULL,claim_expires_at=NULL,updated_at=datetime('now') WHERE intent_id=?1 AND state='creating' AND claim_token_hash=?2`).bind(input.intentId, claim.claimHash!);
   if (!event || event.active !== 1 || (event.closes_at ?? event.starts_at) <= nowUtc(input.now)
     || (event.price_cents && event.price_cents > 0 ? event.price_cents : 0) !== child.amount_cents || event.currency.toLowerCase() !== child.currency) {
@@ -750,10 +778,20 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
       await release().run(); return { status: 'invalid' };
     }
   } catch { await release().run(); return { status: 'invalid' }; }
+  let party: RegistrationContinuationParty | undefined;
+  if (child.party_json !== null) {
+    try {
+      const parsed = JSON.parse(child.party_json) as RegistrationContinuationParty;
+      const attendees = parsed.attendees.map((attendee) => ({ name: text(attendee.name, 'identity_continuation_party_invalid') }));
+      if (attendees.length < 1 || attendees.length > event.max_party_size) throw new Error('identity_continuation_party_invalid');
+      party = { phone: typeof parsed.phone === 'string' && parsed.phone !== '' ? parsed.phone : null, attendees };
+    } catch { await release().run(); return { status: 'invalid' }; }
+  }
   const owner = await db.prepare('SELECT display_name,email FROM people WHERE id=?1 AND active=1 AND deleted_at IS NULL').bind(auth.personId).first<{ display_name: string; email: string }>();
   if (!owner) { await release().run(); return { status: 'invalid' }; }
   if (child.amount_cents === 0) {
     const registrationId = databaseId();
+    const manage = await generateManageToken();
     let created: CreatedRegistration | null;
     try {
       const results = await db.batch([
@@ -768,6 +806,9 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
           name: owner.display_name, email: owner.email, status: 'confirmed',
           amountCents: 0, currency: child.currency, submissionKey: `continuation:${input.intentId}`,
           allowWaitlist: true, answers, guard: { now: nowUtc(input.now), currency: child.currency },
+          // The guest's party: attendee 1 is the new account (person_id inherited), the rest are names only.
+          ...(party ? { attendees: party.attendees.map((attendee, index) => ({ name: attendee.name, personId: index === 0 ? undefined : null })) } : {}),
+          locale: child.locale, phone: party?.phone ?? null, manageTokenHash: manage.hash,
         }),
         db.prepare(`UPDATE identity_registration_continuations SET state='attached',registration_id=?1,claim_token_hash=NULL,claim_expires_at=NULL,updated_at=datetime('now') WHERE intent_id=?2 AND state='creating' AND claim_token_hash=?3`).bind(registrationId, input.intentId, claim.claimHash!),
         db.prepare(`INSERT INTO identity_business_intent_receipts(receipt_id,campus_id,intent_id,source_record_id,source_version,source_digest,person_id,business_record_key)
@@ -776,7 +817,7 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
           signup_delivery_count=0,signup_delivery_not_before=NULL,updated_at=datetime('now') WHERE intent_id=?2 AND state='ready' AND result_person_id=?3`).bind(String(registrationId), input.intentId, auth.personId),
         db.prepare(`UPDATE identity_registration_continuations SET state='consumed',updated_at=datetime('now') WHERE intent_id=?1 AND registration_id=?2`).bind(input.intentId, registrationId),
       ]);
-      created = readRegistrationInsert(results);
+      created = readRegistrationInsert(results, manage.token);
     } catch (error) {
       await db.prepare(`UPDATE identity_registration_continuations SET state='ready',claim_token_hash=NULL,claim_expires_at=NULL,updated_at=datetime('now') WHERE intent_id=?1 AND state='creating' AND claim_token_hash=?2`).bind(input.intentId, claim.claimHash!).run();
       const capacity = await db.prepare(`SELECT e.capacity,${seatsTakenSql('e.id')} taken FROM reg_events e WHERE e.id=?1`)
@@ -785,14 +826,16 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
       return { status: 'waiting', personId: auth.personId, sessionEpoch: auth.sessionEpoch };
     }
     return { status: 'done', personId: auth.personId, sessionEpoch: auth.sessionEpoch,
-      registrationStatus: created?.status ?? await savedRegistrationStatus(db, registrationId) };
+      registrationStatus: created?.status ?? await savedRegistrationStatus(db, registrationId),
+      registrationId, manageToken: manage.token };
   }
   if (!child.checkout_request_id) return { status: 'invalid' };
   let resolution: CheckoutRequestResolution;
   try {
     resolution = await resolveRegistrationCheckoutRequest(db, { requestId: child.checkout_request_id, eventId: child.event_id, personId: auth.personId,
       name: owner.display_name, email: owner.email, amountCents: child.amount_cents, currency: child.currency,
-      answers, eventTitle: event.title, locale: child.locale, appOrigin: input.appOrigin });
+      answers, ...(party ? { party: { phone: party.phone, attendees: party.attendees.map((attendee, index) => ({ name: attendee.name, personId: index === 0 ? auth.personId : null })) } } : {}),
+      eventTitle: event.title, locale: child.locale, appOrigin: input.appOrigin });
   } catch {
     await db.prepare(`UPDATE identity_registration_continuations SET state='ready',claim_token_hash=NULL,claim_expires_at=NULL,updated_at=datetime('now') WHERE intent_id=?1 AND state='creating' AND claim_token_hash=?2`).bind(input.intentId, claim.claimHash!).run();
     return { status: 'waiting', personId: auth.personId, sessionEpoch: auth.sessionEpoch };

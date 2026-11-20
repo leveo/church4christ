@@ -185,6 +185,7 @@
     },
     "de": {
       "keys": [
+        "reg.email.label.status",
         "admin.activityScore.name",
         "admin.activityScore.search",
         "admin.announcements.colActive",
@@ -272,6 +273,7 @@
     },
     "ms": {
       "keys": [
+        "reg.email.label.status",
         "admin.builder.slug",
         "admin.pages.colSlug",
         "admin.pages.slug",
@@ -282,6 +284,7 @@
     },
     "id": {
       "keys": [
+        "reg.email.label.status",
         "admin.announcements.colActive",
         "admin.attendance.total",
         "admin.builder.prop.label",

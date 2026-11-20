@@ -12,16 +12,37 @@ import { DESIGN_IMAGES } from '../../../lib/designAssets';
 // time (no form); open shows the form (a full free event with a waitlist says "Join
 // the waitlist", any other full event says Full); closed shows a closed notice.
 // ?error= banners surface a bounced submit. An unknown or hidden event renders the
-// "registration closed" state. Owned by the `registration` module — the middleware
+// "registration closed" state. The form posts back to THIS page (step=review), which
+// validates the whole submission without writing anything and either re-renders the
+// form with inline errors or shows a read-only review with Back to edit / Confirm;
+// Confirm posts to the real endpoint. The idempotency ids are minted once and carried
+// through every round trip. Owned by the `registration` module — the middleware
 // 404s this route when the module is off.
 import Base from '../../../layouts/Base.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
-import { formatDate } from '../../../lib/dates';
+import { formatDate, utcToDatetimeLocal } from '../../../lib/dates';
 import { getPublicEvent, listQuestions } from '../../../lib/regDb';
+import { getLiveHouseholdForPerson } from '../../../lib/householdDb';
+import { restrictAttendeePersons, validateSubmission, type SubmissionError } from '../../../lib/regManage';
+import {
+  bagFirst,
+  bagFromFormData,
+  echoIntentId,
+  echoSubmissionKey,
+  fieldIdForPath,
+  partyFit,
+  partyRowCount,
+  seatsLeft,
+  submissionFromBag,
+  type FieldBag,
+  type PartyFit,
+} from '../../../lib/regPublic';
+import { renderQuestionField, submissionErrorKey, type ViewQuestion } from '../../../lib/regViewHtml';
+import { formatCents } from '../../../lib/money';
 import { offersWaitlist } from '../../../lib/regPhase';
 import { mediaPath } from '../../../lib/mediaRef';
-import { btn, lab, tin, noticeErr, badge, badgeInactive } from '../../../lib/adminUi';
+import { btn, btnSecondary, lab, tin, noticeErr, errorText, badge, badgeInactive } from '../../../lib/adminUi';
 import {
   isCheckoutRequestId,
   ownsRecoverableRegistrationCheckoutRequest,
@@ -48,7 +69,7 @@ const ownsWaitingSeat = Number.isSafeInteger(eventId)
   && eventId > 0
   && isCheckoutRequestId(requestedCheckoutId)
   && await ownsRecoverableRegistrationCheckoutRequest(Astro.locals.db, requestedCheckoutId, eventId);
-const { checkoutRequestId, isFull } = registrationCheckoutRenderPolicy({
+const { checkoutRequestId: renderedCheckoutId, isFull } = registrationCheckoutRenderPolicy({
   paid,
   capacity: event?.capacity ?? null,
   takenCount: event?.taken_count ?? 0,
@@ -69,8 +90,108 @@ const errorKey =
 const waitlistOffered = !!event && isFull && offersWaitlist(event);
 const posterSrc = mediaPath(event?.poster);
 
+// ── Form state: first render, a review round trip, or a bounced submit ──────
+const maxParty = partyRowCount(event?.max_party_size);
+const posted = Astro.request.method === 'POST' && event?.phase === 'open' && !ownsWaitingSeat;
+let bag: FieldBag = {};
+if (posted) {
+  try {
+    bag = bagFromFormData(await Astro.request.formData());
+  } catch {
+    bag = {};
+  }
+}
+const postedStep = bagFirst(bag, 'step');
+const checkoutRequestId = isCheckoutRequestId(bagFirst(bag, 'checkoutRequestId')) ? bagFirst(bag, 'checkoutRequestId') : renderedCheckoutId;
+const submissionKey = echoSubmissionKey(bagFirst(bag, 'submission_key'));
+const identityIntentId = echoIntentId(bagFirst(bag, 'identityIntentId'));
+const val = (name: string): string => bagFirst(bag, name);
+
+let errors: SubmissionError[] = [];
+let review: {
+  people: Array<{ name: string }>;
+  answers: Array<{ label: string; value: string }>;
+  fit: PartyFit;
+} | null = null;
+if (posted && event && postedStep !== 'edit') {
+  const checked = validateSubmission(
+    event,
+    questions,
+    submissionFromBag(bag, questions, maxParty, user ? { name: user.displayName, email: user.email } : undefined),
+  );
+  if (!checked.ok) {
+    errors = checked.errors;
+  } else {
+    const people = user ? await restrictAttendeePersons(Astro.locals.db, user.id, checked.value.attendees) : checked.value.attendees;
+    const fit = partyFit(event, people.length);
+    if (fit === 'no_room') {
+      errors = [{ path: 'attendees', code: 'no_room' }];
+    } else {
+      const stored = new Map(checked.value.answers);
+      review = {
+        people: people.map((a) => ({ name: a.name })),
+        fit,
+        answers: questions.flatMap((q) => {
+          const raw = stored.get(q.id);
+          if (raw === undefined) return [];
+          const shown = q.type === 'checkbox' ? (JSON.parse(raw) as string[]).join(', ') : q.type === 'yesno' ? t(locale, raw === 'yes' ? 'register.yes' : 'register.no') : raw;
+          return [{ label: q.label, value: shown }];
+        }),
+      };
+    }
+  }
+}
+const errorFor = (path: string): string | undefined => {
+  const hit = errors.find((e) => e.path === path);
+  return hit ? t(locale, submissionErrorKey(hit)) : undefined;
+};
+const invalid = (path: string, id: string) => (errorFor(path) ? { 'aria-invalid': 'true' as const, 'aria-describedby': `${id}-err` } : {});
+const questionError = (id: number) => errorFor(`q.${id}`);
+
+const household = user && maxParty > 1 && event?.phase === 'open' ? await getLiveHouseholdForPerson(Astro.locals.db, user.id) : null;
+const householdChips = (household?.members ?? []).filter((m) => m.person_id !== user?.id);
+const left = event ? seatsLeft(event) : null;
+const pageAction = event ? `/${locale}/register/${event.id}` : '';
+const submitAction = user ? '/api/register/submit' : '/api/identity/continuation/start';
+const questionViews: ViewQuestion[] = questions.map((q) => ({
+  id: q.id,
+  label: q.label,
+  type: q.type,
+  required: q.required === 1,
+  options: q.options ?? [],
+  value: bag[String(q.id)] ?? [],
+}));
+
+// Every field a review round trip must carry, once, for both the Back and Confirm forms.
+const hiddenFields: Array<[string, string]> = event
+  ? [
+      ['locale', locale],
+      ['event_id', String(event.id)],
+      ['checkoutRequestId', checkoutRequestId],
+      ['submission_key', submissionKey],
+      // The honeypot rides along, so a bot that fills it is still caught after the review step.
+      ['website', val('website')],
+      ...(user ? ([['identitySource', '1']] as Array<[string, string]>) : ([['flow', 'registration'], ['identityIntentId', identityIntentId]] as Array<[string, string]>)),
+      ['name', user ? user.displayName : val('name')],
+      ['email', user ? user.email : val('email')],
+      ['phone', val('phone')],
+      ...Array.from({ length: maxParty - 1 }, (_, i) => i + 1).flatMap((i): Array<[string, string]> => [
+        [`person_name_${i}`, val(`person_name_${i}`)],
+        [`person_id_${i}`, val(`person_id_${i}`)],
+      ]),
+      ...questions.flatMap((q): Array<[string, string]> => (bag[String(q.id)] ?? []).map((v) => [String(q.id), v])),
+    ]
+  : [];
+const reviewing = review !== null;
+const stepIndex = !event || event.phase !== 'open' || (isFull && !waitlistOffered) ? 0 : reviewing ? 2 : 1;
+const reviewTotal = event && paid && review ? formatCents(event.price_cents! * review.people.length, event.currency, locale) : '';
+
 const priceLabel = paid ? `$${(event!.price_cents! / 100).toFixed(2)}` : t(locale, 'register.free');
-const stamp = (utc: string) => `${formatDate(utc.slice(0, 10), locale)} ${utc.slice(11, 16)}`;
+// Event times are stored in UTC; people read them in the church's time zone (as the emails and the manage page do).
+const stamp = (utc: string) => {
+  const [date, time] = utcToDatetimeLocal(utc).split('T');
+  return `${formatDate(date, locale)} ${time}`;
+};
 const when = event ? stamp(event.starts_at) : '';
 ---
 
@@ -108,16 +229,17 @@ const when = event ? stamp(event.starts_at) : '';
         <img src={posterSrc ?? DESIGN_IMAGES.events} alt="" width="1200" height="750" class="mt-5" />
         <p class="gathering-eyebrow">{copy.eventDetails}</p>
         <h1 class="mt-3 font-display text-heading-md font-bold">{event.title}</h1>
-        <div class="mt-5 flex items-center gap-4"><DateBadge date={event.starts_at} locale={locale} /><p class="text-sm text-ink-muted">{when}</p></div>
+        <div class="mt-5 flex items-center gap-4"><DateBadge date={utcToDatetimeLocal(event.starts_at)} locale={locale} /><p class="text-sm text-ink-muted">{when}</p></div>
         {event.location && <p class="text-sm text-ink-muted">{event.location}</p>}
         <p class="mt-2 text-sm">
           <span class="font-semibold">{t(locale, 'register.price')}:</span> {priceLabel}
         </p>
         {event.description && <p class="mt-5 whitespace-pre-line text-sm leading-relaxed text-ink-muted">{event.description}</p>}
+        {event.notes && <div class="mt-5"><h2 class="text-sm font-semibold">{t(locale, 'register.manage.notes')}</h2><p class="mt-1 whitespace-pre-line text-sm leading-relaxed text-ink-muted">{event.notes}</p></div>}
       </section>
       <section class="gathering-registration-form" aria-labelledby="registration-details-heading">
         <h2 id="registration-details-heading">{copy.yourDetails}</h2>
-        <ol class="gathering-flow" aria-label={copy.registrationSteps}>{[copy.reviewDetails, copy.fillDetails, copy.confirm].map((label, i) => <li aria-current={i === (isFull && !waitlistOffered || event.phase !== 'open' ? 0 : 1) ? 'step' : undefined}><b aria-hidden="true">{i + 1}</b>{label}</li>)}</ol>
+        <ol class="gathering-flow" aria-label={copy.registrationSteps}>{[copy.reviewDetails, copy.fillDetails, t(locale, 'register.step.review'), copy.confirm].map((label, i) => <li aria-current={i === stepIndex ? 'step' : undefined}><b aria-hidden="true">{i + 1}</b>{label}</li>)}</ol>
 
         {errorKey && <p class={`${noticeErr} mt-6`}>{t(locale, errorKey)}</p>}
 
@@ -136,15 +258,47 @@ const when = event ? stamp(event.starts_at) : '';
           </form>
         ) : isFull && !waitlistOffered ? (
           <p class={`${badge} ${badgeInactive} mt-6`}>{t(locale, 'register.full')}</p>
+        ) : review ? (
+          <div class="mt-6 space-y-5" data-step="review">
+            <h3 class="font-display text-lg font-semibold">{t(locale, 'register.review.heading')}</h3>
+            <p class="text-sm text-ink-muted">{t(locale, 'register.review.intro')}</p>
+            {review.fit === 'waitlist' && <p class="gathering-registration-note" data-waitlist-party>{t(locale, 'register.review.waitlistParty')}</p>}
+            <dl class="reg-facts">
+              <div><dt>{t(locale, 'register.review.contact')}</dt><dd>{user ? user.displayName : val('name')}<br />{user ? user.email : val('email')}{val('phone') && <><br />{val('phone')}</>}</dd></div>
+              <div><dt>{t(locale, 'register.review.people')}</dt><dd><ol class="list-decimal pl-5">{review.people.map((p) => <li>{p.name}</li>)}</ol></dd></div>
+              {review.answers.map((a) => <div><dt>{a.label}</dt><dd>{a.value}</dd></div>)}
+              {paid && <div><dt>{t(locale, 'register.price')}</dt><dd>{t(locale, 'register.review.price', { price: formatCents(event.price_cents!, event.currency, locale), count: review.people.length, total: reviewTotal })}</dd></div>}
+            </dl>
+            <div class="flex flex-wrap gap-3">
+              <form method="post" action={submitAction}>
+                {hiddenFields.map(([n, v]) => <input type="hidden" name={n} value={v} />)}
+                <input type="hidden" name="step" value="confirm" />
+                <button type="submit" class={btn}>{t(locale, paid ? 'register.submit.paid' : review.fit === 'waitlist' ? 'register.joinWaitlist' : 'register.submit.free')}</button>
+              </form>
+              <form method="post" action={pageAction}>
+                {hiddenFields.map(([n, v]) => <input type="hidden" name={n} value={v} />)}
+                <input type="hidden" name="step" value="edit" />
+                <button type="submit" class={btnSecondary}>{t(locale, 'register.review.edit')}</button>
+              </form>
+            </div>
+          </div>
         ) : (
-          <form method="post" action={user ? "/api/register/submit" : "/api/identity/continuation/start"} class="mt-6 space-y-4">
+          <form method="post" action={pageAction} class="mt-6 space-y-4" data-register-form id="f-form">
+            {errors.length > 0 && (
+              <div class={noticeErr} role="alert" tabindex="-1" id="f-summary">
+                <p class="font-semibold">{t(locale, 'register.err.summary')}</p>
+                <ul class="mt-1 list-disc pl-5">{errors.map((e) => <li><a href={`#${fieldIdForPath(e.path)}`} class="underline">{t(locale, submissionErrorKey(e))}</a></li>)}</ul>
+              </div>
+            )}
+            <input type="hidden" name="step" value="review" />
             <input type="hidden" name="locale" value={locale} />
             {waitlistOffered && <p class="gathering-registration-note">{t(locale, 'register.waitlistNote')}</p>}
             {!user && <input type="hidden" name="flow" value="registration" />}
             {user && <input type="hidden" name="identitySource" value="1" />}
-            {!user && <input type="hidden" name="identityIntentId" value={crypto.randomUUID()} />}
+            {!user && <input type="hidden" name="identityIntentId" value={identityIntentId} />}
             <input type="hidden" name="event_id" value={event.id} />
             <input type="hidden" name="checkoutRequestId" value={checkoutRequestId} />
+            <input type="hidden" name="submission_key" value={submissionKey} />
 
             {/* Honeypot: hidden from humans, tempting for bots. */}
             <div aria-hidden="true" style="position:absolute;left:-9999px" tabindex="-1">
@@ -156,56 +310,59 @@ const when = event ? stamp(event.starts_at) : '';
 
             <label class="block">
               <span class={lab}>{t(locale, 'register.name')}</span>
-              <input name="name" required class={tin} value={user ? user.displayName : ''} readonly={!!user} />
+              <input id="f-name" name="name" required maxlength="120" class={tin} value={user ? user.displayName : val('name')} readonly={!!user} {...invalid('contact.name', 'f-name')} />
+              {errorFor('contact.name') && <p id="f-name-err" class={errorText}>{errorFor('contact.name')}</p>}
             </label>
             <label class="block">
               <span class={lab}>{t(locale, 'register.email')}</span>
-              <input type="email" name="email" required class={tin} value={user ? user.email : ''} readonly={!!user} />
+              <input id="f-email" type="email" name="email" required class={tin} value={user ? user.email : val('email')} readonly={!!user} {...invalid('contact.email', 'f-email')} />
+              {errorFor('contact.email') && <p id="f-email-err" class={errorText}>{errorFor('contact.email')}</p>}
+            </label>
+            <label class="block">
+              <span class={lab}>{t(locale, 'register.phone')}</span>
+              <input id="f-phone" type="tel" name="phone" inputmode="tel" maxlength="40" class={tin} value={val('phone')} {...invalid('contact.phone', 'f-phone')} />
+              {errorFor('contact.phone') && <p id="f-phone-err" class={errorText}>{errorFor('contact.phone')}</p>}
             </label>
 
-            {questions.map((q) => (
-              <fieldset class="block">
-                <legend class={lab}>{q.label}</legend>
-                {q.type === 'text' && <input name={String(q.id)} aria-label={q.label} required={q.required === 1} class={tin} />}
-                {q.type === 'textarea' && (
-                  <textarea name={String(q.id)} aria-label={q.label} required={q.required === 1} rows="4" class={tin} />
+            {maxParty > 1 && (
+              <fieldset class="reg-party space-y-3" id="f-party" tabindex="-1" data-party {...invalid('attendees', 'f-party')}>
+                <legend class={lab}>{t(locale, 'register.party.heading')}</legend>
+                <p class="text-sm text-ink-muted">{t(locale, 'register.party.hint', { max: maxParty })}</p>
+                {left !== null && left > 0 && left < maxParty && !isFull && (
+                  <p class="text-sm font-semibold text-warn" data-seats-left>{left === 1 ? t(locale, 'register.seats.one') : t(locale, 'register.seats.only', { count: left })} {waitlistOffered || (event.price_cents === null && event.waitlist_enabled === 1) ? t(locale, 'register.seats.largerWaitlist') : ''}</p>
                 )}
-                {q.type === 'select' && (
-                  <select name={String(q.id)} aria-label={q.label} required={q.required === 1} class={tin}>
-                    <option value="">—</option>
-                    {(q.options ?? []).map((o) => (
-                      <option value={o}>{o}</option>
-                    ))}
-                  </select>
-                )}
-                {q.type === 'checkbox' && (
-                  <div class="space-y-1">
-                    {(q.options ?? []).map((o) => (
-                      <label class="flex items-center gap-2 text-sm">
-                        <input type="checkbox" name={String(q.id)} value={o} />
-                        <span>{o}</span>
-                      </label>
-                    ))}
+                {errorFor('attendees') && <p id="f-party-err" class={errorText}>{errorFor('attendees')}</p>}
+                <p class="reg-person-you">{t(locale, 'register.party.you')}</p>
+                {householdChips.length > 0 && (
+                  <div data-household hidden>
+                    <p class="text-sm text-ink-muted">{t(locale, 'register.party.household')}</p>
+                    <div class="mt-2 flex flex-wrap gap-2">
+                      {householdChips.map((m) => (
+                        <button type="button" class="reg-chip" data-chip data-name={m.display_name} data-person-id={m.person_id ?? ''} aria-pressed="false">{m.display_name}</button>
+                      ))}
+                    </div>
                   </div>
                 )}
-                {q.type === 'yesno' && (
-                  <div class="flex gap-4">
-                    <label class="flex items-center gap-2 text-sm">
-                      <input type="radio" name={String(q.id)} value="yes" required={q.required === 1} />
-                      <span>{t(locale, 'register.yes')}</span>
+                {Array.from({ length: maxParty - 1 }, (_, k) => k + 1).map((i) => (
+                  <div class="reg-person-row" data-person-row>
+                    <label class="block min-w-0 flex-1">
+                      <span class={lab}>{t(locale, 'register.party.person', { n: i + 1 })}</span>
+                      <input id={`f-person-${i}`} name={`person_name_${i}`} maxlength="120" class={tin} value={val(`person_name_${i}`)} autocomplete="off" {...invalid(`attendees.${i}.name`, `f-person-${i}`)} />
+                      {errorFor(`attendees.${i}.name`) && <p id={`f-person-${i}-err`} class={errorText}>{errorFor(`attendees.${i}.name`)}</p>}
                     </label>
-                    <label class="flex items-center gap-2 text-sm">
-                      <input type="radio" name={String(q.id)} value="no" required={q.required === 1} />
-                      <span>{t(locale, 'register.no')}</span>
-                    </label>
+                    <input type="hidden" name={`person_id_${i}`} value={val(`person_id_${i}`)} />
+                    <button type="button" class={`${btnSecondary} reg-remove`} data-remove-person hidden>{t(locale, 'register.party.remove')}</button>
                   </div>
-                )}
+                ))}
+                <button type="button" class={btnSecondary} data-add-person hidden>{t(locale, 'register.party.add')}</button>
               </fieldset>
+            )}
+
+            {questionViews.map((q) => (
+              <Fragment set:html={renderQuestionField(q, { name: String(q.id), id: `f-q-${q.id}`, error: questionError(q.id), yes: t(locale, 'register.yes'), no: t(locale, 'register.no') })} />
             ))}
 
-            <button type="submit" class={btn}>
-              {t(locale, paid ? 'register.submit.paid' : waitlistOffered ? 'register.joinWaitlist' : 'register.submit.free')}
-            </button>
+            <button type="submit" class={btn}>{t(locale, 'register.review.next')}</button>
           </form>
         )}
       </section>
@@ -214,3 +371,8 @@ const when = event ? stamp(event.starts_at) : '';
     </Base>
   )
 }
+
+<script>
+  import { initRegisterForm } from '../../../lib/register-form-client';
+  initRegisterForm();
+</script>

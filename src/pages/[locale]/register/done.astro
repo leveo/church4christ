@@ -29,7 +29,7 @@ const waitlist = Astro.url.searchParams.get('status') === 'waitlist';
   <GatheringSurface mode="public">
   <div class="gathering-complete">
     <div class="gathering-complete-icon"><Icon name="calendar" size={28} /></div>
-    <ol class="gathering-flow justify-center" aria-label={copy.registrationSteps}>{[copy.reviewDetails, copy.fillDetails, copy.confirm].map((label, i) => <li aria-current={i === 2 ? 'step' : undefined}><b aria-hidden="true">{i + 1}</b>{label}</li>)}</ol>
+    <ol class="gathering-flow justify-center" aria-label={copy.registrationSteps}>{[copy.reviewDetails, copy.fillDetails, t(locale, 'register.step.review'), copy.confirm].map((label, i) => <li aria-current={i === 3 ? 'step' : undefined}><b aria-hidden="true">{i + 1}</b>{label}</li>)}</ol>
     <h1 class="font-display text-heading-md font-bold">{t(locale, waitlist ? 'register.done.waitlistTitle' : 'register.done.title')}</h1>
     {waitlist && <p class="mt-4 text-ink-muted" data-status="waitlist">{t(locale, 'register.done.waitlist')}</p>}
     {paid && !waitlist && <p class="mt-4 text-ink-muted">{t(locale, 'register.done.paid')}</p>}

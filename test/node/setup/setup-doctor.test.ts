@@ -65,6 +65,7 @@ const SUPABASE_MIGRATIONS = [
   '0040_service_planning.sql',
   '0041_supported_locales.sql',
   '0042_registration_v2.sql',
+  '0043_registration_party.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });

@@ -136,6 +136,48 @@ describe('parseRegEventForm', () => {
   });
 });
 
+describe('parseRegEventForm: party size, self-service and notes', () => {
+  const base = { title_en: 'Retreat', starts_at: '2026-09-01T09:00' };
+
+  it('leaves the new fields undefined when the form does not send them (an older form never resets them)', () => {
+    const r = parseRegEventForm(form({ ...base, title_en: 'Retreat', description_en: 'x' }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data).not.toHaveProperty('max_party_size');
+    expect(r.data).not.toHaveProperty('allow_self_edit');
+    expect(r.data.titles.en).not.toHaveProperty('notes');
+  });
+
+  it('reads Max people (1-20, blank = 1) and rejects anything else', () => {
+    const size = (value: string) => parseRegEventForm(form({ ...base, max_party_size: value }));
+    for (const [raw, want] of [['6', 6], ['1', 1], ['20', 20], ['', 1]] as const) {
+      const r = size(raw);
+      expect(r.ok && r.data.max_party_size).toBe(want);
+    }
+    for (const raw of ['0', '21', '-1', '2.5', 'many']) {
+      const r = size(raw);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.errors.max_party_size).toBe('errors.integerInvalid');
+    }
+  });
+
+  it('reads the hidden 0 + checkbox pair for self-service changes', () => {
+    const on = parseRegEventForm(form({ ...base, allow_self_edit: ['0', '1'] }));
+    const off = parseRegEventForm(form({ ...base, allow_self_edit: '0' }));
+    expect(on.ok && on.data.allow_self_edit).toBe(1);
+    expect(off.ok && off.data.allow_self_edit).toBe(0);
+  });
+
+  it('reads notes per language and only for languages the form sent', () => {
+    const r = parseRegEventForm(form({ ...base, notes_en: ' Bring a blanket ', notes_zh: '', title_zh: '退修会' }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.titles.en?.notes).toBe('Bring a blanket');
+    expect(r.data.titles.zh?.notes).toBe(''); // a blank one clears that language's notes
+    expect(r.data.titles.de).toBeUndefined();
+  });
+});
+
 describe('parseQuestionsForm', () => {
   it('maps indexed fields into ordered saveQuestions input', () => {
     const r = parseQuestionsForm(

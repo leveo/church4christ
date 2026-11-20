@@ -6,7 +6,7 @@ import { EVENT_LOCK_AND_NUMBER_SQL, confirmationNoSql, seatsTakenSql } from './r
 export interface StripeCheckoutParams {
   mode: 'payment';
   line_items: Array<{
-    quantity: 1;
+    quantity: number;
     price_data: {
       currency: string;
       unit_amount: number;
@@ -26,15 +26,26 @@ interface RegistrationCheckoutMetadata {
   request_id: string;
 }
 
+/** The people a paid registration covers (one Checkout line item of quantity = attendees.length). */
+export interface RegistrationCheckoutParty {
+  phone: string | null;
+  attendees: Array<{ name: string; personId: number | null }>;
+}
+
 export interface RegistrationCheckoutRequestInput {
   requestId: string;
   eventId: number;
   personId: number | null;
   name: string;
   email: string;
+  /** The PER-PERSON price in cents (the event's price_cents). The registration's amount is
+   *  this times the party size (1 when `party` is absent) and the Stripe line item is
+   *  unit_amount = this, quantity = party size. */
   amountCents: number;
   currency: string;
   answers: Array<[number, string]>;
+  /** Party members and phone; omitted = a single person, exactly as before the party flow. */
+  party?: RegistrationCheckoutParty;
   eventTitle: string;
   locale: SupportedLocale;
   appOrigin: string;
@@ -57,6 +68,8 @@ interface NormalizedRegistrationCheckoutInput {
   amountCents: number;
   currency: string;
   answers: Array<[number, string]>;
+  /** Present only when the caller passed a party, so a request without one digests exactly as it always did. */
+  party?: RegistrationCheckoutParty;
 }
 
 interface CheckoutRequestRow {
@@ -70,6 +83,7 @@ interface CheckoutRequestRow {
   stripe_checkout_session_id: string | null;
   event_id: number;
   amount_cents: number;
+  party_size: number;
   currency: string;
   email: string;
   reconcile_attempts: number;
@@ -176,6 +190,17 @@ function normalizeInput(input: RegistrationCheckoutRequestInput): NormalizedRegi
   if (answers.some(([questionId], index) => index > 0 && answers[index - 1][0] === questionId)) {
     throw new Error('checkout_answer_invalid');
   }
+  let party: RegistrationCheckoutParty | undefined;
+  if (input.party !== undefined) {
+    const attendees = input.party.attendees.map((attendee) => {
+      const personId = attendee.personId ?? null;
+      if (!(personId === null || (Number.isSafeInteger(personId) && personId > 0))) throw new Error('checkout_person_invalid');
+      return { name: normalizeText(attendee.name, 'checkout_identity_invalid'), personId };
+    });
+    if (attendees.length < 1 || attendees.length > 20) throw new Error('checkout_party_invalid');
+    const phone = input.party.phone === null ? null : input.party.phone.normalize('NFC').trim() || null;
+    party = { phone, attendees };
+  }
   return {
     eventId: input.eventId,
     personId: input.personId,
@@ -184,8 +209,11 @@ function normalizeInput(input: RegistrationCheckoutRequestInput): NormalizedRegi
     amountCents: input.amountCents,
     currency,
     answers,
+    ...(party ? { party } : {}),
   };
 }
+
+const partySizeOf = (normalized: NormalizedRegistrationCheckoutInput): number => normalized.party?.attendees.length ?? 1;
 
 /** SHA-256 over only the normalized submitted registration identity. */
 export async function registrationCheckoutRequestDigest(input: RegistrationCheckoutRequestInput): Promise<string> {
@@ -252,7 +280,7 @@ export function buildRegistrationCheckoutParams(
   return {
     mode: 'payment',
     line_items: [{
-      quantity: 1,
+      quantity: partySizeOf(normalized),
       price_data: {
         currency: normalized.currency,
         unit_amount: normalized.amountCents,
@@ -343,11 +371,11 @@ function requireStoredParams(raw: string, row: CheckoutRequestRow): StripeChecko
   if (
     !isPlainObject(lineItem)
     || !hasExactKeys(lineItem, ['quantity', 'price_data'])
-    || lineItem.quantity !== 1
+    || lineItem.quantity !== row.party_size
     || !isPlainObject(lineItem.price_data)
     || !hasExactKeys(lineItem.price_data, ['currency', 'unit_amount', 'product_data'])
-    || lineItem.price_data.unit_amount !== row.amount_cents
     || !Number.isSafeInteger(lineItem.price_data.unit_amount)
+    || (lineItem.price_data.unit_amount as number) * row.party_size !== row.amount_cents
     || (lineItem.price_data.unit_amount as number) <= 0
     || lineItem.price_data.currency !== row.currency
     || typeof lineItem.price_data.currency !== 'string'
@@ -388,7 +416,7 @@ async function loadRequest(db: AppDb, requestId: string): Promise<CheckoutReques
               q.registration_id AS registration_id, q.request_json AS request_json,
               q.session_url AS session_url, q.state AS state,
               r.status AS status, r.stripe_checkout_session_id AS stripe_checkout_session_id,
-              r.event_id AS event_id, r.amount_cents AS amount_cents,
+              r.event_id AS event_id, r.amount_cents AS amount_cents, r.party_size AS party_size,
               r.currency AS currency, r.email AS email,
               q.reconcile_attempts AS reconcile_attempts,
               q.next_reconcile_at AS next_reconcile_at,
@@ -739,6 +767,7 @@ export async function resolveRegistrationCheckoutRequest(
 ): Promise<CheckoutRequestResolution> {
   const requestId = parseCheckoutRequestId(input.requestId);
   const normalized = normalizeInput(input);
+  const partySize = partySizeOf(normalized);
   const digest = await registrationCheckoutRequestDigest(input);
   const existing = await loadRequest(db, requestId);
   if (existing) return resolveRow(db, existing, digest);
@@ -765,8 +794,9 @@ export async function resolveRegistrationCheckoutRequest(
     db
       .prepare(
         `INSERT INTO registrations
-           (id, event_id, person_id, name, email, status, amount_cents, currency, submission_key, confirmation_no, party_size)
-         SELECT ?1, e.id, ?3, ?4, ?5, 'pending', ?6, ?7, ?8, ${confirmationNoSql('e')}, 1
+           (id, event_id, person_id, name, email, status, amount_cents, currency, submission_key, confirmation_no, party_size,
+            locale, phone)
+         SELECT ?1, e.id, ?3, ?4, ?5, 'pending', ?6, ?7, ?8, ${confirmationNoSql('e')}, ?9, ?10, ?11
          FROM reg_events e WHERE e.id = ?2`,
       )
       .bind(
@@ -775,14 +805,25 @@ export async function resolveRegistrationCheckoutRequest(
         normalized.personId,
         normalized.name,
         normalized.email,
-        normalized.amountCents,
+        // The registration's amount is the whole party's: per-person price times people.
+        normalized.amountCents * partySize,
         normalized.currency,
         `checkout:${requestId}`,
+        partySize,
+        input.locale,
+        normalized.party?.phone ?? null,
       ),
-    db
-      .prepare(`INSERT INTO reg_attendees (registration_id, sort, name, person_id) VALUES (?1, 0, ?2, ?3)`)
-      .bind(registrationId, normalized.name, normalized.personId),
   ];
+  const attendees = normalized.party?.attendees ?? [{ name: normalized.name, personId: normalized.personId }];
+  attendees.forEach((attendee, index) => {
+    // The first person defaults to the contact's own account, like the free writer.
+    const personId = index === 0 ? (attendee.personId ?? normalized.personId) : attendee.personId;
+    statements.push(
+      db
+        .prepare(`INSERT INTO reg_attendees (registration_id, sort, name, person_id) VALUES (?1, ?2, ?3, ?4)`)
+        .bind(registrationId, index, attendee.name, personId),
+    );
+  });
   for (const [questionId, value] of normalized.answers) {
     statements.push(
       db

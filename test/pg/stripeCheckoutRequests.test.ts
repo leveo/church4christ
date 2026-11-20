@@ -158,6 +158,55 @@ describe.skipIf(!hasPg)('durable registration Checkout requests (Postgres)', () 
     expect(prepare).not.toHaveBeenCalled();
   });
 
+  it('charges the per-person price times the party: amount, line-item quantity, attendee rows, phone and locale', async () => {
+    const eventId = await event();
+    const party = {
+      phone: ' 555 0100 ',
+      attendees: [{ name: 'Ada Lovelace', personId: null }, { name: 'Bob', personId: null }, { name: 'Cy', personId: null }],
+    };
+    const result = await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId, { party, locale: 'zh' }));
+    if (result.kind !== 'create') throw new Error('expected create');
+    expect(result.requestJson.line_items).toEqual([
+      { quantity: 3, price_data: { currency: 'usd', unit_amount: 2500, product_data: { name: 'Summer Retreat' } } },
+    ]);
+    const [registration] = await sql.unsafe(
+      'SELECT status, amount_cents, party_size, phone, locale, manage_token_hash FROM registrations WHERE id = $1',
+      [result.registrationId],
+    );
+    expect(registration).toMatchObject({ status: 'pending', amount_cents: 7500, party_size: 3, phone: '555 0100', locale: 'zh', manage_token_hash: null });
+    const attendees = await sql.unsafe('SELECT name, sort, status FROM reg_attendees WHERE registration_id = $1 ORDER BY sort', [result.registrationId]);
+    expect(attendees.map((a) => [a.name, a.sort, a.status])).toEqual([['Ada Lovelace', 0, 'active'], ['Bob', 1, 'active'], ['Cy', 2, 'active']]);
+
+    // The same request replays from the stored pair (its quantity/amount are re-checked); a different party conflicts.
+    const replay = await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId, { party, locale: 'zh' }));
+    expect(replay).toMatchObject({ kind: 'create', registrationId: result.registrationId });
+    expect(await resolveRegistrationCheckoutRequest(db, input(REQUEST_A, eventId, {
+      party: { ...party, attendees: party.attendees.slice(0, 2) },
+    }))).toEqual({ kind: 'conflict' });
+
+    // A tampered stored quantity is refused as a corrupt request.
+    await sql.unsafe(
+      `UPDATE church_private.stripe_checkout_requests SET request_json = replace(request_json, '"quantity":3', '"quantity":1') WHERE request_id = $1`,
+      [REQUEST_A],
+    );
+    await expect(continueRegistrationCheckoutRequest(db, REQUEST_A, eventId)).rejects.toThrow('checkout_request_corrupt');
+  });
+
+  it('digests the party only when one is given, so single-person requests keep their digest', async () => {
+    const base = input(REQUEST_A, 7);
+    const single = await registrationCheckoutRequestDigest(base);
+    const withParty = await registrationCheckoutRequestDigest({
+      ...base, party: { phone: null, attendees: [{ name: 'Ada Lovelace', personId: null }] },
+    });
+    const bigger = await registrationCheckoutRequestDigest({
+      ...base, party: { phone: null, attendees: [{ name: 'Ada Lovelace', personId: null }, { name: 'Bob', personId: null }] },
+    });
+    expect(new Set([single, withParty, bigger]).size).toBe(3);
+    expect(await registrationCheckoutRequestDigest({
+      ...base, party: { phone: '  ', attendees: [{ name: ' Ada Lovelace ', personId: null }] },
+    })).toBe(withParty);
+  });
+
   it('hashes one stable normalized event/identity/amount/currency/sorted-answer representation', async () => {
     const base = input(REQUEST_A, 7, {
       personId: 42,

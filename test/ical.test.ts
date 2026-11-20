@@ -234,3 +234,22 @@ describe('calendar token lifecycle', () => {
     expect(stale).toBeNull();
   });
 });
+
+describe('registrationICalendar', () => {
+  it('emits one timed VEVENT with a registration UID, location and METHOD:PUBLISH', async () => {
+    const { registrationICalendar } = await import('../src/lib/ical');
+    const ics = registrationICalendar(
+      { id: 7, title: 'Fall Retreat, Day 1', starts_at: '2031-05-01 23:00:00', ends_at: '2031-05-02 01:00:00', location: 'Hall A; East', description: 'R31-0001\nBring a dish' },
+      'church.example',
+      '20260101T000000Z',
+    );
+    expect(ics).toContain('METHOD:PUBLISH');
+    expect(ics.match(/BEGIN:VEVENT/g)).toHaveLength(1);
+    expect(ics).toContain('UID:registration-7@church.example');
+    expect(ics).toContain('DTSTART:20310501T180000'); // 23:00 UTC in Chicago (CDT)
+    expect(ics).toContain('DTEND:20310501T200000');
+    expect(ics).toContain('SUMMARY:Fall Retreat\\, Day 1');
+    expect(ics).toContain('LOCATION:Hall A\\; East');
+    expect(ics).toContain('DESCRIPTION:R31-0001\\nBring a dish');
+  });
+});

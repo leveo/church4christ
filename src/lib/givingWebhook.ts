@@ -62,6 +62,8 @@ export interface WebhookDeps {
   modules: ReadonlySet<ModuleKey>;
   fetcher?: typeof fetch;
   checkpoint?: () => Promise<void>;
+  /** Called once, after a Checkout session first moved a registration to confirmed (never on a redelivery). Must not throw. */
+  onRegistrationConfirmed?: (registrationId: number) => Promise<void>;
 }
 
 // postgres.js client-side connection-failure codes (src/lib/dbProvider opens the
@@ -311,6 +313,14 @@ async function applyRegistrationSession(
     currency,
     action,
   }, deps.checkpoint);
+  if (transition === 'applied' && action === 'confirm' && deps.onRegistrationConfirmed) {
+    // Best-effort: the receipt must not fail or retry over a mail; the daily sweep covers a miss.
+    try {
+      await deps.onRegistrationConfirmed(registrationId);
+    } catch {
+      /* swallowed on purpose */
+    }
+  }
   return registrationResult(transition, action);
 }
 

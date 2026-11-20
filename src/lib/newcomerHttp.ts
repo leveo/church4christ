@@ -169,3 +169,46 @@ export async function consumeNewcomerPublicRateLimit(
     return { ok: false, reason: 'unavailable' };
   }
 }
+
+export interface PublicIpRateLimitInput {
+  backend: DbBackend;
+  secret: string | undefined;
+  /** Names the bucket family, so endpoints never share a counter. */
+  scope: string;
+  cfConnectingIp: string | null;
+  /** Requests allowed per 10-minute window and address. */
+  limit: number;
+  now?: string;
+}
+
+/**
+ * A per-address request ceiling for a public endpoint that has no contact to key on
+ * (the registration manage API). Same table, window, keyed hash and fail-closed
+ * behavior as the newcomer limiter: no secret or a failing counter is 'unavailable',
+ * more than `limit` requests in a window is 'limited'. Requests without a usable
+ * address share one 'unknown' bucket.
+ */
+export async function consumePublicIpRateLimit(
+  db: AppDb,
+  input: PublicIpRateLimitInput,
+): Promise<NewcomerRateLimitResult> {
+  if ((input.backend !== 'd1' && input.backend !== 'supabase')
+    || typeof input.secret !== 'string' || input.secret.length < 16 || input.secret.length > 1024) {
+    return { ok: false, reason: 'unavailable' };
+  }
+  const clock = clockParts(input.now);
+  if (!clock) return { ok: false, reason: 'unavailable' };
+  try {
+    const bucket = await keyedHash(input.secret, `${input.scope}\0ip\0${ipBucket(input.cfConnectingIp).value}`);
+    const results = await db.batch([
+      db.prepare('DELETE FROM newcomer_rate_limits WHERE expires_at<=?').bind(clock.now),
+      rateStatement(db).bind(bucket, clock.window, clock.expires),
+    ]);
+    if (!Array.isArray(results) || results.length !== 2) return { ok: false, reason: 'unavailable' };
+    const attempts = returnedAttempts(results[1]);
+    if (attempts === null) return { ok: false, reason: 'unavailable' };
+    return attempts <= input.limit ? { ok: true } : { ok: false, reason: 'limited' };
+  } catch {
+    return { ok: false, reason: 'unavailable' };
+  }
+}

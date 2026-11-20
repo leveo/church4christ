@@ -747,17 +747,17 @@ INSERT INTO availability_windows (person_id, kind, starts_on, ends_on, weekdays,
 -- with capacity 3 and two questions. Event 930 is a preview: it is visible but its
 -- opens_at is still in the future. Paid demo events live in registration-seed.sql
 -- (Postgres only). Ids 920 and up stay clear of that file's 900/910 events.
-INSERT INTO reg_events (id, starts_at, ends_at, location, capacity, price_cents, currency, opens_at, closes_at, active, waitlist_enabled) VALUES
+INSERT INTO reg_events (id, starts_at, ends_at, location, capacity, price_cents, currency, opens_at, closes_at, active, waitlist_enabled, max_party_size) VALUES
   (920, datetime('now','+14 days','start of day','+18 hours'), datetime('now','+14 days','start of day','+20 hours'),
-   'Fellowship Hall', 3, NULL, 'usd', NULL, datetime('now','+12 days','start of day','+23 hours'), 1, 1),
+   'Fellowship Hall', 3, NULL, 'usd', NULL, datetime('now','+12 days','start of day','+23 hours'), 1, 1, 4),
   (930, datetime('now','+45 days','start of day','+10 hours'), datetime('now','+45 days','start of day','+15 hours'),
-   'Community Park', NULL, NULL, 'usd', datetime('now','+10 days','start of day','+9 hours'), NULL, 1, 1);
+   'Community Park', NULL, NULL, 'usd', datetime('now','+10 days','start of day','+9 hours'), NULL, 1, 1, 1);
 
-INSERT INTO reg_event_i18n (event_id, locale, title, description) VALUES
-  (920, 'en', 'Neighbors Potluck Night', 'Bring a dish to share and meet your neighbors. Seats are limited to three households for this small demo.'),
-  (920, 'zh', '邻舍联谊晚餐', '带一道菜与邻舍分享，彼此认识。这个小型示范活动名额有限。'),
-  (930, 'en', 'Community Picnic', 'A relaxed afternoon in the park with games and food. Registration opens soon.'),
-  (930, 'zh', '社区野餐', '在公园里度过轻松的下午，有游戏和美食。报名即将开放。');
+INSERT INTO reg_event_i18n (event_id, locale, title, description, notes) VALUES
+  (920, 'en', 'Neighbors Potluck Night', 'Bring a dish to share and meet your neighbors. Seats are limited to three households for this small demo.', 'Doors open at 5:30 pm. Please bring your own drink.'),
+  (920, 'zh', '邻舍联谊晚餐', '带一道菜与邻舍分享，彼此认识。这个小型示范活动名额有限。', '下午 5:30 开门，请自带饮品。'),
+  (930, 'en', 'Community Picnic', 'A relaxed afternoon in the park with games and food. Registration opens soon.', NULL),
+  (930, 'zh', '社区野餐', '在公园里度过轻松的下午，有游戏和美食。报名即将开放。', NULL);
 
 INSERT INTO reg_questions (id, event_id, sort, type, required, options) VALUES
   (921, 920, 1, 'select', 1, '["Main dish","Side dish","Dessert","Drinks"]'),

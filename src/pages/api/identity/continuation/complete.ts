@@ -10,6 +10,8 @@ import { resolveSignupSessionDelivery } from '../../../../lib/identityAccount';
 import { IDENTITY_CONTINUATION_COOKIE, clearIdentityContinuationCookieHeader, openIdentityContinuationCookie } from '../../../../lib/identityContinuationCookie';
 import { mintSession, sessionCookie } from '../../../../lib/session';
 import { parseLocale } from '../../../../lib/locales';
+import { sendConfirmation } from '../../../../lib/regNotify';
+import { manageLanding } from '../../../../lib/regPublic';
 
 export const prerender = false;
 type ContinuationEnv = IdentityBusinessContinuationEnv & EmailEnv & { SESSION_SECRET?: string; APP_ORIGIN?: string };
@@ -34,6 +36,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // claim; the member can submit the same OTP again without exposing a
     // checkout id or confusing a registration id with an event route id.
     if (result.status === 'waiting') return redirect(`/${locale}/identity/continue?error=waiting`, headers);
+    // A freshly created free registration: mail its confirmation now, with the manage
+    // link that only exists in this result. Awaited (the db client is drained once the
+    // response returns) and never throws; the daily sweep retries a failed send.
+    if (pending.kind === 'registration' && result.status === 'done' && 'manageToken' in result
+      && result.registrationId !== undefined && result.manageToken) {
+      await sendConfirmation(vars, locals.rawDb, result.registrationId, { manageToken: result.manageToken });
+    }
     if (!('personId' in result) || !result.personId || !('sessionEpoch' in result) || result.sessionEpoch === undefined) {
       return redirect(`/${locale}/identity/continue?error=invalid`, headers);
     }
@@ -45,11 +54,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
       return redirect(`/${locale}/identity/continue?error=invalid`, headers);
     }
     headers.append('set-cookie', clearIdentityContinuationCookieHeader(import.meta.env.PROD));
-    if (delivery.status === 'already_claimed' && result.replay === true) return businessRedirect(pending, result, locale, headers);
+    if (delivery.status === 'already_claimed' && result.replay === true) return businessRedirect(pending, result, locale, headers, locals.campus?.slug);
     if (delivery.status !== 'claimed') return redirect(`/${locale}/identity/continue?error=invalid`, headers);
     const jwt = await mintSession(vars.SESSION_SECRET, { id: result.personId, sessionEpoch: delivery.sessionEpoch }, { authMethod: 'email_otp' });
     headers.append('set-cookie', sessionCookie(jwt, import.meta.env.PROD));
-    return businessRedirect(pending, result, locale, headers);
+    return businessRedirect(pending, result, locale, headers, locals.campus?.slug);
   } catch {
     return redirect(`/${locale}/identity/continue?error=invalid`, headers);
   }
@@ -60,10 +69,16 @@ function businessRedirect(
   result: Awaited<ReturnType<typeof completeGivingContinuation>> | Awaited<ReturnType<typeof completeRegistrationContinuation>>,
   locale: string,
   headers: Headers,
+  campusSlug?: string,
 ): Response {
     if (pending.kind === 'giving' && result.status === 'redirect' && 'url' in result) return redirect(result.url, headers);
     if (pending.kind === 'registration' && result.status === 'redirect' && 'resolution' in result
       && result.resolution?.kind === 'redirect') return redirect(result.resolution.checkoutUrl, headers);
+    // A freshly created free registration opens on its manage page; the token exists only in this
+    // result and rides in the fragment. A replay has no token and keeps the plain confirmation page.
+    if (pending.kind === 'registration' && result.status === 'done' && 'manageToken' in result && result.manageToken) {
+      return redirect(manageLanding(locale, result.manageToken, campusSlug), headers);
+    }
     if (pending.kind === 'registration' && 'registrationStatus' in result && result.registrationStatus === 'waitlist') {
       return redirect(`/${locale}/register/done?ok=1&status=waitlist`, headers);
     }

@@ -7,7 +7,7 @@ import { DATABASE_URL, hasPg, pgClient, resetSchema } from './helpers';
 import { PgAdapter } from '../../src/lib/pgAdapter';
 import { scopeDatabase } from '../../src/lib/campusScope';
 import type { AppDb } from '../../src/lib/appDb';
-import { createRegistration, saveEvent, listRegistrations } from '../../src/lib/regDb';
+import { cancelRegistrationPromoting, createRegistration, saveEvent, listRegistrations } from '../../src/lib/regDb';
 import { defineRegCoreCases, ts } from '../shared/regCoreCases';
 
 const DAY = 24 * 3600_000;
@@ -101,6 +101,52 @@ describe.skipIf(!hasPg)('registration core (Postgres)', () => {
       } finally {
         await Promise.all(clients.map((c) => c.end()));
       }
+    });
+  });
+
+  describe('concurrent cancellations on a free event', () => {
+    const seed = async (capacity: number, seated: number, waiting: number) => {
+      const eventId = await saveEvent(db, { title_en: 'Cancel race', starts_at: ts(30 * DAY), active: 1, capacity, waitlist_enabled: 1 });
+      const make = (i: number) => createRegistration(db, {
+        eventId, personId: null, name: `P${i}`, email: `p${i}@example.com`, status: 'confirmed',
+        amountCents: 0, currency: 'usd', answers: [], submissionKey: `cancel-race-${eventId}-${i}`,
+      });
+      const seats = [];
+      for (let i = 0; i < seated; i++) seats.push(await make(i));
+      const queue = [];
+      for (let i = 0; i < waiting; i++) queue.push(await make(100 + i));
+      expect(queue.every((q) => q.status === 'waitlist')).toBe(true);
+      return { eventId, seats, queue };
+    };
+    const cancelConcurrently = async (ids: number[]) => {
+      const clients = ids.map(() => pgClient());
+      try {
+        return await Promise.all(ids.map((id, i) => cancelRegistrationPromoting(new PgAdapter(clients[i]), id)));
+      } finally {
+        await Promise.all(clients.map((c) => c.end()));
+      }
+    };
+
+    it('two parallel cancels promote each waitlisted registration exactly once', async () => {
+      const { eventId, seats, queue } = await seed(2, 2, 2);
+      const results = await cancelConcurrently(seats.map((s) => s.id));
+      expect(results.every((r) => r.cancelled)).toBe(true);
+      const promoted = results.flatMap((r) => r.promoted).sort((a, b) => a - b);
+      expect(promoted).toEqual(queue.map((q) => q.id).sort((a, b) => a - b));
+      const roster = await listRegistrations(db, 'en', eventId);
+      expect(roster.filter((r) => r.status === 'confirmed').map((r) => r.id).sort()).toEqual(queue.map((q) => q.id).sort());
+    });
+
+    it('never promotes more than the seats freed, however the cancels interleave', async () => {
+      const { eventId, seats, queue } = await seed(3, 3, 4);
+      const results = await cancelConcurrently(seats.slice(0, 2).map((s) => s.id));
+      const promoted = results.flatMap((r) => r.promoted);
+      expect(promoted).toHaveLength(2);
+      expect(new Set(promoted).size).toBe(2);
+      const roster = await listRegistrations(db, 'en', eventId);
+      expect(roster.filter((r) => r.status === 'confirmed')).toHaveLength(3);
+      // the oldest two waiters were the ones promoted
+      expect(promoted.sort((a, b) => a - b)).toEqual(queue.slice(0, 2).map((q) => q.id).sort((a, b) => a - b));
     });
   });
 });

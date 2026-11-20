@@ -130,15 +130,18 @@ const dollars = (cents: number | null) => (cents == null ? '' : (cents / 100).to
 // the stored text otherwise.
 const titleValues: Partial<Record<Locale, string>> = {};
 const descValues: Partial<Record<Locale, string>> = {};
+const noteValues: Partial<Record<Locale, string>> = {};
 for (const code of SUPPORTED_LOCALES) {
   titleValues[code] = echoing ? g(`title_${code}`) : (editingRow?.titles[code] ?? '');
   descValues[code] = echoing ? g(`description_${code}`) : (editingRow?.descriptions[code] ?? '');
+  noteValues[code] = echoing ? g(`notes_${code}`) : (editingRow?.notes[code] ?? '');
 }
 const v = echoing
   ? {
       startsAt: g('starts_at'), endsAt: g('ends_at'), opensAt: g('opens_at'), closesAt: g('closes_at'), visibleFrom: g('visible_from'),
       location: g('location'), capacity: g('capacity'), price: g('price'), active: fd!.get('active') !== null,
       waitlist: String(fd!.getAll('waitlist_enabled').at(-1) ?? '1') === '1', prefix: g('confirmation_prefix'), poster: g('poster'),
+      maxParty: g('max_party_size'), selfEdit: String(fd!.getAll('allow_self_edit').at(-1) ?? '1') === '1',
     }
   : editingRow
     ? {
@@ -148,8 +151,9 @@ const v = echoing
         location: editingRow.location ?? '', capacity: editingRow.capacity == null ? '' : String(editingRow.capacity),
         price: dollars(editingRow.price_cents), active: editingRow.active === 1,
         waitlist: editingRow.waitlist_enabled === 1, prefix: editingRow.confirmation_prefix ?? '', poster: editingRow.poster ?? '',
+        maxParty: String(editingRow.max_party_size), selfEdit: editingRow.allow_self_edit === 1,
       }
-    : { startsAt: '', endsAt: '', opensAt: '', closesAt: '', visibleFrom: '', location: '', capacity: '', price: '', active: true, waitlist: true, prefix: '', poster: '' };
+    : { startsAt: '', endsAt: '', opensAt: '', closesAt: '', visibleFrom: '', location: '', capacity: '', price: '', active: true, waitlist: true, prefix: '', poster: '', maxParty: '1', selfEdit: true };
 const posterSrc = mediaPath(v.poster);
 
 const hasErrors = Object.keys(errors).length > 0;
@@ -202,7 +206,7 @@ const actionBtn =
                 <td class={td}>
                   <div class="font-medium">{displayTitle(r)}</div>
                 </td>
-                <td class={`${td} text-ink-muted tabular-nums`}>{r.starts_at.slice(0, 16)}</td>
+                <td class={`${td} text-ink-muted tabular-nums`}>{utcToDatetimeLocal(r.starts_at).replace('T', ' ')}</td>
                 <td class={`${td} tabular-nums`}>
                   {r.taken_count}
                   {r.capacity != null ? ` / ${r.capacity}` : ''}
@@ -328,6 +332,20 @@ const actionBtn =
         </label>
       </div>
       <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.confirmationPrefixHint')}</p>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.reg.maxParty')}</span>
+          <input type="number" name="max_party_size" value={v.maxParty} class={tin} min="1" max="20" inputmode="numeric" />
+          {errors.max_party_size && <span class={errorText}>{t(lang, errors.max_party_size)}</span>}
+        </label>
+        <label class="flex min-h-11 items-center gap-2 self-end text-sm">
+          <input type="hidden" name="allow_self_edit" value="0" />
+          <input type="checkbox" name="allow_self_edit" value="1" checked={v.selfEdit} /> {t(lang, 'admin.reg.selfEdit')}
+        </label>
+      </div>
+      <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.maxPartyHint')} {t(lang, 'admin.reg.selfEditHint')}</p>
+      <div><LocaleFields name="notes" label={t(lang, 'admin.reg.notes')} values={noteValues} lang={lang} multiline rows={3} /></div>
+      <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.notesHint')}</p>
       <div class="block">
         <span class={lab}>{t(lang, 'admin.reg.poster')}</span>
         <input type="hidden" name="poster" value={v.poster} />

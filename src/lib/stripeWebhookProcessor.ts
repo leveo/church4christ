@@ -78,6 +78,12 @@ export async function processStripeWebhookEvent(
       modules,
       fetcher: deps.fetcher,
       checkpoint,
+      // A paid registration's confirmation (with a fresh manage link). Imported lazily so
+      // the mail runtime loads only when a registration is actually confirmed.
+      onRegistrationConfirmed: async (registrationId) => {
+        const { sendConfirmation } = await import('./regNotify');
+        await sendConfirmation(deps.env as never, opened!.db, registrationId);
+      },
     }, event);
     await checkpoint();
     const finalized = await finishStripeDispatch(opened.db, claim, result, now());

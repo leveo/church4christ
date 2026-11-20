@@ -25,6 +25,8 @@ export interface ICalEvent {
    * emitting a single-day all-day DTEND (`nextDay(date)`).
    */
   endDate?: string;
+  /** Where it happens (LOCATION). Omitted when absent. */
+  location?: string;
 }
 
 /** RFC 5545 TEXT escaping: backslash, semicolon, comma, newline. */
@@ -66,6 +68,7 @@ export function buildICal(calName: string, events: ICalEvent[], stamp: string): 
       `DTSTAMP:${stamp}`,
       ...when,
       `SUMMARY:${esc(e.summary)}`,
+      ...(e.location ? [`LOCATION:${esc(e.location)}`] : []),
       ...(e.description ? [`DESCRIPTION:${esc(e.description)}`] : []),
       'END:VEVENT',
     );
@@ -150,4 +153,38 @@ export async function generateCalendarToken(db: AppDb, personId: number): Promis
   const token = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
   await db.prepare(`UPDATE people SET calendar_token = ? WHERE id = ?`).bind(token, personId).run();
   return token;
+}
+
+/**
+ * One registration's event as a single-VEVENT calendar (METHOD:PUBLISH), for the
+ * `.ics` attached to its emails. Same local wall-clock rule as {@link regToICalEvent}
+ * (timed when both ends land on one local date, else an all-day span); the UID is
+ * stable per registration, so re-sending updates the entry instead of duplicating it.
+ */
+export function registrationICalendar(
+  r: { id: number; title: string; starts_at: string; ends_at: string | null; location: string | null; description?: string },
+  host: string,
+  stamp: string = icalStamp(),
+): string {
+  const startLocal = utcToDatetimeLocal(r.starts_at);
+  const endLocal = utcToDatetimeLocal(r.ends_at);
+  const [date, startTime] = startLocal.split('T');
+  const [endDate, endTimeOfDay] = endLocal.split('T');
+  const timed = Boolean(startTime) && Boolean(endTimeOfDay) && endDate === date;
+  const event: ICalEvent = {
+    uid: `registration-${r.id}@${host}`,
+    date,
+    endDate: !timed && endDate && endDate !== date ? endDate : undefined,
+    summary: r.title,
+    description: r.description || undefined,
+    location: r.location || undefined,
+    startTime: timed ? startTime : null,
+    endTime: timed ? endTimeOfDay : null,
+  };
+  return buildICal(r.title, [event], stamp);
+}
+
+/** DTSTAMP for `now`: 'YYYYMMDDTHHMMSSZ'. */
+export function icalStamp(now: Date = new Date()): string {
+  return `${now.toISOString().slice(0, 19).replace(/[-:]/g, '')}Z`;
 }

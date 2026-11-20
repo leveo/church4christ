@@ -32,6 +32,8 @@ export interface RegEventInput {
   waitlist_enabled?: number;
   confirmation_prefix?: string | null;
   poster?: string | null;
+  max_party_size?: number;
+  allow_self_edit?: number;
 }
 
 export type RegEventFormResult =
@@ -72,8 +74,13 @@ export function parseRegEventForm(fd: FormData): RegEventFormResult {
 
   const titles: LocalizedEventTexts = {};
   for (const locale of SUPPORTED_LOCALES) {
-    if (!fd.has(`title_${locale}`) && !fd.has(`description_${locale}`)) continue;
-    titles[locale] = { title: get(`title_${locale}`), description: get(`description_${locale}`) };
+    if (!fd.has(`title_${locale}`) && !fd.has(`description_${locale}`) && !fd.has(`notes_${locale}`)) continue;
+    // Notes are only touched when the form sent them (an older form never clears stored notes).
+    titles[locale] = {
+      title: get(`title_${locale}`),
+      description: get(`description_${locale}`),
+      ...(fd.has(`notes_${locale}`) ? { notes: get(`notes_${locale}`) } : {}),
+    };
   }
   const defaultLocale = getRuntimeDefaultLocale();
   if ((titles[defaultLocale]?.title ?? '') === '') errors[`title_${defaultLocale}`] = 'errors.required';
@@ -91,6 +98,21 @@ export function parseRegEventForm(fd: FormData): RegEventFormResult {
   if (fd.has('waitlist_enabled')) {
     const last = String(fd.getAll('waitlist_enabled').at(-1) ?? '').trim().toLowerCase();
     waitlist_enabled = ['', '0', 'off', 'false', 'no'].includes(last) ? 0 : 1;
+  }
+
+  // 1-20 people per registration; absent = leave the stored value alone, blank = 1.
+  let max_party_size: number | undefined;
+  if (fd.has('max_party_size')) {
+    const raw = get('max_party_size');
+    if (raw === '') max_party_size = 1;
+    else if (!/^\d{1,2}$/.test(raw) || Number(raw) < 1 || Number(raw) > 20) errors.max_party_size = 'errors.integerInvalid';
+    else max_party_size = Number(raw);
+  }
+  // Same hidden "0" + checkbox pattern as the waitlist switch.
+  let allow_self_edit: number | undefined;
+  if (fd.has('allow_self_edit')) {
+    const last = String(fd.getAll('allow_self_edit').at(-1) ?? '').trim().toLowerCase();
+    allow_self_edit = ['', '0', 'off', 'false', 'no'].includes(last) ? 0 : 1;
   }
 
   let confirmation_prefix: string | null | undefined;
@@ -134,6 +156,8 @@ export function parseRegEventForm(fd: FormData): RegEventFormResult {
       ...(waitlist_enabled !== undefined ? { waitlist_enabled } : {}),
       ...(confirmation_prefix !== undefined ? { confirmation_prefix } : {}),
       ...(poster !== undefined ? { poster } : {}),
+      ...(max_party_size !== undefined ? { max_party_size } : {}),
+      ...(allow_self_edit !== undefined ? { allow_self_edit } : {}),
     },
   };
 }
