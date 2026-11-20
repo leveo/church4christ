@@ -31,7 +31,7 @@ import { badge, badgeActive, badgeInactive, badgeScheduled, btnDanger, btnSecond
 
 const user = Astro.locals.user;
 if (!user || !(user.isAdmin || user.finance === 1)) return new Response(null, { status: 403 });
-if (!paymentOperationsEnabled(Astro.locals.modules)) return new Response(null, { status: 404 });
+if (!paymentOperationsEnabled(Astro.locals.modules, Astro.locals.dbBackend)) return new Response(null, { status: 404 });
 const lang: Locale = user.lang ?? 'en';
 const heading = t(lang, 'admin.stripe.title');
 const db = Astro.locals.db;
@@ -53,7 +53,7 @@ const copy = financeCopy(lang);
 if (Astro.request.method === 'POST') {
   // Middleware enforces same-origin/CSRF first; repeat finance + module
   // authorization here before invoking any audited service-layer mutation.
-  if (!(user.isAdmin || user.finance === 1) || !paymentOperationsEnabled(Astro.locals.modules)) {
+  if (!(user.isAdmin || user.finance === 1) || !paymentOperationsEnabled(Astro.locals.modules, Astro.locals.dbBackend)) {
     return new Response(null, { status: 403 });
   }
   const form = await Astro.request.formData();

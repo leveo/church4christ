@@ -154,9 +154,11 @@ export function logisticsModuleEnabled(modules: ReadonlySet<string>): boolean {
   return modules.has('registration') && modules.has('event-logistics');
 }
 
-/** Shared gate for the global finance operations surface and role assignment. */
-export function paymentOperationsEnabled(modules: ReadonlySet<string>): boolean {
-  return modules.has('giving') || modules.has('registration');
+/** Shared gate for the global finance operations surface and role assignment. Stripe payments
+ *  run only on Postgres: on D1 Giving is off and every registration is free, so there is nothing
+ *  to operate (and the Stripe inbox tables do not exist there). */
+export function paymentOperationsEnabled(modules: ReadonlySet<string>, backend: DbBackend): boolean {
+  return backend === 'supabase' && (modules.has('giving') || modules.has('registration'));
 }
 
 // Per-isolate cache: reading the module settings on every request would hammer

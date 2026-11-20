@@ -21,7 +21,7 @@ import {
   createRegistration,
 } from '../../../lib/regDb';
 import { restrictAttendeePersons, validateSubmission } from '../../../lib/regManage';
-import { bagFromFormData, manageLanding, myEventLanding, submissionFromBag } from '../../../lib/regPublic';
+import { bagFromFormData, manageLanding, replayLanding, submissionFromBag } from '../../../lib/regPublic';
 import { parseLocale, type Locale } from '../../../lib/locales';
 import { continuationPayloadDigest, signedInExistingIdentitySourceContext, signedInIdentitySourceContext, type IdentityBusinessContinuationEnv } from '../../../lib/identityBusinessContinuation';
 import { classifyRegistrationCheckoutFailure } from '../../../lib/registrationCheckoutFailure';
@@ -250,8 +250,11 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
         await deps.sendConfirmation(env as unknown as RegNotifyEnv, locals.db, created.id, { manageToken: created.manageToken });
       }
       // The confirmed-or-waitlisted registration opens on its manage page (the token only exists
-      // on the creating call and rides in the fragment); a replay lands on the member's own page.
-      return redirect(created.manageToken ? manageLanding(locale, created.manageToken, locals.campus?.slug) : myEventLanding(locale, created.id));
+      // on the creating call and rides in the fragment); a replay lands on the member's own page, or on the
+      // done page when the Member Portal (which owns /my/events) is off.
+      return redirect(created.manageToken
+        ? manageLanding(locale, created.manageToken, locals.campus?.slug)
+        : replayLanding(locale, created.id, created.status, locals.modules.has('portal')));
     }
 
     await deps.attachIdentitySource(locals.rawDb, deps.identityEnv, {

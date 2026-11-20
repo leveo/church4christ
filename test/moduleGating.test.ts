@@ -156,11 +156,17 @@ describe('People import directory entry', () => {
 });
 
 describe('Stripe operations module gate', () => {
-  it('is available when Giving or Registration is enabled, but not when both are off', () => {
-    expect(paymentOperationsEnabled(new Set())).toBe(false);
-    expect(paymentOperationsEnabled(new Set(['giving']))).toBe(true);
-    expect(paymentOperationsEnabled(new Set(['registration']))).toBe(true);
-    expect(paymentOperationsEnabled(new Set(['giving', 'registration']))).toBe(true);
+  it('is available on Postgres when Giving or Registration is enabled, but not when both are off', () => {
+    expect(paymentOperationsEnabled(new Set(), 'supabase')).toBe(false);
+    expect(paymentOperationsEnabled(new Set(['giving']), 'supabase')).toBe(true);
+    expect(paymentOperationsEnabled(new Set(['registration']), 'supabase')).toBe(true);
+    expect(paymentOperationsEnabled(new Set(['giving', 'registration']), 'supabase')).toBe(true);
+  });
+
+  it('stays off on D1, where every registration is free and Giving is unavailable', () => {
+    // A D1 site running Registration alone must not link to a Stripe page whose tables do not exist there.
+    expect(paymentOperationsEnabled(new Set(['registration']), 'd1')).toBe(false);
+    expect(paymentOperationsEnabled(new Set(['giving', 'registration']), 'd1')).toBe(false);
   });
 
   it('keeps raw payloads, request JSON, secrets, and Checkout URLs out of the page source', () => {

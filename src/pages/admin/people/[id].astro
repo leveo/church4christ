@@ -88,7 +88,7 @@ const media = (env as unknown as { MEDIA: MediaBucket }).MEDIA;
 const hasPeople = Astro.locals.modules.has('people');
 const hasGiving = Astro.locals.modules.has('giving');
 const hasRegistration = Astro.locals.modules.has('registration');
-const hasPaymentOperations = paymentOperationsEnabled(Astro.locals.modules);
+const hasPaymentOperations = paymentOperationsEnabled(Astro.locals.modules, Astro.locals.dbBackend);
 // Group activity (memberships/attendance + registrations) is its own module
 // gate, independent of the people module.
 const hasGroups = Astro.locals.modules.has('groups');
@@ -656,7 +656,8 @@ const copy = careCopy(lang);
               <p class="text-xs text-ink-muted">{t(lang, 'admin.person.areasHint')}</p>
               {availableGrantAreas.map((a) => {
                 const initialState = grantCheckboxStateForRole(person.role, a, personAreas.includes(a));
-                const backendDisabled = (a === 'giving' || a === 'registration' || a === 'payment-operations')
+                // Registration runs on D1 too (free events); only Giving and payment operations need Postgres.
+                const backendDisabled = (a === 'giving' || a === 'payment-operations')
                   && Astro.locals.dbBackend !== 'supabase';
 
                 return (

@@ -619,8 +619,21 @@ describe('doctor capability services check', () => {
     ]);
     const optional: any = structuredClone(catalog);
     optional.capabilities.bulletins.optionalServices = ['stripe'];
-    const optionalFindings = await checkServices({ catalog: optional, manifest: baseManifest, presence: { worker: true, r2: true, hyperdrive: false, email: false, emailDevLog: true, identityVerificationSecretStatus: 'valid', identitySourceKeyStatus: 'valid', identityRecoveryKeyStatus: 'valid', stripeSecretKey: false, stripeWebhookSecret: false, backup: false } });
+    const optionalPresence = { worker: true, r2: true, hyperdrive: true, email: false, emailDevLog: true, identityVerificationSecretStatus: 'valid', identitySourceKeyStatus: 'valid', identityRecoveryKeyStatus: 'valid', stripeSecretKey: false, stripeWebhookSecret: false, backup: false } as const;
+    const optionalFindings = await checkServices({ catalog: optional, manifest: { ...baseManifest, database: 'supabase' }, presence: optionalPresence });
     expect(optionalFindings.map((entry) => [entry.code, entry.severity])).toContainEqual(['services.stripe-absent', 'warning']);
+  });
+
+  it('does not ask a D1 registration-only site to configure Stripe it cannot use', async () => {
+    const manifest = { ...baseManifest, preset: 'event-registration', modules: [...catalog.presets['event-registration'].modules] };
+    const presence = { worker: true, r2: true, hyperdrive: false, email: false, emailDevLog: true, newcomerRateLimitSecret: true, identityVerificationSecretStatus: 'valid', identitySourceKeyStatus: 'valid', identityRecoveryKeyStatus: 'valid', stripeSecretKey: false, stripeWebhookSecret: false, backup: false } as const;
+    const findings = await checkServices({ catalog, manifest, presence });
+    expect(findings).toContainEqual(expect.objectContaining({ code: 'services.stripe-not-used', severity: 'info' }));
+    expect(findings.map((entry) => entry.code)).not.toContain('services.stripe-absent');
+    expect(findings.filter((entry) => entry.severity !== 'info').map((entry) => entry.code)).toEqual([]);
+    // The same modules on Supabase can take paid sign-ups, so missing Stripe stays a warning there.
+    const supabase = await checkServices({ catalog, manifest: { ...manifest, database: 'supabase' }, presence: { ...presence, hyperdrive: true } });
+    expect(supabase).toContainEqual(expect.objectContaining({ code: 'services.stripe-absent', severity: 'warning' }));
   });
 
   it('fails closed when deploy metadata reports the identity secret but cannot prove its value', async () => {
