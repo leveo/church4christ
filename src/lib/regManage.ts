@@ -15,33 +15,37 @@ import { getLiveHouseholdForPerson } from './householdDb';
 import {
   cancelRegistrationPromoting,
   checkAnswer,
+  CONTROL_RE,
+  EMAIL_RE,
   generateManageToken,
   hashManageToken,
   isManageTokenShape,
   listQuestions,
+  MAX_ANSWER_LENGTH,
+  MAX_EMAIL_LENGTH,
+  MAX_PHONE_LENGTH,
+  optionLabel,
+  PHONE_RE,
   promoteWaitlist,
+  storedAnswerSql,
+  TERMS_ACCEPTED,
   type RegQuestion,
   type RegStatus,
+  type RegTicketType,
 } from './regDb';
+import { visibleQuestionIds, type ConditionQuestion } from './regConditions';
 import { eventPhase, type RegPhase } from './regPhase';
 
 // ── Submission validation ────────────────────────────────────────────────────
 
 export const MAX_NAME_LENGTH = 120;
-export const MAX_PHONE_LENGTH = 40;
-export const MAX_EMAIL_LENGTH = 320;
-export const MAX_ANSWER_LENGTH = 2000;
 /** The hard ceiling for events.max_party_size (matches the column CHECK). */
 export const MAX_PARTY_SIZE_LIMIT = 20;
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
-// Digits, spaces and the punctuation people type in phone numbers, extensions included.
-const PHONE_RE = /^[0-9+()\-.\s#*/xX]+$/u;
-// eslint-disable-next-line no-control-regex
-const CONTROL_RE = /[\0-\x08\x0b\x0c\x0e-\x1f\x7f]/u;
+export { MAX_ANSWER_LENGTH, MAX_EMAIL_LENGTH, MAX_PHONE_LENGTH };
 
 export interface SubmissionError {
-  /** `contact.name`, `contact.email`, `contact.phone`, `attendees`, `attendees.<i>.name`, `q.<questionId>` or '' (whole request). */
+  /** `contact.name`, `contact.email`, `contact.phone`, `attendees`, `attendees.<i>.name`, `attendees.<i>.ticket`,
+   *  `attendees.<i>.q.<questionId>` (a per-person answer; i = the form row), `q.<questionId>` or '' (whole request). */
   path: string;
   code: string;
 }
@@ -50,14 +54,23 @@ export interface SubmissionInput {
   contact: { name?: unknown; email?: unknown; phone?: unknown };
   /** People covered, in form order. Row 0 is the contact: a blank name there means the contact's own name.
    *  Blank later rows are ignored (extra rows rendered but not filled in). */
-  attendees?: Array<{ name?: unknown; personId?: unknown }>;
-  /** Raw answer form values keyed by question id (a checkbox arrives as string[]). */
+  attendees?: Array<{
+    name?: unknown;
+    personId?: unknown;
+    /** The chosen ticket type id (events with active ticket types only). */
+    ticketTypeId?: unknown;
+    /** This person's raw answers to the per-person questions, keyed by question id. */
+    answers?: Record<string, string | string[]>;
+  }>;
+  /** Raw answer form values for the once-per-registration questions, keyed by question id (a checkbox arrives as string[]). */
   answers?: Record<string, string | string[]>;
 }
 
 export interface ValidSubmission {
   contact: { name: string; email: string; phone: string | null };
-  attendees: Array<{ name: string; personId: number | null }>;
+  /** Each person with the ticket type they chose (null on an event without active types) and their per-person answers. */
+  attendees: Array<{ name: string; personId: number | null; ticketTypeId: number | null; answers: Array<[number, string]> }>;
+  /** The once-per-registration answers (conditions applied, hidden questions dropped). */
   answers: Array<[number, string]>;
 }
 
@@ -80,21 +93,59 @@ function phoneError(value: string): string | null {
   return null;
 }
 
+const toConditionQuestion = (q: RegQuestion): ConditionQuestion => ({
+  id: q.id, type: q.type, scope: q.scope, options: q.options, condition: q.condition,
+});
+
+/** Check one set of raw answers against the questions of one scope: shown questions only (conditions
+ *  applied; a hidden question is never required and its value is dropped), collecting every problem. */
+function checkScopeAnswers(
+  questions: RegQuestion[],
+  shown: Set<number>,
+  scope: RegQuestion['scope'],
+  form: Record<string, string | string[]>,
+  pathOf: (questionId: number) => string,
+  errors: SubmissionError[],
+): Array<[number, string]> {
+  const out: Array<[number, string]> = [];
+  for (const question of questions) {
+    if (question.scope !== scope || question.type === 'section' || !shown.has(question.id)) continue;
+    const checked = checkAnswer(question, form[String(question.id)]);
+    if ('code' in checked) {
+      errors.push({ path: pathOf(question.id), code: checked.code });
+    } else if (checked.value !== null) {
+      if (codePoints(checked.value) > MAX_ANSWER_LENGTH) errors.push({ path: pathOf(question.id), code: 'too_long' });
+      else out.push([question.id, checked.value]);
+    }
+  }
+  return out;
+}
+
 /**
  * Validate a whole registration submission without writing anything: contact,
- * people and answers, collecting EVERY problem as a field path + code (the review
- * step shows them inline). Names are NFC-normalized and trimmed (<= 120 chars),
+ * people, ticket types and answers, collecting EVERY problem as a field path + code (the
+ * review step shows them inline). Names are NFC-normalized and trimmed (<= 120 chars),
  * email is trimmed and lower-cased, phone is optional (<= 40 chars of digits and
  * the usual punctuation), blank extra people are dropped, and the party may not
- * exceed the event's max_party_size ('attendees' / 'too_many'). Questions are
- * asked once per registration; their checks are exactly validateAnswers'.
- * The result's `personId`s are only what the form claimed - a caller that took
- * them from a form must pass them through restrictAttendeePersons.
+ * exceed the event's max_party_size ('attendees' / 'too_many').
+ *
+ * Questions come in two scopes: once per registration (`q.<id>`) and once per person
+ * (`attendees.<i>.q.<id>`, i = the form row). Show-if conditions are evaluated with the shared
+ * evaluator: a hidden question is never required and its submitted value is dropped. Per-type
+ * rules: number, date, email, phone, terms (value = TERMS_ACCEPTED until a writer stamps the
+ * time), max_length (text / textarea), option KEYS for select / checkbox; sections hold no answer.
+ *
+ * `opts.ticketTypes` (the event's types, see listTicketTypes): when it holds an ACTIVE type every
+ * person must pick one that belongs to it and is active (`attendees.<i>.ticket`: 'required' /
+ * 'invalid'); without active types the field is ignored. The writers enforce the same rule in SQL.
+ * The result's `personId`s are only what the form claimed - a caller that took them from a form
+ * must pass them through restrictAttendeePersons.
  */
 export function validateSubmission(
   event: { max_party_size: number },
   questions: RegQuestion[],
   input: SubmissionInput,
+  opts: { ticketTypes?: ReadonlyArray<Pick<RegTicketType, 'id' | 'active'>> } = {},
 ): SubmissionResult {
   const errors: SubmissionError[] = [];
 
@@ -108,6 +159,10 @@ export function validateSubmission(
   else if (!EMAIL_RE.test(email) || CONTROL_RE.test(email)) errors.push({ path: 'contact.email', code: 'invalid' });
   const phoneProblem = phoneError(phone);
   if (phoneProblem) errors.push({ path: 'contact.phone', code: phoneProblem });
+
+  const conditionQuestions = questions.map(toConditionQuestion);
+  const registrationForm = input.answers ?? {};
+  const activeTypeIds = new Set((opts.ticketTypes ?? []).filter((t) => t.active === 1).map((t) => t.id));
 
   const rows = input.attendees && input.attendees.length > 0 ? input.attendees : [{ name: '' }];
   const attendees: ValidSubmission['attendees'] = [];
@@ -124,22 +179,39 @@ export function validateSubmission(
       return;
     }
     const personId = Number.isSafeInteger(row?.personId) && (row.personId as number) > 0 ? (row.personId as number) : null;
-    attendees.push({ name: attendeeName, personId });
+
+    let ticketTypeId: number | null = null;
+    if (activeTypeIds.size > 0) {
+      const claimed = Number(typeof row?.ticketTypeId === 'string' ? row.ticketTypeId.trim() : row?.ticketTypeId);
+      if (row?.ticketTypeId === undefined || row.ticketTypeId === null || row.ticketTypeId === '') {
+        errors.push({ path: `attendees.${index}.ticket`, code: 'required' });
+      } else if (!Number.isSafeInteger(claimed) || !activeTypeIds.has(claimed)) {
+        errors.push({ path: `attendees.${index}.ticket`, code: 'invalid' });
+      } else ticketTypeId = claimed;
+    }
+
+    const personForm = row?.answers ?? {};
+    const personAnswers = checkScopeAnswers(
+      questions,
+      visibleQuestionIds(conditionQuestions, registrationForm, personForm),
+      'attendee',
+      personForm,
+      (id) => `attendees.${index}.q.${id}`,
+      errors,
+    );
+    attendees.push({ name: attendeeName, personId, ticketTypeId, answers: personAnswers });
   });
   const limit = Math.min(Math.max(1, Math.trunc(event.max_party_size) || 1), MAX_PARTY_SIZE_LIMIT);
   if (attendees.length > limit) errors.push({ path: 'attendees', code: 'too_many' });
 
-  const answers: Array<[number, string]> = [];
-  const form = input.answers ?? {};
-  for (const question of questions) {
-    const checked = checkAnswer(question, form[String(question.id)]);
-    if ('code' in checked) {
-      errors.push({ path: `q.${question.id}`, code: checked.code });
-    } else if (checked.value !== null) {
-      if (checked.value.length > MAX_ANSWER_LENGTH) errors.push({ path: `q.${question.id}`, code: 'too_long' });
-      else answers.push([question.id, checked.value]);
-    }
-  }
+  const answers = checkScopeAnswers(
+    questions,
+    visibleQuestionIds(conditionQuestions, registrationForm),
+    'registration',
+    registrationForm,
+    (id) => `q.${id}`,
+    errors,
+  );
 
   if (errors.length > 0) return { ok: false, errors };
   return { ok: true, value: { contact: { name, email, phone: phone || null }, attendees, answers } };
@@ -150,11 +222,11 @@ export function validateSubmission(
  * live member of the contact's household; any other id (a forged form field) is
  * dropped. The contact's own row (index 0) is always linked to the contact.
  */
-export async function restrictAttendeePersons(
+export async function restrictAttendeePersons<T extends { name: string; personId: number | null }>(
   db: AppDb,
   contactPersonId: number | null,
-  attendees: ValidSubmission['attendees'],
-): Promise<ValidSubmission['attendees']> {
+  attendees: T[],
+): Promise<T[]> {
   const allowed = new Set<number>();
   if (contactPersonId !== null) {
     allowed.add(contactPersonId);
@@ -162,7 +234,7 @@ export async function restrictAttendeePersons(
     for (const member of household?.members ?? []) if (member.person_id !== null) allowed.add(member.person_id);
   }
   return attendees.map((attendee, index) => ({
-    name: attendee.name,
+    ...attendee,
     personId: index === 0 && contactPersonId !== null
       ? contactPersonId
       : attendee.personId !== null && allowed.has(attendee.personId) ? attendee.personId : null,
@@ -255,9 +327,21 @@ export interface RegistrationSummary {
     created_at: string;
     cancelled_at: string | null;
   };
-  /** Every attendee row in order, cancelled ones included (filter on status). */
-  attendees: Array<{ id: number; name: string; status: 'active' | 'cancelled'; person_id: number | null }>;
-  /** Answers in question order; `value` is display text (a checkbox's choices joined by ", "). */
+  /** Every attendee row in order, cancelled ones included (filter on status). Each carries the ticket type
+   *  they hold (read-only for the registrant) and their own answers to the per-person questions. */
+  attendees: Array<{
+    id: number;
+    name: string;
+    status: 'active' | 'cancelled';
+    person_id: number | null;
+    ticket_type_id: number | null;
+    /** Localized ticket type label (null without a type). */
+    ticket_label: string | null;
+    ticket_price_cents: number | null;
+    answers: Array<{ question_id: number; label: string; value: string }>;
+  }>;
+  /** The once-per-registration answers in question order (sections skipped); `label` is the localized
+   *  question, `value` is display text: option LABELS for a select / checkbox (a checkbox's choices joined by ", "). */
   answers: Array<{ question_id: number; label: string; value: string }>;
   /** The registrant may edit contact name, phone, people's names and answers. */
   canEdit: boolean;
@@ -343,23 +427,49 @@ export async function registrationSummary(
     .first<SummaryRow>();
   if (!row) return null;
 
-  const { results: attendees } = await db
-    .prepare(`SELECT id, name, status, person_id FROM reg_attendees WHERE registration_id = ?1 ORDER BY sort, id`)
-    .bind(id)
-    .all<RegistrationSummary['attendees'][number]>();
-
-  const q = i18nJoin('reg_question_i18n', 'q', 'question_id', ['label'], locale);
-  const { results: answerRows } = await db
+  const ticket = i18nJoin('reg_ticket_type_i18n', 't', 'ticket_type_id', ['label'], locale);
+  const { results: attendeeRows } = await db
     .prepare(
-      `SELECT a.question_id AS question_id, ${q.select}, a.value AS value, q.type AS type
-       FROM reg_answers a
-       JOIN reg_questions q ON q.id = a.question_id
-       ${q.joins}
+      `SELECT a.id AS id, a.name AS name, a.status AS status, a.person_id AS person_id,
+              a.ticket_type_id AS ticket_type_id, t.price_cents AS ticket_price_cents, ${ticket.select.replace(/ AS label$/, ' AS ticket_label')}
+       FROM reg_attendees a
+       LEFT JOIN reg_ticket_types t ON t.id = a.ticket_type_id
+       ${ticket.joins}
        WHERE a.registration_id = ?1
-       ORDER BY q.sort, q.id`,
+       ORDER BY a.sort, a.id`,
     )
     .bind(id)
-    .all<{ question_id: number; label: string | null; value: string; type: string }>();
+    .all<Omit<RegistrationSummary['attendees'][number], 'answers' | 'ticket_label'> & { ticket_label: string | null }>();
+
+  const definitions = await listQuestions(db, locale, row.event_id);
+  const stored = await db
+    .prepare(`SELECT question_id, value FROM reg_answers WHERE registration_id = ?1`)
+    .bind(id)
+    .all<{ question_id: number; value: string }>();
+  const storedPerson = await db
+    .prepare(
+      `SELECT aa.attendee_id AS attendee_id, aa.question_id AS question_id, aa.value AS value
+       FROM reg_attendee_answers aa JOIN reg_attendees a ON a.id = aa.attendee_id
+       WHERE a.registration_id = ?1`,
+    )
+    .bind(id)
+    .all<{ attendee_id: number; question_id: number; value: string }>();
+  const display = (rows: Array<{ question_id: number; value: string }>, scope: RegQuestion['scope']) => {
+    const byQuestion = new Map(rows.map((r) => [r.question_id, r.value]));
+    const out: Array<{ question_id: number; label: string; value: string }> = [];
+    for (const q of definitions) {
+      if (q.scope !== scope || q.type === 'section') continue;
+      const raw = byQuestion.get(q.id);
+      if (raw !== undefined) out.push({ question_id: q.id, label: q.label, value: answerDisplay(q, raw) });
+    }
+    return out;
+  };
+  const attendees: RegistrationSummary['attendees'] = attendeeRows.map((a) => ({
+    ...a,
+    ticket_label: a.ticket_label ?? null,
+    ticket_price_cents: a.ticket_type_id === null ? null : a.ticket_price_cents,
+    answers: display(storedPerson.results.filter((r) => r.attendee_id === a.id), 'attendee'),
+  }));
 
   const event = {
     id: row.event_id,
@@ -391,22 +501,25 @@ export async function registrationSummary(
       cancelled_at: row.cancelled_at,
     },
     attendees,
-    answers: answerRows.map((a) => ({
-      question_id: a.question_id,
-      label: a.label ?? '',
-      value: a.type === 'checkbox' ? decodeChoices(a.value) : a.value,
-    })),
+    answers: display(stored.results, 'registration'),
     ...selfServiceFlags(event, row.status),
   };
 }
 
-function decodeChoices(raw: string): string {
+function decodeChoices(raw: string): string[] {
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.every((v) => typeof v === 'string')) return parsed.join(', ');
+    if (Array.isArray(parsed) && parsed.every((v) => typeof v === 'string')) return parsed;
   } catch {
     // fall through: show the stored text
   }
+  return [raw];
+}
+
+/** The display text of one stored answer: option labels for select / checkbox (a key without a label shows as itself). */
+function answerDisplay(question: RegQuestion, raw: string): string {
+  if (question.type === 'checkbox') return decodeChoices(raw).map((key) => optionLabel(question, key)).join(', ');
+  if (question.type === 'select') return optionLabel(question, raw);
   return raw;
 }
 
@@ -442,9 +555,10 @@ const flagsFor = (row: SelfRow, now: string) =>
 export interface SelfEditInput {
   name?: string;
   phone?: string | null;
-  /** New names for existing people, by attendee id. People cannot be added here. */
-  attendees?: Array<{ id: number; name: string }>;
-  /** The FULL answer set (validated against every question, replacing the stored answers). */
+  /** Existing people, by attendee id: a new name and/or the FULL set of that person's answers to the
+   *  per-person questions. People cannot be added here and their ticket type never changes. */
+  attendees?: Array<{ id: number; name?: string; answers?: Record<string, string | string[]> }>;
+  /** The FULL once-per-registration answer set (validated against every question, replacing the stored answers). */
   answers?: Record<string, string | string[]>;
 }
 
@@ -452,9 +566,10 @@ export type SelfEditResult = { ok: true } | { ok: false; errors: SubmissionError
 
 /**
  * A registrant's own edit, re-validated on the server: contact name, phone, the
- * names of people already on the registration, and the answers. Email, party size
- * and status never change here. Refused (`not_found` / `not_allowed`, path '')
- * unless the canEdit rule holds at `now`. One batch.
+ * names of people already on the registration, and the answers (per registration and per
+ * person; conditions apply exactly as at submission). Email, party size, ticket types and status
+ * never change here. A re-saved `terms` answer keeps its original acceptance time. Refused
+ * (`not_found` / `not_allowed`, path '') unless the canEdit rule holds at `now`. One batch.
  */
 export async function updateRegistrationSelf(
   db: AppDb,
@@ -481,7 +596,7 @@ export async function updateRegistrationSelf(
     phone = value || null;
   }
 
-  const attendeeEdits: Array<{ id: number; name: string }> = [];
+  const attendeeEdits: Array<{ id: number; index: number; name: string | null; answers: Record<string, string | string[]> | null }> = [];
   if (input.attendees) {
     const { results } = await db
       .prepare(`SELECT id FROM reg_attendees WHERE registration_id = ?1 AND status = 'active'`)
@@ -493,27 +608,66 @@ export async function updateRegistrationSelf(
         errors.push({ path: `attendees.${index}.id`, code: 'not_found' });
         return;
       }
-      const value = clean(attendee.name);
-      const problem = nameError(value, true);
-      if (problem) errors.push({ path: `attendees.${index}.name`, code: problem });
-      else attendeeEdits.push({ id: attendee.id, name: value });
+      let value: string | null = null;
+      if (attendee.name !== undefined) {
+        value = clean(attendee.name);
+        const problem = nameError(value, true);
+        if (problem) {
+          errors.push({ path: `attendees.${index}.name`, code: problem });
+          return;
+        }
+      }
+      attendeeEdits.push({ id: attendee.id, index, name: value, answers: attendee.answers ?? null });
     });
   }
 
   let answers: Array<[number, string]> | null = null;
-  if (input.answers) {
+  const personAnswers = new Map<number, Array<[number, string]>>();
+  const editsPersonAnswers = attendeeEdits.some((e) => e.answers !== null);
+  if (input.answers || editsPersonAnswers) {
     const questions = await listQuestions(db, (row.locale as Locale | null) ?? getRuntimeDefaultLocale(), row.event_id);
-    answers = [];
-    for (const question of questions) {
-      const checked = checkAnswer(question, input.answers[String(question.id)]);
-      if ('code' in checked) errors.push({ path: `q.${question.id}`, code: checked.code });
-      else if (checked.value !== null) {
-        if (checked.value.length > MAX_ANSWER_LENGTH) errors.push({ path: `q.${question.id}`, code: 'too_long' });
-        else answers.push([question.id, checked.value]);
-      }
+    const conditionQuestions = questions.map(toConditionQuestion);
+    // The registration-level answers decide which per-person questions are shown, whether or not they are being edited.
+    let registrationForm: Record<string, string | string[]> = input.answers ?? {};
+    if (!input.answers) {
+      const { results } = await db.prepare(`SELECT question_id, value FROM reg_answers WHERE registration_id = ?1`).bind(id).all<{ question_id: number; value: string }>();
+      const types = new Map(questions.map((q) => [q.id, q.type]));
+      registrationForm = Object.fromEntries(results.map((r) => [String(r.question_id), types.get(r.question_id) === 'checkbox' ? decodeChoices(r.value) : r.value]));
+    }
+    if (input.answers) {
+      answers = checkScopeAnswers(questions, visibleQuestionIds(conditionQuestions, registrationForm), 'registration', registrationForm, (q) => `q.${q}`, errors);
+    }
+    for (const edit of attendeeEdits) {
+      if (edit.answers === null) continue;
+      personAnswers.set(
+        edit.id,
+        checkScopeAnswers(
+          questions,
+          visibleQuestionIds(conditionQuestions, registrationForm, edit.answers),
+          'attendee',
+          edit.answers,
+          (q) => `attendees.${edit.index}.q.${q}`,
+          errors,
+        ),
+      );
     }
   }
   if (errors.length > 0) return { ok: false, errors };
+
+  // A re-saved terms answer keeps the time it was first accepted.
+  const keepAcceptance = async (pairs: Array<[number, string]>, table: 'reg_answers' | 'reg_attendee_answers', ownerId: number): Promise<Array<[number, string]>> => {
+    if (!pairs.some(([, value]) => value === TERMS_ACCEPTED)) return pairs;
+    const { results } = await db
+      .prepare(table === 'reg_answers'
+        ? `SELECT question_id, value FROM reg_answers WHERE registration_id = ?1`
+        : `SELECT question_id, value FROM reg_attendee_answers WHERE attendee_id = ?1`)
+      .bind(ownerId)
+      .all<{ question_id: number; value: string }>();
+    const previous = new Map(results.map((r) => [r.question_id, r.value]));
+    return pairs.map(([questionId, value]) => [questionId, value === TERMS_ACCEPTED ? (previous.get(questionId) ?? value) : value]);
+  };
+  if (answers) answers = await keepAcceptance(answers, 'reg_answers', id);
+  for (const [attendeeId, pairs] of personAnswers) personAnswers.set(attendeeId, await keepAcceptance(pairs, 'reg_attendee_answers', attendeeId));
 
   const open = `status NOT IN ('cancelled','declined')`;
   const stmts: AppStatement[] = [];
@@ -524,15 +678,35 @@ export async function updateRegistrationSelf(
     stmts.push(db.prepare(`UPDATE registrations SET phone = ?1, updated_at = datetime('now') WHERE id = ?2 AND ${open}`).bind(phone, id));
   }
   for (const edit of attendeeEdits) {
-    stmts.push(
-      db
-        .prepare(
-          `UPDATE reg_attendees SET name = ?1, updated_at = datetime('now')
-           WHERE id = ?2 AND registration_id = ?3 AND status = 'active'
-             AND EXISTS (SELECT 1 FROM registrations r WHERE r.id = ?3 AND r.${open})`,
-        )
-        .bind(edit.name, edit.id, id),
-    );
+    if (edit.name !== null) {
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE reg_attendees SET name = ?1, updated_at = datetime('now')
+             WHERE id = ?2 AND registration_id = ?3 AND status = 'active'
+               AND EXISTS (SELECT 1 FROM registrations r WHERE r.id = ?3 AND r.${open})`,
+          )
+          .bind(edit.name, edit.id, id),
+      );
+    }
+    const pairs = personAnswers.get(edit.id);
+    if (pairs) {
+      const guard = `EXISTS (SELECT 1 FROM reg_attendees a JOIN registrations r ON r.id = a.registration_id WHERE a.id = ?1 AND a.registration_id = ?2 AND a.status = 'active' AND r.${open})`;
+      stmts.push(db.prepare(`DELETE FROM reg_attendee_answers WHERE attendee_id = ?1 AND ${guard}`).bind(edit.id, id));
+      for (const [questionId, value] of pairs) {
+        stmts.push(
+          db
+            .prepare(
+              `INSERT INTO reg_attendee_answers (attendee_id, question_id, value)
+               SELECT a.id, CAST(?3 AS INTEGER), ${storedAnswerSql('?4')}
+               FROM reg_attendees a JOIN registrations r ON r.id = a.registration_id
+               WHERE a.id = ?1 AND a.registration_id = ?2 AND a.status = 'active' AND r.${open}
+               ON CONFLICT DO NOTHING`,
+            )
+            .bind(edit.id, id, questionId, value),
+        );
+      }
+    }
   }
   if (answers) {
     stmts.push(db.prepare(`DELETE FROM reg_answers WHERE registration_id = ?1 AND EXISTS (SELECT 1 FROM registrations r WHERE r.id = ?1 AND r.${open})`).bind(id));
@@ -541,7 +715,7 @@ export async function updateRegistrationSelf(
         db
           .prepare(
             `INSERT INTO reg_answers (registration_id, question_id, value)
-             SELECT r.id, CAST(?2 AS INTEGER), CAST(?3 AS TEXT) FROM registrations r WHERE r.id = ?1 AND r.${open}
+             SELECT r.id, CAST(?2 AS INTEGER), ${storedAnswerSql('?3')} FROM registrations r WHERE r.id = ?1 AND r.${open}
              ON CONFLICT DO NOTHING`,
           )
           .bind(id, questionId, value),

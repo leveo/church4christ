@@ -7,6 +7,7 @@
 // Worker and in the manage page's script. Every dynamic value goes through esc(), the
 // view is plain data, and the copy arrives as a labels map (built with t() by the
 // caller, placeholders left in place and filled here with escaped values).
+import type { RegQuestionType } from './regDb';
 import { badge, btn, btnDanger, btnSecondary, errorText, lab, tin } from './adminUi';
 
 /** esc(): HTML-escape a value for text and double-quoted attribute positions. */
@@ -19,7 +20,7 @@ export type ViewStatus = 'pending' | 'review' | 'confirmed' | 'waitlist' | 'decl
 export interface ViewQuestion {
   id: number;
   label: string;
-  type: 'text' | 'textarea' | 'select' | 'checkbox' | 'yesno';
+  type: RegQuestionType;
   required: boolean;
   options: string[];
   /** Current answer(s); a checkbox group may have several. */
@@ -114,8 +115,11 @@ export function renderQuestionField(
   const required = q.required ? ' required' : '';
   const first = q.value[0] ?? '';
   let control = '';
-  if (q.type === 'text') {
-    control = `<input id="${esc(id)}" name="${esc(name)}" aria-label="${esc(q.label)}"${required} class="${tin}" value="${esc(first)}"${aria}>`;
+  if (q.type === 'text' || q.type === 'number' || q.type === 'date' || q.type === 'email' || q.type === 'phone') {
+    const inputType = q.type === 'phone' ? 'tel' : q.type === 'text' ? 'text' : q.type;
+    control = `<input id="${esc(id)}" name="${esc(name)}" type="${inputType}" aria-label="${esc(q.label)}"${required} class="${tin}" value="${esc(first)}"${aria}>`;
+  } else if (q.type === 'terms') {
+    control = `<label class="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" id="${esc(id)}" name="${esc(name)}" value="on"${first !== '' ? ' checked' : ''}${required}${aria}><span>${esc(q.label)}</span></label>`;
   } else if (q.type === 'textarea') {
     control = `<textarea id="${esc(id)}" name="${esc(name)}" aria-label="${esc(q.label)}"${required} rows="4" class="${tin}"${aria}>${esc(first)}</textarea>`;
   } else if (q.type === 'select') {

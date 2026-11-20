@@ -9,6 +9,7 @@
 // never interpolated into an error message, thrown value, or log line.
 import {
   canonicalAppOrigin,
+  checkoutParamsTotal,
   parseCheckoutRequestId,
   registrationCheckoutCancelUrl,
   type StripeCheckoutParams,
@@ -737,8 +738,8 @@ export async function createRegistrationCheckoutFromParams(
   const session = requireRegistrationCheckoutSession(raw, {
     requestId,
     registrationId: Number(params.metadata.registration_id),
-    // Stripe's amount_total is the line item's unit amount times its quantity (party size).
-    amountCents: expected.unit_amount * params.line_items[0].quantity,
+    // Stripe's amount_total is the sum of every line item's unit amount times its quantity.
+    amountCents: checkoutParamsTotal(params),
     currency: expected.currency,
     mode: stripeMode(env) ?? undefined,
   });

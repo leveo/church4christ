@@ -153,7 +153,7 @@ const householdChips = (household?.members ?? []).filter((m) => m.person_id !== 
 const left = event ? seatsLeft(event) : null;
 const pageAction = event ? `/${locale}/register/${event.id}` : '';
 const submitAction = user ? '/api/register/submit' : '/api/identity/continuation/start';
-const questionViews: ViewQuestion[] = questions.map((q) => ({
+const questionViews: ViewQuestion[] = questions.filter((q) => q.scope === 'registration' && q.type !== 'section').map((q) => ({
   id: q.id,
   label: q.label,
   type: q.type,

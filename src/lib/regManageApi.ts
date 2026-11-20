@@ -61,7 +61,8 @@ export async function buildRegistrationView(
       .bind(registrationId)
       .all<{ question_id: number; value: string }>();
     const stored = new Map(results.map((r) => [r.question_id, r.value]));
-    questions = defs.map((q) => {
+    // Per-person questions and section headings are not part of this registration-level form.
+    questions = defs.filter((q) => q.scope === 'registration' && q.type !== 'section').map((q) => {
       const raw = stored.get(q.id);
       return {
         id: q.id,

@@ -144,7 +144,7 @@ export async function listSpecialEventsForGroup(db: AppDb, groupId: number, loca
        JOIN reg_events e ON e.id = g.reg_event_id
        LEFT JOIN reg_event_i18n el ON el.event_id = e.id AND el.locale = ?2
        LEFT JOIN reg_event_i18n ed ON ed.event_id = e.id AND ed.locale = 'en'
-       WHERE g.group_id = ?1
+       WHERE g.group_id = ?1 AND e.is_template = 0
        ORDER BY e.starts_at, e.id`,
     )
     .bind(groupId, locale)
@@ -167,7 +167,7 @@ export async function listOpenSpecialEventsForGroup(
        LEFT JOIN reg_event_i18n el ON el.event_id = e.id AND el.locale = ?2
        LEFT JOIN reg_event_i18n ed ON ed.event_id = e.id AND ed.locale = 'en'
        WHERE g.group_id = ?1
-         AND e.active = 1
+         AND e.active = 1 AND e.is_template = 0
          AND (e.visible_from IS NULL OR e.visible_from <= datetime('now'))
          AND (e.opens_at IS NULL OR e.opens_at <= datetime('now'))
          AND (COALESCE(e.closes_at, e.starts_at) > datetime('now'))
@@ -187,7 +187,7 @@ export async function listLinkableEvents(db: AppDb, groupId: number): Promise<Li
        FROM reg_events e
        LEFT JOIN reg_event_i18n een ON een.event_id = e.id AND een.locale = 'en'
        LEFT JOIN reg_event_i18n ezh ON ezh.event_id = e.id AND ezh.locale = 'zh'
-       WHERE e.active = 1
+       WHERE e.active = 1 AND e.is_template = 0
          AND NOT EXISTS (SELECT 1 FROM group_reg_events g WHERE g.reg_event_id = e.id AND g.group_id = ?1)
        ORDER BY e.starts_at DESC, e.id DESC`,
     )
