@@ -103,13 +103,14 @@ describe('per-event registration roles at the middleware', () => {
     }
   });
 
-  it('every read-only per-event page (CSV, people CSV, badges, sign-in sheet) needs view: a viewer reaches them, a desk volunteer does not', async () => {
+  it('every read-only per-event page (CSV, people CSV, badges, sign-in sheet, logistics prints) needs view: a viewer reaches them, a desk volunteer does not', async () => {
     const token = await session(980, 'door@example.com');
     const viewEvent = await newEvent();
     const deskEvent = await newEvent();
     await grantEventRole(env.DB, viewEvent, 980, 'viewer');
     await grantEventRole(env.DB, deskEvent, 980, 'desk');
-    for (const tail of ['export.csv', 'export-people.csv', 'badges', 'sign-in-sheet']) {
+    // The event-logistics prints are gated the same way here (the page itself then 404s when the module or the area is off).
+    for (const tail of ['export.csv', 'export-people.csv', 'badges', 'sign-in-sheet', 'room-list', 'door-signs', 'table-list', 'table-cards', 'group-list']) {
       expect(await status(`/admin/registration/${viewEvent}/${tail}`, token), tail).toEqual({ status: 200, reached: true });
       expect(await status(`/admin/registration/${deskEvent}/${tail}`, token), `desk ${tail}`).toEqual({ status: 403, reached: false });
       // A role on one event opens nothing on another.

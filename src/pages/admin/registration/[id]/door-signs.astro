@@ -1,0 +1,55 @@
+---
+// Printable door signs for one event (event logistics, housing): one sign per room with the room label and the
+// names of the people in it, in large type. Rooms with nobody in them are left out unless ?all=1. Gated like the
+// badges ('view' on this event) plus the module and the event's housing switch (404 otherwise).
+import PrintSheet from '../../../../layouts/PrintSheet.astro';
+import { logisticsPrintGate } from '../../../../lib/regLogisticsPrint';
+import { listHousing } from '../../../../lib/regHousing';
+import { t } from '../../../../lib/i18n';
+
+const gate = await logisticsPrintGate(Astro.locals, Astro.params.id, 'housing');
+if (gate instanceof Response) return gate;
+const { eventId, lang, eventTitle, names } = gate;
+const all = Astro.url.searchParams.get('all') === '1';
+const signs = (await listHousing(Astro.locals.db, eventId)).flatMap((v) => v.rooms.filter((r) => r.confirmed && (all || r.occupants.length > 0)).map((r) => ({ venue: v.name, room: r })));
+---
+
+<PrintSheet title={`${t(lang, 'admin.reg.lx.print.doorSigns')} · ${eventTitle}`} lang={lang}>
+  <form method="get" class="print-toolbar">
+    <a href={`/admin/registration/${eventId}?tab=housing#logistics`}>{t(lang, 'admin.reg.backToEvent')}</a>
+    <label class="text-sm"><input type="checkbox" name="all" value="1" checked={all} /> {t(lang, 'admin.reg.lx.print.includeEmpty')}</label>
+    <button type="submit">{t(lang, 'admin.reg.filter')}</button>
+    <button type="button" class="print-primary" data-print>{t(lang, 'admin.reg.print')}</button>
+    <span class="text-sm text-ink-muted">{t(lang, 'admin.reg.lx.print.signs', { n: signs.length })}</span>
+  </form>
+  <main class="lx-signs" data-testid="door-signs">
+    {signs.length === 0 && <p class="p-6 text-ink-muted no-print">{t(lang, 'admin.reg.lx.print.noSigns')}</p>}
+    {signs.map(({ venue, room }) => (
+      <article class="lx-sign" data-sign={room.id}>
+        <p class="lx-sign-venue">{venue}</p>
+        <p class="lx-sign-room">{room.label}</p>
+        <ul class="lx-sign-names">{room.occupants.map((id) => <li>{names.get(id) ?? ''}</li>)}</ul>
+        <p class="lx-sign-event">{eventTitle}</p>
+      </article>
+    ))}
+  </main>
+  <script is:inline>
+    document.querySelector('[data-print]')?.addEventListener('click', function () { window.print(); });
+  </script>
+</PrintSheet>
+
+<style is:global>
+  .lx-signs { display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr)); gap: 1rem; padding: 1rem; }
+  .lx-sign { display: flex; flex-direction: column; min-height: 22rem; padding: 1.5rem; border: 2px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-surface-raised); text-align: center; break-inside: avoid; }
+  .lx-sign-venue { font-size: 1rem; font-weight: 600; color: var(--color-ink-muted); text-transform: uppercase; letter-spacing: .06em; }
+  .lx-sign-room { margin: .5rem 0 1rem; font-family: var(--font-display); font-size: 4rem; font-weight: 800; line-height: 1; overflow-wrap: anywhere; }
+  .lx-sign-names { flex: 1; display: grid; align-content: start; gap: .35rem; font-size: 1.5rem; font-weight: 600; }
+  .lx-sign-event { margin-top: 1rem; font-size: .875rem; color: var(--color-ink-muted); }
+  @media print {
+    .lx-signs { display: block; padding: 0; }
+    .lx-sign { min-height: calc(100vh - 2mm); margin: 0; border: none; background: transparent; break-after: page; justify-content: flex-start; padding-top: 20mm; }
+    .lx-sign:last-child { break-after: auto; }
+    .lx-sign-room { font-size: 7rem; }
+    .lx-sign-names { font-size: 2.25rem; }
+  }
+</style>

@@ -1,0 +1,49 @@
+---
+// Printable small-group list for one event (event logistics, groups): each group with its leader and members
+// (names only). Gated like the badges ('view' on this event) plus the module and the event's groups switch.
+import PrintSheet from '../../../../layouts/PrintSheet.astro';
+import { logisticsPrintGate } from '../../../../lib/regLogisticsPrint';
+import { listGroups } from '../../../../lib/regGroups';
+import { t } from '../../../../lib/i18n';
+
+const gate = await logisticsPrintGate(Astro.locals, Astro.params.id, 'groups');
+if (gate instanceof Response) return gate;
+const { eventId, lang, eventTitle, names } = gate;
+const groups = await listGroups(Astro.locals.db, eventId);
+const total = groups.reduce((n, g) => n + g.members.length, 0);
+---
+
+<PrintSheet title={`${t(lang, 'admin.reg.lx.print.groupList')} · ${eventTitle}`} lang={lang}>
+  <div class="print-toolbar">
+    <a href={`/admin/registration/${eventId}?tab=groups#logistics`}>{t(lang, 'admin.reg.backToEvent')}</a>
+    <button type="button" class="print-primary" data-print>{t(lang, 'admin.reg.print')}</button>
+  </div>
+  <main class="sheet" data-testid="group-list">
+    <h1 class="sheet-title">{eventTitle}</h1>
+    <p class="sheet-meta">{t(lang, 'admin.reg.lx.print.groupList')} · {t(lang, 'admin.reg.lx.print.peopleGrouped', { n: total })}</p>
+    <div class="lx-print-grid">
+      {groups.map((g) => (
+        <section class="lx-print-block" data-group={g.id}>
+          <h2 class="lx-print-h2">{g.name} <span class="lx-print-note">{g.members.length}{g.capacity !== null ? ` / ${g.capacity}` : ''}</span></h2>
+          {g.leaderAttendeeId !== null && names.has(g.leaderAttendeeId) && <p class="lx-print-leader">{t(lang, 'admin.reg.lx.groupLeader')}: {names.get(g.leaderAttendeeId)}</p>}
+          <ol class="lx-print-names">{g.members.map((id) => <li>{names.get(id) ?? ''}</li>)}</ol>
+        </section>
+      ))}
+    </div>
+  </main>
+  <script is:inline>
+    document.querySelector('[data-print]')?.addEventListener('click', function () { window.print(); });
+  </script>
+</PrintSheet>
+
+<style is:global>
+  .sheet { max-width: 60rem; margin: 0 auto; padding: 1.5rem; }
+  .sheet-title { font-family: var(--font-display); font-size: 1.5rem; font-weight: 700; }
+  .sheet-meta { margin: .25rem 0 1rem; color: var(--color-ink-muted); font-size: .875rem; }
+  .lx-print-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 1rem; }
+  .lx-print-block { padding: .75rem; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); break-inside: avoid; }
+  .lx-print-h2 { font-family: var(--font-display); font-size: 1.125rem; font-weight: 700; display: flex; justify-content: space-between; gap: .5rem; }
+  .lx-print-note { color: var(--color-ink-muted); font-size: .75rem; font-weight: 400; font-variant-numeric: tabular-nums; }
+  .lx-print-leader { margin-top: .25rem; font-size: .8125rem; font-weight: 600; }
+  .lx-print-names { margin-top: .35rem; padding-left: 1.25rem; list-style: decimal; font-size: .9375rem; }
+</style>
