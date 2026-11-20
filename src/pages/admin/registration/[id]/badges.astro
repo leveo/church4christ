@@ -1,0 +1,95 @@
+---
+// Printable badges for one event: one per active person (name auto-fitted, event title, ticket type). Filters by
+// status (default: confirmed) and ticket type through the query string. The route class is `regEventStaff`: the
+// middleware checks the event role ('view') first and this page checks it again before any read.
+import PrintSheet from '../../../../layouts/PrintSheet.astro';
+import { requireRegRole } from '../../../../lib/regAccess';
+import { getEventAdmin, listTicketTypes } from '../../../../lib/regDb';
+import { listAllRosterPeople, parseRosterState, rosterOptions } from '../../../../lib/regAdminPage';
+import { t } from '../../../../lib/i18n';
+import type { Locale } from '../../../../lib/locales';
+
+const user = Astro.locals.user;
+const rawId = Astro.params.id ?? '';
+if (!user || !/^\d+$/.test(rawId)) return new Response(null, { status: user ? 404 : 403 });
+const eventId = Number(rawId);
+const db = Astro.locals.db;
+const role = await requireRegRole(db, user, eventId, 'view');
+if (!role.ok) return new Response(null, { status: role.status });
+const event = await getEventAdmin(db, eventId);
+if (!event || event.is_template === 1) return new Response(null, { status: 404 });
+
+const lang: Locale = user.lang ?? 'en';
+const defaultLocale = Astro.locals.locales.default;
+const eventTitle = event.titles[lang] || event.titles[defaultLocale] || event.title_en || `#${eventId}`;
+const state = parseRosterState(Astro.url.searchParams);
+if (state.status.length === 0) state.status = ['confirmed'];
+const rows = await listAllRosterPeople(db, eventId, { ...rosterOptions(state, lang), sort: 'name' });
+const types = await listTicketTypes(db, lang, eventId);
+const base = `/admin/registration/${eventId}`;
+const statusOptions = ['confirmed', 'waitlist', 'review', 'pending'] as const;
+---
+
+<PrintSheet title={`${t(lang, 'admin.reg.badges.title')} · ${eventTitle}`} lang={lang}>
+  <form method="get" class="print-toolbar" data-testid="badge-filters">
+    <a href={base}>{t(lang, 'admin.reg.backToEvent')}</a>
+    <label class="text-sm">{t(lang, 'admin.reg.status')}
+      <select name="status">
+        {statusOptions.map((s) => <option value={s} selected={state.status.join(',') === s}>{t(lang, `admin.reg.status.${s}`)}</option>)}
+        <option value="confirmed,waitlist,review,pending" selected={state.status.length > 1}>{t(lang, 'admin.reg.badges.allActive')}</option>
+      </select>
+    </label>
+    {types.length > 0 && (
+      <label class="text-sm">{t(lang, 'admin.reg.ticketType')}
+        <select name="type">
+          <option value="">{t(lang, 'admin.reg.allTypes')}</option>
+          {types.map((ty) => <option value={ty.id} selected={state.type === ty.id}>{ty.label}</option>)}
+        </select>
+      </label>
+    )}
+    <button type="submit">{t(lang, 'admin.reg.filter')}</button>
+    <button type="button" class="print-primary" data-print>{t(lang, 'admin.reg.print')}</button>
+    <span class="text-sm text-ink-muted">{rows.length} {t(lang, 'admin.reg.badges.count')}</span>
+  </form>
+
+  <main class="badge-sheet" data-testid="badge-sheet">
+    {rows.length === 0 && <p class="p-6 text-ink-muted no-print">{t(lang, 'admin.reg.badges.empty')}</p>}
+    {rows.map((row) => (
+      <article class="badge" data-badge>
+        <p class="badge-event">{eventTitle}</p>
+        <p class="badge-name" data-fit>{row.people[0]?.name ?? row.registration.name}</p>
+        <p class="badge-type">{row.people[0]?.ticketLabel ?? ''}</p>
+      </article>
+    ))}
+  </main>
+  <script is:inline>
+    document.querySelector('[data-print]')?.addEventListener('click', function () { window.print(); });
+    // Auto-fit: shrink each name until it fits on its badge (one line, or two for long names).
+    function fit() {
+      document.querySelectorAll('[data-fit]').forEach(function (el) {
+        el.style.fontSize = '';
+        var size = parseFloat(getComputedStyle(el).fontSize);
+        while ((el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight + 1) && size > 12) {
+          size -= 1;
+          el.style.fontSize = size + 'px';
+        }
+      });
+    }
+    fit();
+    window.addEventListener('beforeprint', fit);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+  </script>
+</PrintSheet>
+
+<style is:global>
+  .badge-sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(86mm, 1fr)); gap: 4mm; padding: 4mm; }
+  .badge { display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; height: 54mm; padding: 4mm; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-surface-raised); break-inside: avoid; overflow: hidden; }
+  .badge-event { width: 100%; font-size: .8125rem; font-weight: 600; color: var(--color-ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge-name { width: 100%; height: 22mm; display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-size: 2.25rem; font-weight: 700; line-height: 1.1; overflow: hidden; overflow-wrap: anywhere; }
+  .badge-type { min-height: 1.5rem; padding: .1rem .75rem; border-radius: var(--radius-full); background: var(--color-primary-soft); color: var(--color-on-primary-soft); font-size: .875rem; font-weight: 600; }
+  .badge-type:empty { visibility: hidden; }
+  @media print {
+    .badge-sheet { grid-template-columns: repeat(2, 1fr); padding: 0; gap: 4mm; }
+    .badge { background: transparent; border-color: var(--color-ink); }
+  }
+</style>

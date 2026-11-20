@@ -1686,6 +1686,12 @@ export async function getEventAdmin(db: AppDb, id: number, now: string = toUtcSq
   return row ? (await withEventTexts(db, [row], now))[0] : null;
 }
 
+/** True when the event has an active ticket type with a price (approval events must be free). */
+export async function eventHasPricedTicket(db: AppDb, eventId: number): Promise<boolean> {
+  const row = await db.prepare(`SELECT 1 AS present FROM reg_ticket_types WHERE event_id = ?1 AND active = 1 AND price_cents > 0`).bind(eventId).first();
+  return row !== null;
+}
+
 /** A confirmation prefix is 1-6 characters of A-Z / 0-9 (matches the column CHECK). */
 export const CONFIRMATION_PREFIX_RE = /^[A-Z0-9]{1,6}$/;
 

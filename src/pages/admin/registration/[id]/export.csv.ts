@@ -1,32 +1,29 @@
 import type { APIRoute } from 'astro';
-import { getEventAdmin, registrationsCsv } from '../../../../lib/regDb';
+import { requireRegRole } from '../../../../lib/regAccess';
+import { registrationsCsv } from '../../../../lib/regDb';
+import { CSV_BOM } from '../../../../lib/regExport';
 import type { Locale } from '../../../../lib/locales';
-import { hasAreaAccess } from '../../../../lib/adminAreas';
 
 export const prerender = false;
 
-// Roster CSV export for one event (console class — routePolicy gates
-// /admin/registration; the module gate 404s it when registration is off). Streams
-// registrationsCsv (RFC4180, one column per question) as a downloadable file named
-// by event id. Localized to the signed-in admin's language, en fallback.
+// Roster CSV export for one event (one row per registration). The route class is `regEventStaff` (a per-event
+// viewer or registrar may export their own event; the middleware checks the role before this runs) and this
+// endpoint checks it again, BEFORE any read, so a registrar of another event, a desk-only volunteer or a
+// signed-in member without a role never reaches the data. Streams registrationsCsv (RFC4180, one column per
+// question) behind a UTF-8 byte-order mark, as a downloadable file named by event id, in the signed-in
+// person's language (en fallback). The columns are unchanged; only the BOM is new.
 export const GET: APIRoute = async ({ params, locals }) => {
-  // The route class is 'console' (admits bare team leaders), but this roster is
-  // names/emails/answers (PII), so re-tighten to editor∪admin exactly like the two
-  // registration pages do — BEFORE any DB read. Without this a leader 403'd off the
-  // roster page could still download the CSV.
   const user = locals.user;
-  if (!user || !(user.isEditor || hasAreaAccess(user, 'registration'))) return new Response(null, { status: 403 });
-
-  const db = locals.db;
   const rawId = params.id ?? '';
-  if (!/^\d+$/.test(rawId)) return new Response(null, { status: 404 });
+  if (!user || !/^\d+$/.test(rawId)) return new Response(null, { status: user ? 404 : 403 });
   const eventId = Number(rawId);
-  if (!(await getEventAdmin(db, eventId))) return new Response(null, { status: 404 });
+  const role = await requireRegRole(locals.db, user, eventId, 'view');
+  if (!role.ok) return new Response(null, { status: role.status });
 
   const lang: Locale = user.lang ?? 'en';
-  const csv = await registrationsCsv(db, lang, eventId);
+  const csv = await registrationsCsv(locals.db, lang, eventId);
 
-  return new Response(csv, {
+  return new Response(CSV_BOM + csv, {
     headers: {
       'content-type': 'text/csv; charset=utf-8',
       'content-disposition': `attachment; filename="church4christ-registrations-${eventId}.csv"`,

@@ -34,6 +34,8 @@ export interface RegEventInput {
   poster?: string | null;
   max_party_size?: number;
   allow_self_edit?: number;
+  requires_approval?: number;
+  reminder_days?: number | null;
 }
 
 export type RegEventFormResult =
@@ -115,6 +117,21 @@ export function parseRegEventForm(fd: FormData): RegEventFormResult {
     allow_self_edit = ['', '0', 'off', 'false', 'no'].includes(last) ? 0 : 1;
   }
 
+  // Approval: same hidden "0" + checkbox pattern. Absent = leave the stored value alone. (A price is refused by the writer.)
+  let requires_approval: number | undefined;
+  if (fd.has('requires_approval')) {
+    const last = String(fd.getAll('requires_approval').at(-1) ?? '').trim().toLowerCase();
+    requires_approval = ['', '0', 'off', 'false', 'no'].includes(last) ? 0 : 1;
+  }
+  // Reminder: 1-30 days before the start; blank clears it; absent leaves it alone.
+  let reminder_days: number | null | undefined;
+  if (fd.has('reminder_days')) {
+    const raw = get('reminder_days');
+    if (raw === '') reminder_days = null;
+    else if (!/^\d{1,2}$/.test(raw) || Number(raw) < 1 || Number(raw) > 30) errors.reminder_days = 'errors.integerInvalid';
+    else reminder_days = Number(raw);
+  }
+
   let confirmation_prefix: string | null | undefined;
   if (fd.has('confirmation_prefix')) {
     const raw = get('confirmation_prefix').toUpperCase();
@@ -158,6 +175,8 @@ export function parseRegEventForm(fd: FormData): RegEventFormResult {
       ...(poster !== undefined ? { poster } : {}),
       ...(max_party_size !== undefined ? { max_party_size } : {}),
       ...(allow_self_edit !== undefined ? { allow_self_edit } : {}),
+      ...(requires_approval !== undefined ? { requires_approval } : {}),
+      ...(reminder_days !== undefined ? { reminder_days } : {}),
     },
   };
 }

@@ -1,0 +1,45 @@
+---
+// A bare shell for the registration print views (badges, sign-in sheet): theme + mode + fonts, no admin
+// navigation, and print rules that hide the on-screen toolbar. The pages pass their own title and content.
+import { localeMeta, type Locale } from '../lib/locales';
+import '@fontsource-variable/fraunces';
+import '@fontsource-variable/inter';
+import '@fontsource-variable/bricolage-grotesque';
+import '@fontsource-variable/nunito';
+import '@fontsource-variable/space-grotesk';
+import '../styles/base.css';
+import { getActiveTheme, THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
+
+interface Props { title: string; lang: Locale }
+const { title, lang } = Astro.props;
+const theme = (Astro.locals.theme ?? THEME_DEFAULT) as Theme;
+let defaultMode: 'light' | 'dark' = THEME_DEFAULT_MODE[theme] ?? 'light';
+try {
+  defaultMode = (await getActiveTheme(Astro.locals.db)).defaultMode;
+} catch {
+  /* keep the theme's intrinsic default mode */
+}
+---
+<!doctype html>
+<html lang={localeMeta(lang).bcp47} data-theme={theme} data-mode="light" data-mode-default={defaultMode}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>{title}</title>
+  </head>
+  <body class="bg-surface text-ink">
+    <slot />
+  </body>
+</html>
+<style is:global>
+  @page { margin: 12mm; }
+  .print-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; padding: .75rem 1rem; border-bottom: 1px solid var(--color-border); background: var(--color-surface-raised); }
+  .print-toolbar label { display: inline-flex; align-items: center; gap: .5rem; }
+  .print-toolbar a, .print-toolbar button, .print-toolbar select { min-height: 2.5rem; padding: .35rem .85rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-ink); font-size: .875rem; font-weight: 600; }
+  .print-toolbar .print-primary { background: var(--color-primary); color: var(--color-on-primary); border-color: var(--color-primary); }
+  @media print {
+    .print-toolbar, .no-print { display: none !important; }
+    body { background: transparent; color: var(--color-ink); }
+  }
+</style>

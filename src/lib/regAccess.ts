@@ -12,6 +12,7 @@
 // route class (regEventStaff, session only) run before any of this; see routePolicy.ts.
 import type { AppDb } from './appDb';
 import { hasAreaAccess } from './adminAreas';
+import { likeSql, likeTerm } from './regAdminCore';
 import type { SessionUser } from './types';
 
 export type RegRole = 'viewer' | 'desk' | 'registrar';
@@ -140,5 +141,20 @@ export async function listEventRolesForPerson(db: AppDb, personId: number): Prom
     .prepare(`SELECT event_id, role FROM reg_event_access WHERE person_id = ?1 ORDER BY event_id`)
     .bind(personId)
     .all<{ event_id: number; role: RegRole }>();
+  return results;
+}
+
+/** Active members matching a name or email fragment (for the access panel's grant form), at most 20. */
+export async function searchPeopleForAccess(db: AppDb, term: string): Promise<Array<{ id: number; display_name: string }>> {
+  const needle = term.trim().slice(0, 100);
+  if (needle === '') return [];
+  const { results } = await db
+    .prepare(
+      `SELECT id, display_name FROM people
+       WHERE active = 1 AND deleted_at IS NULL AND (${likeSql('display_name', '?1')} OR ${likeSql(`COALESCE(email, '')`, '?1')})
+       ORDER BY display_name, id LIMIT 20`,
+    )
+    .bind(likeTerm(needle))
+    .all<{ id: number; display_name: string }>();
   return results;
 }
