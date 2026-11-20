@@ -36,7 +36,8 @@ When someone cancels, their bed, seat, and group place are freed at once.
 ### Turn it on
 
 1. A super admin opens **Settings → Modules**, ticks **Event Logistics**, and saves. Registration
-   must be on too. Event logistics is off on new and upgraded sites until someone turns it on.
+   must be on too. Event logistics is off by default: no setup preset includes it, and upgraded
+   sites keep it off until someone turns it on.
 2. Open **Admin → Registration** and edit an event that already exists. The editor has a section
    called **Rooms, tables and groups**. (It does not appear while you are creating a new event.
    Save the event first, then edit it.)

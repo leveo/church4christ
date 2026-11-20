@@ -66,8 +66,9 @@ For the `learning` provider/privacy boundary and screenshots, see **[Learning](l
 the [deployment runbook](../deploy.md#learning-module-and-shared-credential-key-ring).
 
 The `event-logistics` module adds rooms, tables, and small groups to Registration events. It
-depends on `registration`, works on either database, and is not part of any preset: it is off
-on new and upgraded sites until an admin ticks it. It works only while Registration is on too.
+depends on `registration`, works on either database, and is off by default: no preset includes
+it, and upgraded sites keep it off until an admin ticks it. It works only while Registration is
+on too.
 Each event then turns on the parts it needs. See **[Event logistics](event-logistics.md)**.
 
 **Giving needs the Supabase database, and so does paid Registration.** Giving runs
