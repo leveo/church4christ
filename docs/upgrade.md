@@ -478,12 +478,16 @@ binding or secret, and no behavior changes** for existing content.
 - **Recovery.** There is no down migration. Restore the pre-upgrade backup as in section 5 if you
   must go back.
 
-## Upgrading 1.6.0 to the next release (Unreleased)
+## Upgrading 1.6.0 to 1.7.0
 
-This release moves Registration onto Cloudflare D1 for free events and adds event stages, a
-waitlist, duplicate event, confirmation numbers, and a poster. It adds one forward migration
-on each database. Back up first (section 2
-above), apply the migration, then deploy.
+Version 1.7.0 is about event registration. Free events now run on Cloudflare D1, people can
+register as a household or group, staff get an event builder and a back office with a phone
+check-in desk, and an optional Event Logistics module handles rooms, tables and small groups.
+Apply the new forward migrations in order before deploying: on D1, `0050` through `0054`; on
+Supabase, `0042` through `0046`. Back up first (section 2 above). There is no new secret, binding
+or cron trigger; the only new dependency is `jsqr` for the check-in desk scanner. Event Logistics
+stays off after the upgrade until an administrator turns it on. The sections below give the
+details.
 
 ### Registration on D1
 

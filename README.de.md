@@ -41,7 +41,7 @@ Mitgliederportal und weitere Abläufe der Gemeindeverwaltung. Das Projekt will d
 Start- und laufenden Wartungskosten einer individuell angepassten Umsetzung senken und dabei
 den Code und die Bereitstellungskonfiguration für die Betreibenden zugänglich halten.
 
-Der **aktuelle Quellcode-Release ist 1.6**. Church4Christ ist ein quelloffenes Fundament,
+Der **aktuelle Quellcode-Release ist 1.7**. Church4Christ ist ein quelloffenes Fundament,
 kein schlüsselfertiger Managed Service. Die lokale Evaluation ist kostenlos, und manche Bereitstellungen
 passen in die kostenlosen Kontingente der Anbieter, aber Hosting, E-Mail, Datenbanken, Domains, Backups und weitere Dienste
 im Produktivbetrieb können je nach Konfiguration und Nutzung Geld kosten. Lies
@@ -254,7 +254,8 @@ Jede Funktion hat ihre eigene leicht verständliche Anleitung. Fang mit einer da
 | [![](docs/images/learning/genesis-1-en.png)](docs/features/learning.md) | **[Learning](docs/features/learning.md)** | Führe Sonntagsschule und Jüngerschaft zwischen den Treffen mit zweisprachigen Videos, Dateien, Aufgaben, Quizzen und anbietersynchronisiertem Status fort. |
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Seiteneditor](docs/features/page-builder.md)** | Stelle eigene Seiten per Drag-and-drop zusammen — mehrsprachig, immer im Theme, und veröffentlichte Seiten laden ganz ohne JavaScript. Optional; das Abschalten macht bereits gebaute Seiten nie kaputt. |
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Spenden](docs/features/giving.md)** | Umgesetzt: Online-Spenden über Stripe (standardmäßig Testmodus, live nach der Go-live-Checkliste), ein Offline-Buch für Schecks und Bargeld und jährliche Spendenbescheinigungen. |
-| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Anmeldung](docs/features/registration.md)** | Umgesetzt: kostenlose Veranstaltungsanmeldung, eigene Fragen und Teilnehmerlisten-Export, dazu kostenpflichtiger Stripe-Checkout im selben Stripe-Modus wie Spenden (prüfe mit einer kleinen Live-Anmeldung, bevor du dich darauf verlässt). |
+| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Anmeldung](docs/features/registration.md)** | Umgesetzt: kostenlose Veranstaltungsanmeldung auf D1 oder Supabase, eigene Fragen, Warteliste, Veranstaltungsphasen und Teilnehmerlisten-Export, dazu kostenpflichtiger Stripe-Checkout auf Supabase im selben Stripe-Modus wie Spenden (prüfe mit einer kleinen Live-Anmeldung, bevor du dich darauf verlässt). |
+|  | **[Veranstaltungslogistik](docs/features/event-logistics.md)** | Optionale Ergänzung zur Anmeldung: Teile Personen Zimmern zu, setze sie mit einer Vorschau der Auto-Platzierung an Tische, ordne sie Kleingruppen zu und drucke Zimmerlisten, Türschilder und Tischkarten. |
 | [![](docs/images/portal/member-opportunities.png)](docs/features/member-portal.md) | **[Mitgliederportal](docs/features/member-portal.md)** | Ein angemeldeter Hub für aktuelle Beteiligung und offene Möglichkeiten, dazu Haushaltsprofile, Veranstaltungen, Dienste, Kalender, Spenden und Gebet im passenden Rahmen. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Zwölf Sprachen](docs/features/i18n.md)** | Wähle pro Website aus 12 Oberflächensprachen, mit englischem Fallback und Umwandlung von vereinfachtem in traditionelles Chinesisch per Klick. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[E-Mail & Automatisierung](docs/features/email-automation.md)** | Anmelde-Links, Erinnerungen und Zusammenfassungen, mit lokalem Logging und einer Produktivkonfiguration, die auch kostenpflichtig sein kann. |
@@ -263,7 +264,7 @@ Jede Funktion hat ihre eigene leicht verständliche Anleitung. Fang mit einer da
 **Wähle deine Module.** Die meisten optionalen Fachfunktionen sind **Module**, die du
 in den Einstellungen in einem Bereich abschalten kannst — Gemeindebriefe, Predigten, die Gebetswand, Dienstplanung für Ehrenamtliche
 und mehr. Neue Installationen schreiben jede Moduleinstellung ausdrücklich aus der Auswahl bei der Einrichtung;
-die Demo „Full Church“ wählt ihre 21 aus (die Gottesdienstplanung wird separat eingeschaltet). Nur bei älteren Installationen behalten fehlende Modulzeilen
+die Demo „Full Church“ wählt ihre 21 aus (die Gottesdienstplanung und die Veranstaltungslogistik werden separat eingeschaltet). Nur bei älteren Installationen behalten fehlende Modulzeilen
 das frühere Standardverhalten „an“. Eine Gemeinde, die nur Gottesdienstzeiten und Predigten will, kann
 den Rest mit einem Klick ausblenden: Die Seiten, Links und E-Mails des Moduls verschwinden gemeinsam, und nichts
 wird gelöscht. Siehe [**`docs/features/modules.md`**](docs/features/modules.md).
@@ -289,9 +290,10 @@ wird gelöscht. Siehe [**`docs/features/modules.md`**](docs/features/modules.md)
 | `page-builder` | Page Builder | 页面编辑器 | Either |
 | `portal` | Member Portal | 会友平台 | Either |
 | `giving` | Giving | 奉献 | Supabase |
-| `registration` | Registration | 活动报名 | Supabase |
+| `registration` | Registration | 活动报名 | Either |
 | `learning` | Learning | 学习 | Either |
 | `planning` | Service Planning | 服事流程 | Either |
+| `event-logistics` | Event Logistics | 活动后勤 | Either |
 
 ### Gemeinschaftsverwaltung und Abläufe
 
@@ -345,7 +347,7 @@ auf den gesamten Bereich `/admin` beschränkt bleiben.
 Das Portal läuft sowohl auf dem Standard-Backend D1 als auch auf dem optionalen Backend **Supabase (Postgres)**.
 Haushalte, Gruppen, geschützte Gruppendateien und die Moderation von Gemeinde-, Gruppen- und privaten Gebeten
 funktionieren auf D1. Gebete im Veranstaltungsbereich, Veranstaltungsadministratoren und „Meine Anmeldungen“
-brauchen die Anmeldung, die nur mit Supabase läuft. Mehr dazu in
+brauchen die Anmeldung, die nach dem Einschalten für kostenlose Veranstaltungen auf D1 läuft. Mehr dazu in
 [**`docs/features/member-portal.md`**](docs/features/member-portal.md).
 
 ---
@@ -380,7 +382,7 @@ Leitspruch, Adresse, Zeitzone, Primär- und Sekundärfarbe, optionales PNG/JPEG/
 (bis zu 2 MiB), Sprache, die erste Administration und die Entscheidung zu Demo-Inhalten. Hake nur die
 Funktionen an, die du brauchst.
 Die empfohlene Auswahl nutzt D1 als Datenbank; die Anwendung läuft trotzdem auf
-Cloudflare Workers und speichert Medien in R2. **Spenden und Anmeldung**
+Cloudflare Workers und speichert Medien in R2. **Spenden und kostenpflichtige Anmeldung**
 sind erweiterte Optionen, die den ausdrücklichen Wechsel zu Supabase-kompatiblem PostgreSQL erfordern.
 
 Beim Speichern entstehen `.church/preferences.json` und ein hochgeladenes Logo unter `.church/`, was
@@ -428,8 +430,8 @@ vorhandene E-Mail-Adresse und stellen keinen entzogenen Zugang wieder her. Melde
 
 Das reine Terminal-Kommando `npm run setup` bleibt verfügbar. Die Einrichtung bietet **Website** (8 fokussierte
 Veröffentlichungsmodule), **Website + Community** (18 Module; das Mitgliederportal lässt sich auf D1 ergänzen) und
-**Full Church** (21 Module; die Gottesdienstplanung wird separat eingeschaltet). Spenden und
-Anmeldung wählen automatisch Supabase; D1-kompatible Auswahlen wählen D1, sofern du das Backend nicht
+**Full Church** (21 Module; die Gottesdienstplanung wird separat eingeschaltet). Spenden
+wählt automatisch Supabase (die kostenlose Anmeldung läuft auf D1); D1-kompatible Auswahlen wählen D1, sofern du das Backend nicht
 ausdrücklich überschreibst. Welche Konten du brauchst, hängt vom Modus Lokal oder Deploy ab,
 wie unten beschrieben. Für Automatisierung übergib alle Antworten mit `--yes`; füge `--json` für ein
 maschinenlesbares Ergebnis hinzu. Für einen menschenlesbaren nicht interaktiven Lauf nutze dieselben vollständigen
@@ -454,7 +456,7 @@ Preisseiten bestätigt werden.
 | Profil | Enthaltener Umfang | Hinweise zu Kosten und Bereitschaft |
 |---|---|---|
 | **Lokale Evaluation** | Website- oder Community-Module mit lokalem D1; alle Module mit kompatiblem lokalem Postgres | Für die lokale D1-Evaluation fallen keine Gebühren für gehostete Dienste an. Computer, Entwicklungszeit und optionale externe Dienste stellst du aber selbst. |
-| **D1 Website/Community** | Cloudflare Worker, D1 und R2 für bis zu 20 D1-kompatible Module | Eine bescheidene Bereitstellung kann in die kostenlosen Kontingente von Cloudflare passen. Traffic, Speicher, Operationen über die Kontingente hinaus, eine Domain und andere Dienste können Geld kosten; siehe [Workers-Preise](https://developers.cloudflare.com/workers/platform/pricing/). Produktiv-E-Mail kommt separat dazu. |
+| **D1 Website/Community** | Cloudflare Worker, D1 und R2 für bis zu 22 D1-kompatible Module | Eine bescheidene Bereitstellung kann in die kostenlosen Kontingente von Cloudflare passen. Traffic, Speicher, Operationen über die Kontingente hinaus, eine Domain und andere Dienste können Geld kosten; siehe [Workers-Preise](https://developers.cloudflare.com/workers/platform/pricing/). Produktiv-E-Mail kommt separat dazu. |
 | **Produktiv-E-Mail** | Transaktionale Anmelde-Links, Erinnerungen, Anfragen und Zusammenfassungen an beliebige Empfänger | Das Repository unterstützt eine Cloudflare-E-Mail-Konfiguration, die auch kostenpflichtig sein kann. Der Versand an beliebige Empfänger erfordert Workers Paid, derzeit mindestens **5 $/Monat** inklusive **3.000 E-Mails**, danach **0,35 $ pro 1.000 E-Mails**. Diese Beträge können sich ändern; siehe [Preise von Cloudflare Email Service](https://developers.cloudflare.com/email-service/platform/pricing/). |
 | **Supabase/alle Module** | Cloudflare-Bereitstellung plus Supabase/Postgres für die 21 Module von Full Church, einschließlich Mitgliederportal, Spenden und Anmeldung | Die Cloudflare-Kosten fallen weiterhin an, und der gewählte [Supabase-Tarif](https://supabase.com/pricing) kann Abo- oder Nutzungsgebühren hinzufügen. Stand August 2026 hat Supabase Free keine automatischen täglichen Backups, und wenig genutzte Free-Projekte können je nach Aktivität über einen Zeitraum von sieben Tagen [automatisch pausiert](https://supabase.com/docs/guides/platform/free-project-pausing) werden. Erstelle für den Produktivbetrieb regelmäßig externe Datenbank-Dumps und übe die Wiederherstellung, oder wähle einen kostenpflichtigen Tarif, dessen [Backup-Optionen](https://supabase.com/docs/guides/platform/backups) deine Anforderungen an die Betriebskontinuität erfüllen. Preise und Servicerichtlinien können sich ändern. Stripe startet im Testmodus; Live-Zahlungen sind eine ausdrückliche Entscheidung nach der Go-live-Checkliste in [`docs/supabase-setup.md`](docs/supabase-setup.md). |
 
@@ -475,7 +477,7 @@ Anleitung.
 
 Starte mit `npm run setup`, wähle **Deploy** und beantworte die Fragen zu Funktionen und Gemeinde.
 Der Assistent legt die benötigten Ressourcen an oder importiert sie, schreibt die erzeugte Konfiguration, wendet
-Migrationen an, hält alle 22 Moduleinstellungen fest und richtet die erste Administration ein. Danach übergibt er
+Migrationen an, hält alle 23 Moduleinstellungen fest und richtet die erste Administration ein. Danach übergibt er
 an `npm run deploy`. Führe `npm run doctor` für den Bereitschaftsbericht im Schema v2 aus und nutze
 die immer verfügbare Checkliste unter `/admin/onboarding` mit denselben stabilen Prüfidentitäten.
 Spenden, Anmeldung, Gruppen, Teams, Neue, Importe und die optionale schreibgeschützte Planning-Center-
@@ -494,8 +496,8 @@ proben im Staging und lesen den [Changelog unter `Unreleased`](CHANGELOG.md), be
 Vorwärtsmigrationen anwenden. Maintainer, die einen Release vorbereiten, folgen
 dem [Release-Prozess](docs/release-process.md).
 
-**Deine Datenbank wählen.** Die 20 D1-kompatiblen Module schließen
-**Spenden** und **Anmeldung** aus, die Postgres brauchen. Welche Konten du brauchst, folgt dem
+**Deine Datenbank wählen.** Die 22 D1-kompatiblen Module schließen
+**Spenden** aus, das Postgres braucht, und ebenso die **kostenpflichtige Anmeldung**. Welche Konten du brauchst, folgt dem
 Modus: Lokales D1 braucht kein externes Konto; bereitgestelltes D1 braucht ein Cloudflare-Konto; lokales
 Supabase braucht ein Supabase-Konto oder eine kompatible lokale Postgres-Datenbank; bereitgestelltes Supabase
 braucht Cloudflare und Supabase. Eine automatisierte Inhaltsmigration zwischen D1 und Supabase gibt es noch nicht,
@@ -504,8 +506,8 @@ wähle also die Produktivdatenbank, bevor du echte Inhalte eingibst. Siehe
 
 **Stripe startet im Testmodus; der Live-Modus ist eine ausdrückliche Entscheidung.** Stripe hostet Zahlungsseiten,
 Belege, das Billing Portal, Rückerstattungen und Streitfälle; diese Anwendung speichert nur Beträge,
-Spendenzwecke, Daten, Status und Stripe-IDs. Spenden und Anmeldung laufen nur mit Supabase; D1 unterstützt
-diese Module nicht. Wenn die Einrichtung eines der beiden Module abfragt, importiere einen `sk_test_…`-Schlüssel und das
+Spendenzwecke, Daten, Status und Stripe-IDs. Spenden und die kostenpflichtige Anmeldung laufen nur mit Supabase; D1 unterstützt
+sie nicht. Wenn die Einrichtung eines der beiden Module abfragt, importiere einen `sk_test_…`-Schlüssel und das
 `whsec_…`-Signing-Secret über die einmaligen Umgebungsvariablen `CHURCH_SETUP_STRIPE_SECRET_KEY` und
 `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET`; die Einrichtung speichert die Laufzeit-Secrets
 und schreibt `STRIPE_MODE=test`. Für echte Spenden folge der Go-live-Checkliste im

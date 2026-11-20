@@ -1,11 +1,12 @@
-# v1.6.0 source release process
+# v1.7.0 source release process
 
-Church4Christ `v1.6.0` is a maintainer-created source checkpoint for operators who need a
-reviewed revision with twelve interface languages and per-site language settings. Version `v1.0.0` remains the historical
+Church4Christ `v1.7.0` is a maintainer-created source checkpoint for operators who need a
+reviewed revision with the upgraded event registration (free events on D1, household sign-up,
+the event builder, the back office and check-in desk, and optional event logistics). Version `v1.0.0` remains the historical
 initial open-source checkpoint. Neither version makes the private package publishable, promises
 managed upgrades, or removes the need to test custom implementations.
 
-No release is created merely because `package.json` currently says `1.6.0`. The immutable
+No release is created merely because `package.json` currently says `1.7.0`. The immutable
 upgrade-rehearsal baseline for 1.0.0 is commit
 `b85ad362b9f879408797270929c52dab7ad39d1d`; a version becomes a release only when a maintainer
 completes the process below and deliberately creates an immutable tag and corresponding GitHub
@@ -43,18 +44,22 @@ Version 1.5.0 adds forward files `0039` and `0040` on both backends (D1: `0039_m
 `0040_service_planning.sql`; Supabase: `0039_giving_production.sql`, `0040_service_planning.sql`).
 Version 1.6.0 adds D1 forward files `0041` through `0049` (`0041_supported_locales.sql`, then the
 locale foreign-key rebuilds) and Supabase forward file `0041_supported_locales.sql`.
+Version 1.7.0 adds D1 forward files `0050` through `0054` (`0050_registration_d1.sql` through
+`0054_registration_logistics.sql`) and Supabase forward files `0042` through `0046`
+(`0042_registration_v2.sql` through `0046_registration_logistics.sql`).
 
 ## Prepare the release pull request
 
-1. Confirm that the release target is exactly `v1.6.0` and that the 1.5.0 → 1.6.0 upgrade
-   adds exactly D1 `0041`–`0049` and Supabase `0041` after `0040_service_planning.sql`.
+1. Confirm that the release target is exactly `v1.7.0` and that the 1.6.0 → 1.7.0 upgrade
+   adds exactly D1 `0050`–`0054` after `0049` and Supabase `0042`–`0046` after
+   `0041_supported_locales.sql`.
    Keep the historical 1.0.0 baseline rehearsal as an additional forward-upgrade check.
 2. Move the reviewed `Unreleased` entries into a dated version section and create a new empty
    `Unreleased` section. Link the upgrade notes for any change requiring operator action.
 3. Update the private package metadata without creating a tag:
 
    ```bash
-   npm version 1.6.0 --no-git-tag-version
+   npm version 1.7.0 --no-git-tag-version
    ```
 
    Review both `package.json` and `package-lock.json`. Keep `"private": true`; this repository
@@ -87,7 +92,7 @@ After the release-preparation pull request is merged and the exact `main` commit
 a maintainer must explicitly:
 
 1. verify that the commit contains the intended version and changelog section;
-2. create an annotated `v1.6.0` tag on that exact commit;
+2. create an annotated `v1.7.0` tag on that exact commit;
 3. push the tag without force;
 4. create the GitHub Release from the matching changelog text and link the upgrade runbook;
 5. verify the published tag and Release both resolve to the reviewed commit;
