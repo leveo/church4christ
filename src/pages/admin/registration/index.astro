@@ -14,7 +14,7 @@ import Admin from '../../../layouts/Admin.astro';
 import { env } from 'cloudflare:workers';
 import { t } from '../../../lib/i18n';
 import { applyEventAction, saveEventFromForm } from '../../../lib/regAdminActions';
-import { listEventsAdmin, type RegPhase } from '../../../lib/regDb';
+import { eventIdsWithActiveTickets, listEventsAdmin, listTemplatesAdmin, type RegPhase } from '../../../lib/regDb';
 import { utcToDatetimeLocal, toUtcSql } from '../../../lib/dates';
 import { formatCents } from '../../../lib/money';
 import { tin, lab, card, errorText, btn, badge, badgeActive, badgeInactive, badgeScheduled, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
@@ -56,10 +56,13 @@ if (Astro.request.method === 'POST') {
       // A lifecycle button or Duplicate. Duplicate lands on the new event's editor.
       const result = await applyEventAction(db, fd);
       if (result.ok) {
-        return Astro.redirect(
-          result.notice === 'duplicated' ? `/admin/registration?edit=${result.id}&duplicated=1` : '/admin/registration?updated=1',
-          303,
-        );
+        const target: Record<string, string> = {
+          duplicated: `/admin/registration?edit=${result.id}&duplicated=1`,
+          template_saved: '/admin/registration?template_saved=1#reg-templates',
+          template_created: `/admin/registration?edit=${result.id}&from_template=1`,
+          template_deleted: '/admin/registration?template_deleted=1#reg-templates',
+        };
+        return Astro.redirect(target[result.notice] ?? '/admin/registration?updated=1', 303);
       }
       return Astro.redirect(`/admin/registration?error=${result.error}${result.id !== null ? `&row=${result.id}` : ''}`, 303);
     }
@@ -86,10 +89,13 @@ if (Astro.request.method === 'POST') {
   }
 }
 
-const rows = await listEventsAdmin(db);
+const [rows, templates, ticketedEvents] = await Promise.all([listEventsAdmin(db), listTemplatesAdmin(db), eventIdsWithActiveTickets(db)]);
 const saved = Astro.url.searchParams.get('saved') === '1';
 const updated = Astro.url.searchParams.get('updated') === '1';
 const duplicated = Astro.url.searchParams.get('duplicated') === '1';
+const templateSaved = Astro.url.searchParams.get('template_saved') === '1';
+const fromTemplate = Astro.url.searchParams.get('from_template') === '1';
+const templateDeleted = Astro.url.searchParams.get('template_deleted') === '1';
 const actionError = Astro.url.searchParams.get('error');
 const actionErrorRow = Astro.url.searchParams.get('row') ?? '';
 
@@ -172,6 +178,9 @@ const actionBtn =
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
   {updated && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.reg.updated')}</p>}
   {duplicated && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.reg.duplicated')}</p>}
+  {templateSaved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.reg.templateSaved')}</p>}
+  {fromTemplate && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.reg.templateCreated')}</p>}
+  {templateDeleted && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.reg.templateDeleted')}</p>}
   {badRequest && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
   {actionError === 'close_required' && <p class={`mt-4 ${noticeErr}`} data-testid="close-required">{t(lang, 'admin.reg.closeRequired')}</p>}
   {(actionError === 'invalid' || actionError === 'not_found') && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'admin.form.badRequest')}</p>}
@@ -212,7 +221,7 @@ const actionBtn =
                   {r.capacity != null ? ` / ${r.capacity}` : ''}
                   {r.waitlist_count > 0 && <div class="text-xs text-ink-muted">{t(lang, 'admin.reg.waitlistCount', { count: r.waitlist_count })}</div>}
                 </td>
-                <td class={td}>{r.price_cents == null ? t(lang, 'admin.reg.free') : formatCents(r.price_cents, r.currency)}</td>
+                <td class={td}>{ticketedEvents.has(r.id) ? t(lang, 'admin.reg.priceByTicket') : r.price_cents == null ? t(lang, 'admin.reg.free') : formatCents(r.price_cents, r.currency)}</td>
                 <td class={td}>
                   <span class={`${badge} ${phaseBadge[r.phase]}`} data-phase={r.phase}>{t(lang, `admin.reg.phase.${r.phase}`)}</span>
                 </td>
@@ -253,6 +262,58 @@ const actionBtn =
                       <input type="hidden" name="id" value={r.id} />
                       <input type="hidden" name="op" value="duplicate" />
                       <button type="submit" class={actionBtn}>{t(lang, 'admin.reg.action.duplicate')}</button>
+                    </form>
+                    <form method="post">
+                      <input type="hidden" name="action" value="event" />
+                      <input type="hidden" name="id" value={r.id} />
+                      <input type="hidden" name="op" value="save_template" />
+                      <button type="submit" class={actionBtn}>{t(lang, 'admin.reg.action.saveTemplate')}</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            ))
+          )
+        }
+      </tbody>
+    </table>
+  </div>
+  <h2 id="reg-templates" class={`mt-10 ${h2}`}>{t(lang, 'admin.reg.templates')}</h2>
+  <p class="mt-1 max-w-2xl text-sm text-ink-muted">{t(lang, 'admin.reg.templatesIntro')}</p>
+  <div class="gathering-table-wrap mt-4">
+    <table class="gathering-table" data-testid="templates-table">
+      <thead class="bg-surface-sunken">
+        <tr>
+          <th class={th}>{t(lang, 'admin.reg.titleEn')}</th>
+          <th class={th}>{t(lang, 'admin.reg.actions')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          templates.length === 0 ? (
+            <tr>
+              <td class={`${td} text-ink-muted`} colspan="2">{t(lang, 'admin.reg.templatesEmpty')}</td>
+            </tr>
+          ) : (
+            templates.map((r) => (
+              <tr class="border-t border-border align-top" data-template-id={r.id}>
+                <td class={td}>
+                  <div class="font-medium">{displayTitle(r)}</div>
+                </td>
+                <td class={td}>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <a href={`/admin/registration/${r.id}`} class={actionBtn}>{t(lang, 'admin.form.edit')}</a>
+                    <form method="post">
+                      <input type="hidden" name="action" value="event" />
+                      <input type="hidden" name="id" value={r.id} />
+                      <input type="hidden" name="op" value="from_template" />
+                      <button type="submit" class={actionBtn}>{t(lang, 'admin.reg.action.fromTemplate')}</button>
+                    </form>
+                    <form method="post">
+                      <input type="hidden" name="action" value="event" />
+                      <input type="hidden" name="id" value={r.id} />
+                      <input type="hidden" name="op" value="delete_template" />
+                      <button type="submit" class={actionBtn} data-confirm={t(lang, 'admin.reg.templateDeleteConfirm')}>{t(lang, 'admin.reg.action.deleteTemplate')}</button>
                     </form>
                   </div>
                 </td>
@@ -320,6 +381,9 @@ const actionBtn =
         </label>
       </div>
       <p class="text-xs text-ink-subtle">{t(lang, isD1 ? 'admin.reg.priceD1' : 'admin.reg.priceHint')}</p>
+      {editingRow && ticketedEvents.has(editingRow.id) && (
+        <p class="rounded-md bg-primary-soft px-3 py-2 text-sm text-on-primary-soft" data-testid="price-ignored">{t(lang, 'admin.reg.priceIgnored')} <a href={`/admin/registration/${editingRow.id}#reg-form-heading`} class="underline">{t(lang, 'admin.reg.priceIgnoredLink')}</a></p>
+      )}
       <div class="grid gap-4 sm:grid-cols-2">
         <label class="flex min-h-11 items-center gap-2 text-sm">
           <input type="hidden" name="waitlist_enabled" value="0" />

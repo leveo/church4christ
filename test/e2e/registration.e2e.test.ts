@@ -571,3 +571,119 @@ describe('Registration on D1: a family signs up, reviews, manages and cancels on
     expect(editor).toContain('Bring sunscreen.');
   });
 });
+
+describe('Registration on D1: the form builder and templates', () => {
+  const jsonPost = async (path: string, payload: unknown, cookie: string, origin: string = ORIGIN): Promise<Response> =>
+    SELF.fetch(`${ORIGIN}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin, cookie },
+      body: JSON.stringify(payload),
+      redirect: 'manual',
+    });
+
+  async function newEvent(title: string): Promise<number> {
+    const saved = await post('/admin/registration', new URLSearchParams({ action: 'save', title_en: title, starts_at: '2030-06-01T10:00' }).toString(), { cookie: await ADMIN() });
+    expect(saved.headers.get('location')).toBe('/admin/registration?saved=1');
+    return (await env.DB.prepare(`SELECT id FROM reg_events WHERE id NOT IN (920, 930) ORDER BY id DESC LIMIT 1`).first<number>('id'))!;
+  }
+
+  const PAYLOAD = {
+    questions: [
+      { key: 'kids', type: 'yesno', labels: { en: 'Need childcare?' } },
+      { key: 'allergy', type: 'text', scope: 'attendee', max_length: 40, labels: { en: 'Child allergies' }, condition: { q: 'kids', op: 'eq', value: 'yes' } },
+    ],
+    tickets: [{ price_cents: 0, capacity: 5, active: true, labels: { en: 'Adult' }, descriptions: { en: 'Ages 13 and up' } }],
+  };
+
+  it('mounts the builder island, saves a per-person question with a condition and a ticket type, and re-renders them', async () => {
+    await enableRegistration();
+    const id = await newEvent('Builder Camp');
+    const page = await get(`/admin/registration/${id}`, { cookie: await ADMIN() });
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('Registration form');
+    expect(html).toMatch(/<astro-island[^>]*RegFormBuilder/);
+    expect(html).toContain('Registrations');
+
+    const res = await jsonPost(`/admin/registration/${id}`, PAYLOAD, await ADMIN());
+    expect(res.status).toBe(200);
+    const body = await res.json<{ ok: boolean; questions: Array<{ id: number; scope: string; condition: { q: number; op: string; value: string } | null }>; tickets: Array<{ capacity: number }> }>();
+    expect(body.ok).toBe(true);
+    expect(body.questions.map((q) => q.scope)).toEqual(['registration', 'attendee']);
+    expect(body.questions[1].condition).toEqual({ q: body.questions[0].id, op: 'eq', value: 'yes' });
+    expect(body.tickets[0].capacity).toBe(5);
+
+    const stored = await env.DB.prepare(`SELECT q.scope AS scope, q.max_length AS max_length FROM reg_questions q WHERE q.event_id = ?1 ORDER BY q.sort`).bind(id).all<{ scope: string; max_length: number | null }>();
+    expect(stored.results).toEqual([{ scope: 'registration', max_length: null }, { scope: 'attendee', max_length: 40 }]);
+    expect(await env.DB.prepare(`SELECT count(*) AS n FROM reg_ticket_types WHERE event_id = ?1`).bind(id).first<number>('n')).toBe(1);
+
+    // the admin page now carries the stored form in the island props (serialized into the page HTML)
+    const again = await (await get(`/admin/registration/${id}`, { cookie: await ADMIN() })).text();
+    expect(again).toContain('Child allergies');
+    expect(again).toContain('Ages 13 and up');
+    // the events list says the event price is ignored while a ticket type is active
+    const editor = await (await get(`/admin/registration?edit=${id}`, { cookie: await ADMIN() })).text();
+    expect(editor).toContain('data-testid="price-ignored"');
+  });
+
+  it('returns validation errors by field path and writes nothing', async () => {
+    await enableRegistration();
+    const id = await newEvent('Builder Errors');
+    const res = await jsonPost(`/admin/registration/${id}`, { questions: [{ type: 'select', labels: {} }], tickets: [{ price_cents: 500, labels: { en: 'VIP' } }] }, await ADMIN());
+    expect(res.status).toBe(422);
+    const body = await res.json<{ ok: boolean; errors: Array<{ path: string; code: string }> }>();
+    expect(body.errors.map((e) => `${e.path}:${e.code}`)).toEqual([
+      'questions.0.labels.en:required', 'questions.0.options:required', 'tickets.0.price_cents:paid_unavailable',
+    ]);
+    expect(await env.DB.prepare(`SELECT count(*) AS n FROM reg_questions WHERE event_id = ?1`).bind(id).first<number>('n')).toBe(0);
+  });
+
+  it('refuses a cross-origin save, a signed-out save and a member without the registration area', async () => {
+    await enableRegistration();
+    const id = await newEvent('Builder Guard');
+    expect((await jsonPost(`/admin/registration/${id}`, PAYLOAD, await ADMIN(), 'https://evil.example')).status).toBe(403);
+    const anon = await SELF.fetch(`${ORIGIN}/admin/registration/${id}`, { method: 'POST', headers: { 'content-type': 'application/json', origin: ORIGIN }, body: JSON.stringify(PAYLOAD), redirect: 'manual' });
+    expect([302, 303, 401, 403]).toContain(anon.status);
+    const member = await jsonPost(`/admin/registration/${id}`, PAYLOAD, await sessionCookie(3, 'sarah.johnson@example.com'));
+    expect([302, 303, 403, 404]).toContain(member.status);
+    expect(await env.DB.prepare(`SELECT count(*) AS n FROM reg_questions WHERE event_id = ?1`).bind(id).first<number>('n')).toBe(0);
+  });
+
+  it('saves an event as a template, builds a new event from it, and only ever deletes templates', async () => {
+    await enableRegistration();
+    const id = await newEvent('Template Source');
+    await jsonPost(`/admin/registration/${id}`, PAYLOAD, await ADMIN());
+    const action = async (target: number, op: string) =>
+      post('/admin/registration', new URLSearchParams({ action: 'event', id: String(target), op }).toString(), { cookie: await ADMIN() });
+
+    const saved = await action(id, 'save_template');
+    expect(saved.headers.get('location')).toBe('/admin/registration?template_saved=1#reg-templates');
+    const templateId = (await env.DB.prepare(`SELECT id FROM reg_events WHERE is_template = 1 ORDER BY id DESC LIMIT 1`).first<number>('id'))!;
+
+    // the list shows it under Templates, not among the events, and the template page has no roster
+    const list = await (await get('/admin/registration', { cookie: await ADMIN() })).text();
+    const templatesPart = list.slice(list.indexOf('data-testid="templates-table"'));
+    expect(templatesPart).toContain(`data-template-id="${templateId}"`);
+    expect(list.slice(0, list.indexOf('data-testid="templates-table"'))).not.toContain(`data-event-id="${templateId}"`);
+    const templatePage = await (await get(`/admin/registration/${templateId}`, { cookie: await ADMIN() })).text();
+    expect(templatePage).toMatch(/<astro-island[^>]*RegFormBuilder/);
+    expect(templatePage).not.toContain('Export CSV');
+    expect(await env.DB.prepare(`SELECT count(*) AS n FROM registrations`).first<number>('n')).toBe(0);
+
+    // lifecycle buttons are refused for a template
+    const refused = await action(templateId, 'hide');
+    expect(refused.headers.get('location')).toBe(`/admin/registration?error=invalid&row=${templateId}`);
+
+    // a new regular event comes from it, hidden, with the questions and ticket type
+    const created = await action(templateId, 'from_template');
+    const newId = (await env.DB.prepare(`SELECT id FROM reg_events WHERE is_template = 0 ORDER BY id DESC LIMIT 1`).first<number>('id'))!;
+    expect(created.headers.get('location')).toBe(`/admin/registration?edit=${newId}&from_template=1`);
+    expect(await env.DB.prepare(`SELECT count(*) AS n FROM reg_questions WHERE event_id = ?1`).bind(newId).first<number>('n')).toBe(2);
+    expect(await env.DB.prepare(`SELECT count(*) AS n FROM reg_ticket_types WHERE event_id = ?1`).bind(newId).first<number>('n')).toBe(1);
+
+    // a regular event is never deleted, a template is
+    expect((await action(newId, 'delete_template')).headers.get('location')).toBe(`/admin/registration?error=not_found&row=${newId}`);
+    expect((await action(templateId, 'delete_template')).headers.get('location')).toBe('/admin/registration?template_deleted=1#reg-templates');
+    expect(await env.DB.prepare(`SELECT count(*) AS n FROM reg_events WHERE id IN (?1, ?2)`).bind(newId, templateId).first<number>('n')).toBe(1);
+  });
+});
