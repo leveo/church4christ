@@ -66,10 +66,11 @@ function deps(overrides: Record<string, unknown> = {}) {
     stripeEnv: { STRIPE_MODE: 'test', STRIPE_SECRET_KEY: 'sk_test_route', APP_ORIGIN: 'http://localhost:4321' },
     getOpenEvent: vi.fn(async () => event(2500)),
     listQuestions: vi.fn(async () => []),
+    listTicketTypes: vi.fn(async () => []),
     validateSubmission: vi.fn(validateSubmission),
     // The household check needs a database; the fake keeps the contact's own link and drops nothing else.
     restrictAttendeePersons: vi.fn(async (_db: unknown, contactPersonId: number | null, attendees: Array<{ name: string; personId: number | null }>) =>
-      attendees.map((a, i) => ({ name: a.name, personId: i === 0 ? contactPersonId : a.personId }))),
+      attendees.map((a, i) => ({ ...a, personId: i === 0 ? contactPersonId : a.personId }))),
     createRegistration: vi.fn(async () => ({ id: 41, status: 'confirmed' as const, confirmationNo: 'R26-0001' })),
     resolveRequest: vi.fn(async () => ({ kind: 'create', registrationId: 41, requestId: REQUEST_ID, requestJson: savedJson })),
     continueRequest: vi.fn(async () => ({ kind: 'create', registrationId: 41, requestId: REQUEST_ID, requestJson: savedJson })),
@@ -504,9 +505,9 @@ describe('registration submit: a party, validation and household links', () => {
     );
     expect(response.headers.get('location')).toBe(`/en/register/manage?new=1#t=${'M'.repeat(43)}`);
     expect(dependencies.restrictAttendeePersons).toHaveBeenCalledWith(expect.anything(), 9, [
-      { name: 'Ada Lovelace', personId: null },
-      { name: 'Byron Lovelace', personId: 12 },
-      { name: 'Anne Isabella', personId: null },
+      { name: 'Ada Lovelace', personId: null, ticketTypeId: null, answers: [] },
+      { name: 'Byron Lovelace', personId: 12, ticketTypeId: null, answers: [] },
+      { name: 'Anne Isabella', personId: null, ticketTypeId: null, answers: [] },
     ]);
     expect(dependencies.createRegistration).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       personId: 9,

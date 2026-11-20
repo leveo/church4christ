@@ -439,6 +439,21 @@ export function defineRegBuilderCases(label: string, getDb: () => AppDb, backend
         expect(ok.ok && ok.value.answers.find(([q]) => q === Number(idOf('Email')))?.[1]).toBe('pat@example.com');
       });
 
+      it('terms are boolean-only for clients: a posted timestamp or the internal marker is rejected, any checked value is accepted', async () => {
+        const id = await newEvent();
+        await mustSave(id, { questions: [{ type: 'terms', required: true, labels: { en: 'Agree' } }] });
+        const qs = await listQuestions(getDb(), 'en', id);
+        const run = (value: string) => validateSubmission({ max_party_size: 1 }, qs, { contact, answers: { [String(qs[0].id)]: value } });
+        for (const forged of ['2020-01-01 00:00:00', TERMS_ACCEPTED]) {
+          const r = run(forged);
+          expect(!r.ok && r.errors).toEqual([{ path: `q.${qs[0].id}`, code: 'bad_answer' }]);
+        }
+        for (const checked of ['on', 'yes', 'true', '1']) {
+          const r = run(checked);
+          expect(r.ok && r.value.answers).toEqual([[qs[0].id, TERMS_ACCEPTED]]);
+        }
+      });
+
       it('ticket types: required per person when the event has active types, must be active and belong to the event', async () => {
         const id = await newEvent();
         const other = await newEvent();
@@ -649,7 +664,10 @@ export function defineRegBuilderCases(label: string, getDb: () => AppDb, backend
         expect((await listOpenSpecialEventsForGroup(getDb(), group.id, 'en')).map((e) => e.id)).not.toContain(templateId);
         // the visible original still shows
         expect((await listPublicEvents(getDb(), 'en')).map((e) => e.id)).toContain(id);
-        expect((await listRegistrationsForPerson(getDb(), 'en', 1, 'nobody@example.com')).map((r) => r.event_id)).not.toContain(templateId);
+        // even a registration row somehow attached to a template never shows in "my events"
+        await getDb().prepare(`INSERT INTO registrations (event_id, name, email, status, submission_key) VALUES (?1, 'T', 'tpl-owner@example.com', 'confirmed', ?2)`).bind(templateId, key()).run();
+        await getDb().prepare(`INSERT INTO registrations (event_id, name, email, status, submission_key) VALUES (?1, 'T', 'tpl-owner@example.com', 'confirmed', ?2)`).bind(id, key()).run();
+        expect((await listRegistrationsForPerson(getDb(), 'en', 987654, 'tpl-owner@example.com')).map((r) => r.event_id)).toEqual([id]);
       });
 
       it('createFromTemplate makes a regular inactive event with everything copied; only a template qualifies', async () => {

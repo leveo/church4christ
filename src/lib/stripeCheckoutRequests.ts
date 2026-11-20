@@ -882,10 +882,10 @@ export async function resolveRegistrationCheckoutRequest(
   const requestJson = buildRegistrationCheckoutParams({ ...input, registrationId });
   // Ticket-typed event: the types must be this event's active ones at the prices billed (priceTicketSelection
   // throws ticket_type_required / ticket_type_invalid), so the form can never name a type or a price.
-  if (normalized.tickets) {
-    const priced = await priceTicketSelection(db, normalized.eventId, normalized.party?.attendees ?? [{ ticketTypeId: null }]);
-    if (priced !== normalized.amountCents) throw new Error('ticket_type_invalid');
-  }
+  // Always checked, whatever the caller sent: an event with active ticket types never accepts an untyped
+  // request (priceTicketSelection throws ticket_type_required) and the totals must match the database.
+  const priced = await priceTicketSelection(db, normalized.eventId, normalized.party?.attendees ?? [{ ticketTypeId: null }]);
+  if (normalized.tickets ? priced !== normalized.amountCents : priced !== null) throw new Error('ticket_type_invalid');
   const serializedRequest = JSON.stringify(requestJson);
   const statements: AppStatement[] = [
     // Acquire the parent-row lock before the registration insert takes its FK
@@ -983,7 +983,7 @@ export async function resolveRegistrationCheckoutRequest(
   );
 
   // Each ticket type's limit holds the seats (people) already taken, this party included.
-  if (normalized.tickets) {
+  {
     statements.push(
       db
         .prepare(

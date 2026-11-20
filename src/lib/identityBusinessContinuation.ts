@@ -230,7 +230,7 @@ function revalidateScopeAnswers(
   const out: Array<[number, string]> = [];
   for (const question of questions) {
     if (question.scope !== scope || question.type === 'section' || !shown.has(question.id)) continue;
-    const checked = checkAnswer(question, form[String(question.id)]);
+    const checked = checkAnswer(question, form[String(question.id)], { trusted: true });
     if ('code' in checked) throw new Error('identity_continuation_answers_invalid');
     if (checked.value !== null) {
       if (Array.from(checked.value).length > MAX_ANSWER_LENGTH) throw new Error('identity_continuation_answers_invalid');
@@ -250,7 +250,8 @@ function personAnswersStable(
   party: RegistrationContinuationParty | NormalizedRegistrationContinuationInput['party'] | undefined,
   registrationAnswers: ReadonlyArray<readonly [number, string]>,
 ): boolean {
-  for (const attendee of party?.attendees ?? []) {
+  // No party means one person with no per-person answers (their required questions must then be absent/hidden).
+  for (const attendee of party?.attendees ?? [{ answers: [] as Array<readonly [number, string]> }]) {
     const persisted = attendee.answers ?? [];
     const checked = revalidateScopeAnswers(questions, 'attendee', persisted, registrationAnswers);
     if (JSON.stringify(checked) !== JSON.stringify(canonicalRegistrationAnswers(persisted))) return false;

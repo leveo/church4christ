@@ -10,6 +10,9 @@ import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { hasPg, pgClient, resetSchema, DATABASE_URL } from './helpers';
+import { PgAdapter } from '../../src/lib/pgAdapter';
+import { listQuestions } from '../../src/lib/regDb';
+import { registrationSummary } from '../../src/lib/regManage';
 
 describe.skipIf(!hasPg)('Postgres registration schema', () => {
   const sql = hasPg ? pgClient() : (null as never);
@@ -431,6 +434,15 @@ describe.skipIf(!hasPg)('Postgres registration builder migration (0044) on exist
     expect(question).toEqual({ options: '["Small","Medium","Large (XL)"]', scope: 'registration', condition: null, max_length: null });
     const [answer] = await sql.unsafe('SELECT value FROM reg_answers WHERE registration_id = 3001 AND question_id = 2001');
     expect(answer.value).toBe('Large (XL)');
+  });
+
+  it('the migrated labels read through the app in every language', async () => {
+    const app = new PgAdapter(sql);
+    const [en, zh] = [await listQuestions(app, 'en', 1001), await listQuestions(app, 'zh', 1001)];
+    expect(en[0].option_labels).toEqual({ Small: 'Small', Medium: 'Medium', 'Large (XL)': 'Large (XL)' });
+    expect(zh[0]).toMatchObject({ label: '衬衫尺寸', options: ['Small', 'Medium', 'Large (XL)'] });
+    const summary = (await registrationSummary(app, 3001, 'zh'))!;
+    expect(summary.answers).toEqual([{ question_id: 2001, label: '衬衫尺寸', value: 'Large (XL)' }]);
   });
 
   it('leaves non-option and malformed-options questions without labels instead of failing', async () => {

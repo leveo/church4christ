@@ -532,7 +532,6 @@ export const CONTROL_RE = /[\0-\x08\x0b\x0c\x0e-\x1f\x7f]/u;
  *  'YYYY-MM-DD HH:MM:SS') in SQL. A constant keeps validation deterministic, so a retried
  *  submission digests identically; every writer and the self-service edit replace it. */
 export const TERMS_ACCEPTED = '@accepted';
-const TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/u;
 const NUMBER_RE = /^-?\d{1,30}(\.\d{1,15})?$/u;
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/u;
 
@@ -574,6 +573,9 @@ export type AnswerErrorCode = 'missing_required' | 'bad_answer' | 'too_long';
 export function checkAnswer(
   q: Pick<RegQuestion, 'type' | 'required' | 'options' | 'max_length'>,
   raw: string | string[] | undefined,
+  /** `trusted` is for server-side replay of answers this code stored itself (the guest continuation): only
+   *  then may a `terms` value already be the TERMS_ACCEPTED marker. Client input is never trusted. */
+  opts: { trusted?: boolean } = {},
 ): { value: string | null } | { code: AnswerErrorCode } {
   const options = q.options ?? [];
   if (q.type === 'section') return { value: null };
@@ -587,10 +589,11 @@ export function checkAnswer(
 
   const value = (Array.isArray(raw) ? (raw[0] ?? '') : (raw ?? '')).trim();
   if (q.type === 'terms') {
-    // Checked = any of the usual "on" values, or an acceptance time already stamped (a re-saved answer).
+    // Client input is boolean only: any checked value means "accepted" and the SERVER stamps the time. A
+    // timestamp (or the internal marker) from a client is rejected.
     const lower = value.toLowerCase();
     if (value === '' || ['no', 'n', 'false', '0', 'off'].includes(lower)) return q.required ? { code: 'missing_required' } : { value: null };
-    if (value === TERMS_ACCEPTED || TIMESTAMP_RE.test(value)) return { value };
+    if (value === TERMS_ACCEPTED) return opts.trusted ? { value } : { code: 'bad_answer' };
     return ['yes', 'y', 'true', '1', 'on'].includes(lower) ? { value: TERMS_ACCEPTED } : { code: 'bad_answer' };
   }
   if (value === '') return q.required ? { code: 'missing_required' } : { value: null };
@@ -910,6 +913,8 @@ export async function createRegistration(
 
   const priced = await priceTicketSelection(db, input.eventId, input.attendees);
   const amountCents = priced ?? input.amountCents;
+  // A priced ticket selection is paid: it can only be created pending (awaiting payment), never confirmed.
+  if (priced !== null && priced > 0 && input.status === 'confirmed') throw new Error('payment_required');
 
   const manage = await generateManageToken();
   const stmts = registrationInsertStatements(db, {

@@ -136,6 +136,21 @@ describe.skipIf(!hasPg)('registration builder (Postgres)', () => {
       expect((await sql.unsafe('SELECT count(*)::int AS n FROM registrations WHERE event_id = $1', [id]))[0].n).toBe(0);
     });
 
+    it('an untyped request to a typed event is refused (paid and free), and a priced selection cannot be confirmed unpaid', async () => {
+      const { id, types } = await typedEvent([adult]);
+      await expect(resolveRegistrationCheckoutRequest(db, checkoutInput(id))).rejects.toThrow('ticket_type_required');
+      await expect(resolveRegistrationCheckoutRequest(db, checkoutInput(id, { party: { phone: null, attendees: [{ name: 'Ada', personId: null }] } }))).rejects.toThrow('ticket_type_required');
+      await expect(createRegistration(db, {
+        eventId: id, personId: null, name: 'Ada', email: 'ada@example.com', status: 'confirmed', amountCents: 0, currency: 'usd', answers: [], attendees: [{ name: 'Ada' }],
+      })).rejects.toThrow('ticket_type_required');
+      await expect(createRegistration(db, {
+        eventId: id, personId: null, name: 'Ada', email: 'ada@example.com', status: 'confirmed', amountCents: 0, currency: 'usd', answers: [], attendees: [{ name: 'Ada', ticketTypeId: types[0].id }],
+      })).rejects.toThrow('payment_required');
+      // a typed request that omits `tickets` is refused too (the gate does not depend on what the caller sent)
+      await expect(resolveRegistrationCheckoutRequest(db, checkoutInput(id, { party: { phone: null, attendees: [{ name: 'Ada', personId: null, ticketTypeId: types[0].id }] } }))).rejects.toThrow('checkout_ticket_invalid');
+      expect((await sql.unsafe('SELECT count(*)::int AS n FROM registrations WHERE event_id = $1', [id]))[0].n).toBe(0);
+    });
+
     it('a paid type over its limit throws event_full from the paid writer and the free-path writer, and holds no seat', async () => {
       const { id, types } = await typedEvent([{ ...adult, capacity: 1 }, child]);
       const [a, c] = types;
