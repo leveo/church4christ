@@ -16,10 +16,11 @@ import { onRequest } from '../src/middleware';
 import { loadSessionUser } from '../src/lib/currentUser';
 import { grantEventRole, hasRegistrationArea, regEventRole } from '../src/lib/regAccess';
 
-function context(path: string, session?: string) {
+function context(path: string, session?: string, method = 'GET') {
   const url = new URL(`http://localhost${path}`);
   return {
-    request: new Request(url),
+    // A same-origin POST so the mutation-provenance check passes and the role gate is what decides.
+    request: new Request(url, method === 'GET' ? undefined : { method, headers: { origin: url.origin, 'sec-fetch-site': 'same-origin' } }),
     url,
     locals: { cfContext: { waitUntil: vi.fn() } } as Record<string, unknown>,
     cookies: { get: vi.fn((name: string) => (name === SESSION_COOKIE && session ? { value: session } : undefined)) },
@@ -31,9 +32,14 @@ function context(path: string, session?: string) {
 const secret = () => (env as unknown as { SESSION_SECRET: string }).SESSION_SECRET;
 const session = (id: number, email: string) => mintSession(secret(), { id, email, sessionEpoch: 0 });
 
-async function status(path: string, token?: string): Promise<{ status: number | undefined; reached: boolean }> {
+async function newEvent(): Promise<number> {
+  const row = await env.DB.prepare(`INSERT INTO reg_events (starts_at) VALUES ('2032-01-01 09:00:00') RETURNING id`).first<{ id: number }>();
+  return row!.id;
+}
+
+async function status(path: string, token?: string, method = 'GET'): Promise<{ status: number | undefined; reached: boolean }> {
   clearModuleCache();
-  const ctx = context(path, token);
+  const ctx = context(path, token, method);
   const next = vi.fn(async () => new Response('route reached'));
   const response = await onRequest(ctx as never, next);
   return { status: response?.status, reached: next.mock.calls.length > 0 };
@@ -69,22 +75,43 @@ describe('per-event registration roles at the middleware', () => {
     expect(anon).toEqual({ status: 303, reached: false });
   });
 
-  it('lets a plain member reach one event page and its desk, and nothing else under /admin', async () => {
+  it('fails closed: a signed-in member with no role for the event never reaches either page (GET or POST)', async () => {
     const token = await session(980, 'door@example.com');
-    for (const path of ['/admin/registration/5', '/admin/registration/5/checkin']) {
-      expect(await status(path, token), path).toEqual({ status: 200, reached: true });
+    const event = await newEvent();
+    for (const path of [`/admin/registration/${event}`, `/admin/registration/${event}/checkin`, '/admin/registration/999999']) {
+      expect(await status(path, token), path).toEqual({ status: 403, reached: false });
+      expect(await status(path, token, 'POST'), `POST ${path}`).toEqual({ status: 403, reached: false });
     }
-    for (const path of ['/admin/registration', '/admin/registration/5/export.csv', '/admin/registration/5/other', '/admin', '/admin/people']) {
+  });
+
+  it('a desk role reaches only the desk; a viewer only the event page; nothing else under /admin', async () => {
+    const token = await session(980, 'door@example.com');
+    const deskEvent = await newEvent();
+    const viewEvent = await newEvent();
+    await grantEventRole(env.DB, deskEvent, 980, 'desk');
+    await grantEventRole(env.DB, viewEvent, 980, 'viewer');
+    expect(await status(`/admin/registration/${deskEvent}/checkin`, token)).toEqual({ status: 200, reached: true });
+    // The same-origin POST passes provenance, so the 403s above for POST come from the role gate.
+    expect(await status(`/admin/registration/${deskEvent}/checkin`, token, 'POST')).toEqual({ status: 200, reached: true });
+    expect(await status(`/admin/registration/${deskEvent}`, token)).toEqual({ status: 403, reached: false });
+    expect(await status(`/admin/registration/${viewEvent}`, token)).toEqual({ status: 200, reached: true });
+    expect(await status(`/admin/registration/${viewEvent}/checkin`, token)).toEqual({ status: 403, reached: false });
+    // A role on one event opens nothing on another.
+    expect(await status(`/admin/registration/${viewEvent + 1000}`, token)).toEqual({ status: 403, reached: false });
+    for (const path of ['/admin/registration', `/admin/registration/${viewEvent}/export.csv`, `/admin/registration/${viewEvent}/other`, '/admin', '/admin/people']) {
       expect(await status(path, token), path).toEqual({ status: 403, reached: false });
     }
   });
 
-  it('carves the two pages out of the limited-admin area gate and keeps every other registration page gated', async () => {
+  it('carves the two pages out of the limited-admin area gate only for a held role, and keeps every other registration page gated', async () => {
     const token = await session(981, 'limited@example.com');
-    for (const path of ['/admin/registration/5', '/admin/registration/5/checkin']) {
+    const event = await newEvent();
+    expect(await status(`/admin/registration/${event}`, token)).toEqual({ status: 403, reached: false });
+    await grantEventRole(env.DB, event, 981, 'registrar');
+    for (const path of [`/admin/registration/${event}`, `/admin/registration/${event}/checkin`]) {
       expect(await status(path, token), path).toEqual({ status: 200, reached: true });
     }
-    for (const path of ['/admin/registration', '/admin/registration/5/export.csv']) {
+    for (const path of ['/admin/registration', `/admin/registration/${event}/export.csv`]) {
       expect(await status(path, token), path).toEqual({ status: 403, reached: false });
     }
   });

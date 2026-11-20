@@ -20,6 +20,7 @@ import { SESSION_COOKIE, verifySession } from './lib/session';
 import { loadSessionUser, loadSessionUserByEmail } from './lib/currentUser';
 import { canAccess, classifyRoute } from './lib/routePolicy';
 import { adminAreaForPath, hasAreaAccess } from './lib/adminAreas';
+import { requireRegRole } from './lib/regAccess';
 import { hasValidMutationProvenance } from './lib/csrf';
 import { openDb, type DbEnv } from './lib/dbProvider';
 import {
@@ -392,6 +393,16 @@ export const onRequest = defineMiddleware(async (context, next) => {
         const area = adminAreaForPath(rest);
         if (!area || !hasAreaAccess(u, area)) return finish(forbidden(context.locals.locale));
       }
+    }
+
+    // regEventStaff only requires a session in canAccess, so fail closed HERE: the person must hold the
+    // capability for the event in the URL (view for the event page, checkin for the desk) before the page runs.
+    // Pages still check each action's own need; this gate means a page that forgets cannot leak to every member.
+    if (cls === 'regEventStaff') {
+      const match = /^\/admin\/registration\/(\d+)(\/checkin)?\/?$/.exec(rest);
+      const eventId = match ? Number(match[1]) : NaN;
+      const check = await requireRegRole(context.locals.db, u, eventId, match?.[2] ? 'checkin' : 'view');
+      if (!check.ok) return finish(check.status === 404 ? opaqueNotFound() : forbidden(context.locals.locale));
     }
 
     const res = await next();
