@@ -21,6 +21,7 @@ import { fallbackChain, getRuntimeDefaultLocale, isSupportedLocale } from './loc
 import type { DbBackend } from './dbProvider';
 import { eventPhase, type RegPhase } from './regPhase';
 import { parseCondition, validateConditions, type Condition, type ConditionScope, type DraftConditionQuestion } from './regConditions';
+import { releaseLogisticsStatements } from './regLogisticsRelease';
 
 export type { RegPhase } from './regPhase';
 
@@ -1491,6 +1492,8 @@ export async function cancelRegistrationPromoting(
            AND EXISTS (SELECT 1 FROM registrations r WHERE r.id = ?1 AND r.status = 'cancelled')`,
       )
       .bind(id),
+    // Rooms, seats and groups (event logistics) are given up in the same batch.
+    ...releaseLogisticsStatements(db, id, null),
   ]);
   if (results[1].meta.changes === 0) return { cancelled: false, promoted: [] };
   return { cancelled: true, promoted: await promoteWaitlist(db, event.event_id) };

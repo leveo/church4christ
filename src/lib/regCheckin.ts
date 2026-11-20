@@ -12,6 +12,7 @@ import { type Locale } from './db';
 import { getRuntimeDefaultLocale } from './locales';
 import { activityStatement, intLit, likeSql, likeTerm, logActivity, type NeedsConfirm } from './regAdminCore';
 import { listTicketTypes, type RegStatus } from './regDb';
+import { assignmentsForAttendees } from './regLogistics';
 
 export interface DeskPerson {
   attendeeId: number;
@@ -23,6 +24,10 @@ export interface DeskPerson {
   checkedOutAt: string | null;
   /** The person was cancelled from the registration. */
   cancelled: boolean;
+  /** Event logistics (only when the caller passed `logistics: true`): present when housing / seating is on for the
+   *  event; null = not assigned yet. */
+  room?: { label: string; venue: string } | null;
+  table?: { label: string } | null;
 }
 
 export interface DeskParty {
@@ -45,7 +50,7 @@ export const DESK_RESULT_LIMIT = 20;
 
 const statusWarning = (status: RegStatus): string | null => (status === 'confirmed' ? null : `status_${status}`);
 
-async function partiesByIds(db: AppDb, eventId: number, ids: number[], locale: Locale): Promise<DeskParty[]> {
+async function partiesByIds(db: AppDb, eventId: number, ids: number[], locale: Locale, logistics = false): Promise<DeskParty[]> {
   if (ids.length === 0) return [];
   const list = ids.map((id) => intLit(id)).join(',');
   const { results: regs } = await db
@@ -61,8 +66,10 @@ async function partiesByIds(db: AppDb, eventId: number, ids: number[], locale: L
     )
     .all<{ id: number; registration_id: number; name: string; ticket_type_id: number | null; status: 'active' | 'cancelled'; checked_in_at: string | null; checked_out_at: string | null }>();
   const labels = new Map((await listTicketTypes(db, locale, eventId)).map((t) => [t.id, t.label]));
+  const assigned = logistics ? await assignmentsForAttendees(db, eventId, people.map((p) => p.id)) : null;
   const byReg = new Map<number, DeskPerson[]>();
   for (const p of people) {
+    const where = assigned?.get(p.id);
     (byReg.get(p.registration_id) ?? byReg.set(p.registration_id, []).get(p.registration_id)!).push({
       attendeeId: p.id,
       name: p.name,
@@ -71,6 +78,8 @@ async function partiesByIds(db: AppDb, eventId: number, ids: number[], locale: L
       checkedInAt: p.checked_in_at,
       checkedOutAt: p.checked_out_at,
       cancelled: p.status === 'cancelled',
+      ...(where && where.room !== undefined ? { room: where.room } : {}),
+      ...(where && where.table !== undefined ? { table: where.table } : {}),
     });
   }
   const order = new Map(ids.map((id, i) => [id, i]));
@@ -84,14 +93,21 @@ async function partiesByIds(db: AppDb, eventId: number, ids: number[], locale: L
  * case-insensitive search of the registration's name, email, phone and confirmation number and every person's
  * name (any status: the desk must find a waitlisted person to warn about them). At most DESK_RESULT_LIMIT.
  */
-export async function findForDesk(db: AppDb, eventId: number, query: string, locale: Locale = getRuntimeDefaultLocale()): Promise<DeskSearch> {
+export async function findForDesk(
+  db: AppDb,
+  eventId: number,
+  query: string,
+  locale: Locale = getRuntimeDefaultLocale(),
+  /** `logistics`: the event-logistics module is on; adds each person's room and table. */
+  opts: { logistics?: boolean } = {},
+): Promise<DeskSearch> {
   const q = query.trim();
   if (q === '') return { exact: false, parties: [] };
   const exact = await db
     .prepare(`SELECT id FROM registrations WHERE event_id = ?1 AND confirmation_no = ?2`)
     .bind(eventId, q.replace(/\s+/g, '').toUpperCase())
     .first<{ id: number }>();
-  if (exact) return { exact: true, parties: await partiesByIds(db, eventId, [exact.id], locale) };
+  if (exact) return { exact: true, parties: await partiesByIds(db, eventId, [exact.id], locale, opts.logistics) };
   const { results } = await db
     .prepare(
       `SELECT r.id AS id FROM registrations r
@@ -103,7 +119,7 @@ export async function findForDesk(db: AppDb, eventId: number, query: string, loc
     )
     .bind(eventId, likeTerm(q))
     .all<{ id: number }>();
-  return { exact: false, parties: await partiesByIds(db, eventId, results.map((r) => r.id), locale) };
+  return { exact: false, parties: await partiesByIds(db, eventId, results.map((r) => r.id), locale, opts.logistics) };
 }
 
 export interface DeskCounts {

@@ -36,6 +36,8 @@ import {
 } from './regDb';
 import { visibleQuestionIds, type ConditionQuestion } from './regConditions';
 import { eventPhase, type RegPhase } from './regPhase';
+import { releaseLogisticsStatements } from './regLogisticsRelease';
+import { assignmentsForAttendees, type AttendeeAssignments } from './regLogistics';
 
 // ── Submission validation ────────────────────────────────────────────────────
 
@@ -340,6 +342,10 @@ export interface RegistrationSummary {
     ticket_label: string | null;
     ticket_price_cents: number | null;
     answers: Array<{ question_id: number; label: string; value: string }>;
+    /** Room / table / group (event logistics), only when the caller asked for them (`opts.logistics`, i.e. the
+     *  module is on) and the event shows assignments to registrants. A key is present for each area switched on
+     *  for the event; null there means "not assigned yet". */
+    assignments?: AttendeeAssignments;
   }>;
   /** The once-per-registration answers in question order (sections skipped); `label` is the localized
    *  question, `value` is display text: option LABELS for a select / checkbox (a checkbox's choices joined by ", "). */
@@ -406,6 +412,8 @@ export async function registrationSummary(
   id: number,
   locale: Locale,
   now: string = toUtcSql(),
+  /** `logistics`: the event-logistics module is on (logisticsModuleEnabled); hidden by default (fail closed). */
+  opts: { logistics?: boolean } = {},
 ): Promise<RegistrationSummary | null> {
   const { select, joins } = i18nJoin('reg_event_i18n', 'e', 'event_id', ['title', 'notes'], locale);
   const row = await db
@@ -471,6 +479,10 @@ export async function registrationSummary(
     ticket_price_cents: a.ticket_type_id === null ? null : a.ticket_price_cents,
     answers: display(storedPerson.results.filter((r) => r.attendee_id === a.id), 'attendee'),
   }));
+  if (opts.logistics) {
+    const assigned = await assignmentsForAttendees(db, row.event_id, attendees.map((a) => a.id), { forRegistrant: true });
+    if (assigned) for (const a of attendees) a.assignments = assigned.get(a.id) ?? {};
+  }
 
   const event = {
     id: row.event_id,
@@ -764,6 +776,8 @@ export async function cancelAttendee(
          RETURNING id`,
       )
       .bind(registrationId),
+    // The cancelled person leaves their room, table and group (event logistics) in the same batch.
+    ...releaseLogisticsStatements(db, registrationId, null),
   ]);
   if (results[1].meta.changes === 0) return { ok: false, reason: 'not_found' };
   return {

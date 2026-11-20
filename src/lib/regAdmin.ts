@@ -26,6 +26,7 @@ import {
   type RegQuestion, type RegStatus,
 } from './regDb';
 import { visibleQuestionIds } from './regConditions';
+import { releaseLogisticsStatements } from './regLogisticsRelease';
 import {
   checkScopeAnswers, clean, nameError, phoneError, registrationSummary, toConditionQuestion, validateSubmission,
   type RegistrationSummary, type SubmissionError, type SubmissionInput,
@@ -717,6 +718,8 @@ export async function adminRemovePerson(
       .prepare(`UPDATE registrations SET status = 'cancelled', cancelled_at = datetime('now') WHERE id = ?1 AND ${activeCount} = 0 AND ${held} RETURNING id`)
       .bind(registrationId),
     activityStatement(db, registrationId, opts.actor, 'person_removed', { attendeeId: input.attendeeId }, held),
+    // A removed person leaves their room, table and group in the same batch.
+    ...releaseLogisticsStatements(db, registrationId, opts.actor, held),
   ]);
   if (!write.claimed) return claimFailure(db, registrationId, input.version);
   const registrationCancelled = (write.work[2].results?.length ?? 0) > 0;
@@ -743,6 +746,7 @@ export async function adminCancelRegistration(
       .prepare(`UPDATE reg_attendees SET status = 'cancelled', updated_at = datetime('now') WHERE registration_id = ?1 AND status = 'active' AND ${held}`)
       .bind(registrationId),
     activityStatement(db, registrationId, opts.actor, 'cancelled', { from: reg.status }, held),
+    ...releaseLogisticsStatements(db, registrationId, opts.actor, held),
   ]);
   if (!write.claimed) return claimFailure(db, registrationId, expected);
   return { ok: true, version: expected + 1, registrationCancelled: true, promoted: wasSeat ? await promoteWaitlist(db, reg.event_id) : [] };
@@ -838,6 +842,8 @@ export async function decideRegistration(
         )
         .bind(registrationId, target, actor),
       activityStatement(db, registrationId, actor, DECISION_ACTION[decision], { from: reg.status }, held),
+      // A declined registration gives up its rooms, seats and groups (self-guarded: nothing for accept / waitlist).
+      ...releaseLogisticsStatements(db, registrationId, actor, held),
     ],
     takesSeat && !opts.confirm ? fitSql(reg.event_id, demand) : '1 = 1',
   );
