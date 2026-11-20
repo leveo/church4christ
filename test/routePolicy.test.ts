@@ -107,8 +107,17 @@ describe('classifyRoute', () => {
     ['/admin/applications', 'console'],
     ['/admin/testimonies', 'console'],
     ['/admin/registration', 'console'],
-    ['/admin/registration/5', 'console'],
-    ['/admin/registration/5/export.csv', 'console'],
+    ['/admin/registration/5/export.csv', 'regEventStaff'],
+    ['/admin/registration/5/export-people.csv', 'regEventStaff'],
+    ['/admin/registration/5/badges', 'regEventStaff'],
+    ['/admin/registration/5/sign-in-sheet', 'regEventStaff'],
+    ['/admin/registration/5/labels', 'console'],
+    ['/admin/registration/new', 'console'],
+    ['/admin/registration/5/checkin/extra', 'console'],
+    // ── regEventStaff: the per-event page and its check-in desk only ──
+    ['/admin/registration/5', 'regEventStaff'],
+    ['/admin/registration/5/', 'regEventStaff'],
+    ['/admin/registration/5/checkin', 'regEventStaff'],
     // ── adminOnly ──
     ['/admin/people', 'adminOnly'],
     ['/admin/people/4', 'adminOnly'],
@@ -280,6 +289,27 @@ describe('canAccess', () => {
     }
     for (const allowed of [scopedMember, scopedEditor, scopedAdmin, superAdmin]) {
       expect(canAccess('newcomerStaff', allowed)).toBe(true);
+    }
+  });
+
+  it('regEventStaff: any signed-in person reaches the per-event pages (the page derives the role); anonymous never', () => {
+    expect(canAccess('regEventStaff', anon)).toBe(false);
+    for (const u of [member, teamMember, editor, admin, financeUser]) expect(canAccess('regEventStaff', u)).toBe(true);
+  });
+
+  it('a person with only a per-event role gets no other registration or admin surface', () => {
+    for (const path of [
+      '/admin/registration',
+      '/admin/registration/5/labels',
+      '/admin/registration/5/anything-else',
+      '/admin/registration/5/checkin/extra',
+      '/admin/registration/abc',
+      '/admin/registration/5x',
+      '/admin',
+      '/admin/people',
+      '/admin/giving',
+    ]) {
+      expect(canAccess(classifyRoute(path), member), path).toBe(false);
     }
   });
 

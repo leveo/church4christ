@@ -57,10 +57,10 @@ entry), and — on every member's profile page — a **Giving history** panel sh
 household's gifts and their total for the year. That panel deliberately shows the same
 household-level numbers a member sees on their own **My giving** page, not a more detailed
 breakdown — an admin with the Giving grant sees exactly what the giving family itself would
-see, just from the admin side. Note that **Giving** and **Registration** only work at all on
-a church that uses the optional Supabase database (see [Modules](modules.md)); on the
-default Cloudflare D1 setup, those two checkboxes are greyed out because there is nothing to
-grant access to yet.
+see, just from the admin side. Note that **Giving** only works on a church that uses the
+optional Supabase database (see [Modules](modules.md)); on the default Cloudflare D1 setup its
+checkbox is greyed out because there is nothing to grant access to yet. **Registration** works
+on both databases; only paid events need Supabase.
 
 **The service-attendance example.** The **Attendance** grant opens the aggregate
 `/admin/attendance` grid, correction forms, optional Children's check-in link editor, and
@@ -72,6 +72,15 @@ super-admin responsibility. See [Service attendance](service-attendance.md).
 activity report and church-wide summary. A limited admin with the grant can view scores and
 their bounded calculation evidence, but only a super admin can edit the church-wide scoring
 model. See [Activity score](activity-score.md).
+
+**The registration example.** The **Registration** grant opens every registration event.
+For a single event there is a smaller option that is not part of this checklist: on the
+event's page, a registration admin can give any member a role on just that event, as a
+**Viewer**, a **Check-in desk** volunteer, or a **Registrar**. The person does not need to be
+an admin and gets nothing else in the admin area. They reach only that event's page (with its
+exports, badges, and sign-in sheet) or its check-in desk, by a direct link. See
+[Registration](registration.md#access-to-one-event). Refunds still need the **Payment
+operations** grant.
 
 **What can't be granted.** **Settings** and **Navigation** always stay super-admin-only —
 they control things like the church's modules, theme, and site structure, which are
@@ -137,6 +146,14 @@ not whether the module exists.
     with team-leader access), `src/pages/[locale]/p/[slug].astro` (custom-page draft
     preview), and explicit `isSuperAdmin` checks in `src/pages/admin/settings/index.astro`
     and `src/pages/admin/navigation/index.astro`.
+  - Per-event registration pages are the one exception to the area check. Paths listed in
+    `REG_EVENT_STAFF_PATHS` (`src/lib/routePolicy.ts`) are the `regEventStaff` route class:
+    `canAccess` needs only a session, the limited-admin area check is skipped, and the
+    middleware then runs `requireRegRole` (`src/lib/regAccess.ts`) for the event in the URL,
+    answering 403 without the role. Roles come from `reg_event_access` (`viewer`, `desk`,
+    `registrar`); an editor or an admin with the `registration` area is registrar everywhere.
+    The module gate still returns 404 first when Registration is off. Identity merge treats
+    `reg_event_access.person_id` as a hard conflict, like `event_admins`.
   - `src/layouts/Admin.astro` (sidebar) and `src/pages/admin/index.astro` (dashboard) filter
     their nav sections and cards through the same `hasAreaAccess` predicate so a limited
     admin never sees a link to a page they can't open.

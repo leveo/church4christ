@@ -1,0 +1,96 @@
+---
+// Printable sign-in sheet: one row per active person (sorted by name) with a blank signature column. Filters by
+// status (default: confirmed) and ticket type. Gated like the badges ('view' on this event).
+import PrintSheet from '../../../../layouts/PrintSheet.astro';
+import { requireRegRole } from '../../../../lib/regAccess';
+import { getEventAdmin, listTicketTypes } from '../../../../lib/regDb';
+import { listAllRosterPeople, parseRosterState, rosterOptions } from '../../../../lib/regAdminPage';
+import { formatDate } from '../../../../lib/dates';
+import { t } from '../../../../lib/i18n';
+import type { Locale } from '../../../../lib/locales';
+
+const user = Astro.locals.user;
+const rawId = Astro.params.id ?? '';
+if (!user || !/^\d+$/.test(rawId)) return new Response(null, { status: user ? 404 : 403 });
+const eventId = Number(rawId);
+const db = Astro.locals.db;
+const role = await requireRegRole(db, user, eventId, 'view');
+if (!role.ok) return new Response(null, { status: role.status });
+const event = await getEventAdmin(db, eventId);
+if (!event || event.is_template === 1) return new Response(null, { status: 404 });
+
+const lang: Locale = user.lang ?? 'en';
+const defaultLocale = Astro.locals.locales.default;
+const eventTitle = event.titles[lang] || event.titles[defaultLocale] || event.title_en || `#${eventId}`;
+const state = parseRosterState(Astro.url.searchParams);
+if (state.status.length === 0) state.status = ['confirmed'];
+const rows = await listAllRosterPeople(db, eventId, { ...rosterOptions(state, lang), sort: 'name' });
+const types = await listTicketTypes(db, lang, eventId);
+const base = `/admin/registration/${eventId}`;
+const statusOptions = ['confirmed', 'waitlist', 'review', 'pending'] as const;
+---
+
+<PrintSheet title={`${t(lang, 'admin.reg.sheet.title')} · ${eventTitle}`} lang={lang}>
+  <form method="get" class="print-toolbar" data-testid="sheet-filters">
+    <a href={base}>{t(lang, 'admin.reg.backToEvent')}</a>
+    <label class="text-sm">{t(lang, 'admin.reg.status')}
+      <select name="status">
+        {statusOptions.map((s) => <option value={s} selected={state.status.join(',') === s}>{t(lang, `admin.reg.status.${s}`)}</option>)}
+        <option value="confirmed,waitlist,review,pending" selected={state.status.length > 1}>{t(lang, 'admin.reg.badges.allActive')}</option>
+      </select>
+    </label>
+    {types.length > 0 && (
+      <label class="text-sm">{t(lang, 'admin.reg.ticketType')}
+        <select name="type">
+          <option value="">{t(lang, 'admin.reg.allTypes')}</option>
+          {types.map((ty) => <option value={ty.id} selected={state.type === ty.id}>{ty.label}</option>)}
+        </select>
+      </label>
+    )}
+    <button type="submit">{t(lang, 'admin.reg.filter')}</button>
+    <button type="button" class="print-primary" data-print>{t(lang, 'admin.reg.print')}</button>
+  </form>
+  <main class="sheet" data-testid="sign-in-sheet">
+    <h1 class="sheet-title">{eventTitle}</h1>
+    <p class="sheet-meta">{formatDate(event.starts_at.slice(0, 10), lang)}{event.location ? ` · ${event.location}` : ''} · {rows.length} {t(lang, 'admin.reg.badges.count')}</p>
+    <table class="sheet-table">
+      <thead>
+        <tr>
+          <th class="sheet-n">#</th>
+          <th>{t(lang, 'admin.reg.sheet.person')}</th>
+          <th>{t(lang, 'admin.reg.ticketType')}</th>
+          <th>{t(lang, 'admin.reg.confirmation')}</th>
+          <th class="sheet-sign">{t(lang, 'admin.reg.sheet.signature')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, i) => (
+          <tr>
+            <td class="sheet-n">{i + 1}</td>
+            <td class="sheet-name">{row.people[0]?.name ?? row.registration.name}</td>
+            <td>{row.people[0]?.ticketLabel ?? ''}</td>
+            <td class="sheet-conf">{row.registration.confirmation_no ?? ''}</td>
+            <td class="sheet-sign"></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </main>
+  <script is:inline>
+    document.querySelector('[data-print]')?.addEventListener('click', function () { window.print(); });
+  </script>
+</PrintSheet>
+
+<style is:global>
+  .sheet { max-width: 60rem; margin: 0 auto; padding: 1.5rem; }
+  .sheet-title { font-family: var(--font-display); font-size: 1.5rem; font-weight: 700; }
+  .sheet-meta { margin: .25rem 0 1rem; color: var(--color-ink-muted); font-size: .875rem; }
+  .sheet-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+  .sheet-table th { text-align: left; padding: .4rem .5rem; border-bottom: 2px solid var(--color-ink); font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; }
+  .sheet-table td { height: 2.25rem; padding: .25rem .5rem; border-bottom: 1px solid var(--color-border-strong); }
+  .sheet-table tr { break-inside: avoid; }
+  .sheet-n { width: 2.5rem; color: var(--color-ink-muted); font-variant-numeric: tabular-nums; }
+  .sheet-name { font-weight: 600; }
+  .sheet-conf { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .sheet-sign { width: 35%; }
+</style>

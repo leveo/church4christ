@@ -886,6 +886,9 @@ export async function resolveRegistrationCheckoutRequest(
   // request (priceTicketSelection throws ticket_type_required) and the totals must match the database.
   const priced = await priceTicketSelection(db, normalized.eventId, normalized.party?.attendees ?? [{ ticketTypeId: null }]);
   if (normalized.tickets ? priced !== normalized.amountCents : priced !== null) throw new Error('ticket_type_invalid');
+  // An event that requires approval is free (no seat is held for payment there): refuse before reserving anything.
+  const approval = await db.prepare(`SELECT requires_approval FROM reg_events WHERE id = ?1`).bind(normalized.eventId).first<{ requires_approval: number }>();
+  if (approval?.requires_approval === 1) throw new Error('approval_requires_free');
   const serializedRequest = JSON.stringify(requestJson);
   const statements: AppStatement[] = [
     // Acquire the parent-row lock before the registration insert takes its FK
@@ -903,9 +906,9 @@ export async function resolveRegistrationCheckoutRequest(
       .prepare(
         `INSERT INTO registrations
            (id, event_id, person_id, name, email, status, amount_cents, currency, submission_key, confirmation_no, party_size,
-            locale, phone)
-         SELECT ?1, e.id, ?3, ?4, ?5, 'pending', ?6, ?7, ?8, ${confirmationNoSql('e')}, ?9, ?10, ?11
-         FROM reg_events e WHERE e.id = ?2 AND e.is_template = 0`,
+            locale, phone, payment_method)
+         SELECT ?1, e.id, ?3, ?4, ?5, 'pending', ?6, ?7, ?8, ${confirmationNoSql('e')}, ?9, ?10, ?11, 'stripe'
+         FROM reg_events e WHERE e.id = ?2 AND e.is_template = 0 AND e.requires_approval = 0`,
       )
       .bind(
         registrationId,

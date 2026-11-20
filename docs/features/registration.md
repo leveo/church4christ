@@ -36,8 +36,18 @@ It replaces the paper sign-up sheet, the separate payment link, and the spreadsh
   in every language your site has turned on. Emails arrive in the language the person used.
 - **A roster your team can export.** Every sign-up lands on the event's roster. One click
   downloads it as a spreadsheet (CSV).
+- **A back office for each event.** One page shows the numbers at a glance, a roster you can
+  search and filter, and every detail of each sign-up. Staff can fix mistakes, add walk-ins,
+  approve sign-ups, spot double sign-ups, and email everyone who registered.
+- **A check-in desk for the door.** Volunteers find people on a phone by name or by scanning
+  the QR code in their email, and check them in. Several phones stay in step.
+- **Badges, a sign-in sheet, and refunds.** Print name badges and a sign-in sheet. On paid
+  events, refund all or part of a card payment from the same page.
+- **Access for one event only.** Give a volunteer a role on one event, such as the check-in
+  desk, without opening the rest of the admin area.
 
-Rosters hold names and emails, so the admin pages and exports are open only to staff.
+Rosters hold names and emails, so the admin pages and exports are open only to staff and to
+people you give a role on that event.
 
 ## Free and paid events
 
@@ -71,12 +81,16 @@ Open **New event** to fill in:
 - the **waitlist** switch,
 - **Max people per registration** (1 to 20, default 1; see "Families and groups"),
 - **Allow self-service changes** (on by default; see "Changes by the registrant"),
+- **Requires approval** (off by default; free events only; see "Approval"),
+- **Reminder email (days before)** (blank for none, or 1 to 30; see "Reminder emails"),
 - optional **Notes for registrants** (one tab per language),
 - the schedule: **Visible from**, **Opens**, and **Closes**.
 
 ![The event editor, with a language tab for each site language](../images/registration/admin-editor.png)
 
 ![The editor's group size, self-service, and notes settings](../images/registration/admin-editor-party.png)
+
+![The Requires approval switch and the Reminder email setting](../images/registration/backoffice-settings.png)
 
 **Notes for registrants** are shown on the event page, on the registrant's private page, and in
 their emails. Use them for parking, what to bring, or the schedule.
@@ -165,8 +179,9 @@ the form.
   sign-ups.
 - On the default D1 database, ticket prices must be free. Paid tickets need Postgres
   (Supabase) and Stripe, like paid events.
-- People cannot change their ticket type on the private manage page. To change one, ask the
-  office to cancel that person and register them again.
+- People cannot change their ticket type on the private manage page. Staff can change it
+  from the registration's detail panel (see "A registration's detail panel"). The amount
+  already charged is not recalculated.
 
 ### Templates
 
@@ -253,9 +268,15 @@ group) joins the waitlist. They see a message that says they are on the waitlist
 People get an email when they:
 
 - are confirmed, or join the waitlist,
+- sign up for an event that requires approval ("we received your registration", with no QR
+  code yet),
+- are accepted, put on the waitlist, or declined by your team (see "Approval"),
 - pay (a paid sign-up is confirmed only after Stripe confirms the payment),
 - move from the waitlist to confirmed,
-- cancel, or are cancelled by your team.
+- cancel, or are cancelled by your team,
+- are due a reminder, if the event has one (see "Reminder emails").
+
+Your team can also write to everyone at once (see "Email the registrants").
 
 Each email arrives in the person's language. It shows the event, the time in your church's
 time zone, the place, the confirmation number, the people, your notes, and a QR code. The
@@ -263,7 +284,9 @@ confirmation also has a calendar file (.ics) and a **Manage my registration** bu
 
 The button opens a private page. **Only the newest email's link works.** Each new email gives
 a fresh link and turns off the one in older emails. If someone says their link stopped working,
-ask them to use the link in the most recent email.
+ask them to use the link in the most recent email. Reminders, accept and waitlist emails, and
+**Resend confirmation** all bring a fresh link. A decline email and a message from **Email the
+registrants** have no link and leave the current one working.
 
 If an email could not be sent, the site tries again during its daily job. The first daily job
 after you upgrade does **not** email people who registered before the upgrade.
@@ -294,7 +317,8 @@ want to handle all changes yourself.
 Signed-in members can do the same from **My events**.
 
 **Paid sign-ups are not refunded automatically.** The page tells people to contact the church
-office. Refund in Stripe yourself.
+office. Staff with the payment operations permission can refund from the registration's
+detail panel, or in the Stripe dashboard (see "Refunds").
 
 ### Waitlist promotion
 
@@ -303,6 +327,10 @@ On free events, when seats free up, the people on the waitlist move to confirmed
 skipped and a smaller group behind it may get the seats. Each promoted person gets an email.
 This also happens when your team cancels a registration. Paid events never have a waitlist.
 
+On an event that **requires approval**, a promoted group moves to **In review**, not to
+confirmed. It holds the seats, and the email says a place opened up and is waiting for
+approval. Your team still decides.
+
 ### Confirmation numbers
 
 Each registration gets a confirmation number such as `R26-0001`. It starts with `R` and the
@@ -310,19 +338,240 @@ last two digits of the event's start year, then counts up from 0001 within that 
 your own prefix, set the **confirmation prefix** on the event: one to six capital letters or
 digits.
 
-### Roster and CSV
+### The event page
 
-The **Questions & roster** page lists every registration: confirmation number, name, email,
-status, party size, amount, when they signed up, each answer, the names of the people, and
-the phone number. Statuses are confirmed,
-pending, waitlist, and cancelled. 
+Open an event from **Admin → Registration** to reach its page. The top of the page is an
+**overview**:
 
-**Export CSV** downloads the roster. The columns are, in this order: Confirmation, Name,
-Email, Status, Party size, Amount, Registered, one column per question that is asked once, then **People** and
-**Phone**. After those come **Ticket types** (only for events that have ticket types, written
-like "Ana: Adult; Ben: Child") and one column for each per-person question. The earlier
-columns keep their order, so existing scripts that read by position keep working. Cancelling a registration frees its seats and starts waitlist
-promotion.
+- **Seats taken** (out of the capacity), **Seats left**, **On the waitlist**, **Awaiting a
+  decision**, and **Checked in** (out of the people who are confirmed).
+- A count for each status: Confirmed, In review, Waitlist, Pending, Declined, and Cancelled.
+- Seats taken and the waitlist for each ticket type.
+- A tally for every dropdown, checkbox, and yes/no question, such as how many people chose
+  each T-shirt size.
+- On events that took money: **Collected**, **Refunded**, and **Net collected**.
+
+![The event overview: seats, waitlist, decisions, check-ins, and answer tallies](../images/registration/backoffice-overview.png)
+
+Below it is the **roster**. It shows 50 registrations per page.
+
+- **Search** by name, email, phone, or confirmation number. The names of everyone in a group
+  are searched too. On the default D1 database, search ignores capital letters for English
+  letters only.
+- Press a **status** to show only that status. Each one shows its count.
+- Filter by **Ticket type**, by **At the door** (checked in or not yet), or by an **Answer**
+  to a dropdown, checkbox, or yes/no question.
+- **Sort by** newest, oldest, name, status, or confirmation number.
+- **By registration** shows one row per sign-up. **By person** shows one row per person.
+
+![The roster filtered to sign-ups that are in review](../images/registration/backoffice-roster.png)
+
+The statuses are:
+
+| Status | Meaning |
+|---|---|
+| **Confirmed** | Has a seat. |
+| **In review** | Waiting for your team to decide. Holds its seats. |
+| **Waitlist** | Waiting for a seat. |
+| **Pending** | Paying at Stripe. Holds its seats until Stripe answers. |
+| **Declined** | Your team said no. |
+| **Cancelled** | Cancelled by the person or by your team. |
+
+### A registration's detail panel
+
+Press **Open** on a roster row. A panel shows the contact, the people with their ticket types
+and answers, who decided and when, and when the confirmation was sent. If you can make
+changes, the panel also lets you:
+
+- **Edit details:** the contact's name, email, and phone, each person's name, and the
+  answers. Staff can leave required answers blank.
+- **Change** one person's ticket type. The amount already charged is not recalculated.
+- **Add a person** or **Remove** one. Removing the last person cancels the registration. A
+  paid registration cannot get extra people: add a new registration instead.
+- **Move to the waitlist** or **Move to confirmed** (free registrations only). The person moved
+  is not emailed. Press **Resend confirmation** if they should hear about it.
+- **Cancel registration.** The seats go to the waitlist and the person gets an email.
+- **Resend confirmation.** This sends a fresh private link. The old link stops working.
+- Write a **Staff note**. Only staff see it.
+- **Refund** a paid registration (see "Refunds").
+
+![The detail panel of a confirmed registration](../images/registration/backoffice-drawer.png)
+
+The **History** at the bottom lists every change: who made it and when. Check-ins, emails sent
+from the page, and refunds appear there too.
+
+![A registration's history](../images/registration/backoffice-history.png)
+
+On a phone, the panel fits the screen.
+
+![The detail panel on a phone](../images/registration/backoffice-drawer-mobile.png)
+
+**Two people editing at once.** If someone else changed the registration after you opened it,
+your change is not saved. The page says "Someone else changed this registration." Reload and
+try again. Changes the registrant makes on their private page count too.
+
+**Going over the limit.** If a change would put the event or a ticket type over its limit, the
+page asks first. Press **Do it anyway** to go ahead.
+
+### Approval
+
+Turn on **Requires approval** in the event's settings when you want to choose who comes.
+Approval is for free events only. The switch is turned off while the event or any active
+ticket type has a price.
+
+- New sign-ups become **In review**. They hold their seats while they wait. The person gets a
+  "we received your registration" email without a QR code. Their private page says "Waiting
+  for approval".
+- If the event is full and the waitlist is on, new sign-ups join the waitlist as usual.
+- Open the registration and press **Accept**, **Waitlist**, or **Decline**. The person is
+  emailed the result. An accepted person gets the full confirmation with the QR code and a
+  calendar file. A declined person gets a polite note.
+- Waitlisting or declining someone frees their seats. The oldest group on the waitlist then
+  moves to **In review**, not straight to confirmed.
+- You can also accept someone who is on the waitlist or was declined earlier. If that goes
+  over the limit, the page asks first.
+
+![The Accept, Waitlist, and Decline buttons on a sign-up in review](../images/registration/backoffice-approval.png)
+
+### Add a registration by hand
+
+Use **Add a registration by hand** for walk-ins and phone sign-ups. Fill in the contact, then
+each person with a ticket type and answers. It works even when sign-up is closed, and required
+answers may be left blank. If the event is full, the page asks first. Tick **Email the
+confirmation to the registrant** to send the usual email.
+
+A registration added by hand is **confirmed at once**, even on an event that requires approval.
+
+On a paid event the page never charges a card. Choose **Cash or check** and enter the amount
+collected, or **Complimentary** for no charge.
+
+![The form for adding a registration by hand](../images/registration/backoffice-manual-add.png)
+
+### Possible duplicates
+
+**Possible duplicates** lists sign-ups that look like the same people twice: the same
+person's name (capitals, accents, and extra spaces ignored), the same email, or the same phone
+number. Cancelled and declined sign-ups are left out. Open one and cancel it if it is extra.
+
+### Reminder emails
+
+Set **Reminder email (days before)** on the event, from 1 to 30. The daily job then sends one
+reminder to each confirmed registration once the event is that many days away. The reminder
+has the event details, the people, your notes, the QR code, and a fresh private link. Each
+registration gets it once. A send that fails is tried again the next day.
+
+The daily job sends up to 40 reminders a day across all events. For a big event, the rest go
+out on the following days, so allow a few extra days.
+
+### Email the registrants
+
+**Email the registrants** sends one message to many people.
+
+1. Choose **Who gets it** by status (Confirmed is ticked to start) and, if you like, one
+   ticket type.
+2. Write a **Subject** (up to 200 characters) and a **Message** (plain text, up to 10,000
+   characters). You can use `{name}`, `{event}`, and `{confirmation}`. Each email fills them in
+   for that person.
+3. Press **Preview recipients** to see how many registrations it will reach.
+4. Press **Send email**.
+
+Each registration gets one email at its contact address. Your message is sent as you wrote it.
+The email's frame and footer are in each person's language. The first 20 emails go out at
+once. The rest go out with the hourly job, up to 60 an hour. The **Email queue** line shows how
+many are waiting, sent, and failed. A failed email is tried up to three times. One message can
+reach up to 5,000 registrations.
+
+![Writing an email to every confirmed registrant](../images/registration/backoffice-bulk-email.png)
+
+### Check-in desk
+
+Press **Check-in desk** on the event page, or open `/admin/registration/<event number>/checkin`.
+The desk is made for a phone at the door.
+
+- **Find someone** by name, confirmation number, email, or phone. Or press **Scan code** and
+  point the camera at the QR code in the person's confirmation email. The code holds the
+  confirmation number. If the camera is not available, search by name instead.
+- The result shows the group: each person's name and ticket type, the confirmation number,
+  and the status. It never shows emails, phone numbers, or answers.
+- Press **Check in** for one person, or **Check in everyone** for the whole group. **Undo**
+  takes a check-in back, as if the person never came. **Check out** records that a person
+  left. They can be checked in again later.
+- A group that is not confirmed (waitlist, in review, payment not finished, cancelled, or
+  declined) shows a warning. So does a person who was cancelled. To check them in anyway, tick
+  **I understand — check in anyway** first.
+- The top shows **Checked in X of Y**. Y is the number of people on confirmed registrations.
+- Several phones can run the desk at once. Every 10 seconds, while the page is open on screen,
+  each desk picks up changes made at the others. Two desks checking in the same person at the
+  same moment record one check-in.
+
+The desk also works without JavaScript, as plain buttons. Check-ins show up in the overview,
+in the roster's **At the door** filter, in each registration's history, and in the people
+export.
+
+### Badges, sign-in sheet, and CSV
+
+The event page has buttons for printing and exports:
+
+- **Badges** prints one badge per person with the name, the event title, and the ticket type.
+  Filter by status (Confirmed to start) and ticket type, then press **Print**.
+- **Sign-in sheet** prints one row per person, sorted by name, with a blank column for a
+  signature. It has the same filters.
+- **Export CSV** downloads one row per registration. The columns are, in this order:
+  Confirmation, Name, Email, Status, Party size, Amount, Registered, one column per question
+  that is asked once, then **People** and **Phone**. After those come **Ticket types** (only for
+  events that have ticket types, written like "Ana: Adult; Ben: Child") and one column for each
+  per-person question. The earlier columns keep their order.
+- **Export people (CSV)** downloads one row per person: Confirmation, Person, Ticket type,
+  Status, Contact name, Email, Phone, Checked in, Registered, then the answers. A family of
+  four is four rows.
+
+![Printable badges](../images/registration/backoffice-badges.png)
+
+Both CSV files now start with an invisible marker (a UTF-8 byte-order mark), so Excel shows
+accents and Chinese correctly. A script that reads the first column header may need to remove it.
+
+### Refunds
+
+Card refunds need **Postgres (Supabase) and Stripe**. Only staff with the **payment
+operations** permission (or the finance team) see the refund controls, and only on events
+where they can manage registrations.
+
+- Open a registration that was paid by card. Under **Refund by card**, enter an amount up to
+  what is still refundable, and tick **Also cancel the registration** if they are not coming.
+  Stripe sends the money back. This cannot be undone.
+- A double click does not refund twice. If a refund shows an error, reload the page and check
+  the refunded amount before you try again.
+- A refund made in the Stripe dashboard is recorded on the registration too. The two never
+  add up twice.
+- For a payment taken in cash or by check, **Record offline refund** only updates the books.
+  No money moves. Add a note if you like.
+- A complimentary registration has nothing to refund.
+
+A refund does not cancel the registration unless you tick the box. The overview shows the
+total refunded.
+
+### Access to one event
+
+Registration admins can give any active member a role on **one** event in the **Access to this event**
+panel at the bottom of the event page. Find the person by name or email, pick a role, and
+press **Save**. Press **Remove** to take it away.
+
+| Role | Can do |
+|---|---|
+| **Viewer** | See the overview, roster, detail panel, and duplicates. Download the CSV files and print badges and the sign-in sheet. Cannot change anything or use the check-in desk. |
+| **Check-in desk** | Use the check-in desk for this event. Cannot see the roster. |
+| **Registrar** | Everything for this event: edits, approval, adding registrations, emails, the check-in desk, exports, and printing. Not the event settings, the form builder, access, or refunds. |
+
+![The Access to this event panel](../images/registration/backoffice-access.png)
+
+The person signs in with their own account. There is no menu link for them, so send them the
+link: `/admin/registration/<event number>` for viewers and registrars, or
+`/admin/registration/<event number>/checkin` for the desk. The site checks their role before
+the page opens and again for every button they press. Without the right role, they are
+turned away.
+
+A person who has a role on an event cannot be merged into another person in the identity
+merge tool until the role is removed. The tool reports it as a conflict.
 
 ### Show registration on a page
 
@@ -332,9 +581,13 @@ an event card can also link straight to a registration event.
 
 ### Who can manage events
 
-Admins and editors can create events, edit questions, and view or export rosters. Volunteer
-team leaders without an editor role cannot. The public pages are open to everyone. A hidden
-anti-spam field quietly drops bot sign-ups so they cannot use up an event's seats.
+**Registration admins** are editors, and admins who hold the **Registration** area (super
+admins always do). They act as registrars on every event, and only they can change event
+settings, build forms, and give people access to one event. Anyone else needs a role on that
+event (see "Access to one event"). Refunds also need the **payment operations** permission.
+Volunteer team leaders without one of these cannot open the admin pages. The public pages are
+open to everyone. A hidden anti-spam field quietly drops bot sign-ups so they cannot use up an
+event's seats.
 
 ### Event admins and the member portal
 
@@ -342,6 +595,9 @@ Registration also stores which people are **event admins**, and which groups are
 event. The Member Portal uses these for event prayers and "My events". These tables are
 available on D1 too, once Registration is enabled. A person who is an event admin cannot be
 merged away into another person in the identity merge tool. The tool reports it as a conflict.
+
+Event admins are separate from the roles in **Access to this event**. An event admin approves
+prayer requests for the event. It does not open the event's roster or check-in desk.
 
 ## Setting it up
 
@@ -386,7 +642,9 @@ five minutes the site recovers lost notices. Admins and finance users can review
 `/admin/stripe-events`.
 
 The **payment operations** permission covers both Giving and paid Registration. Give it only to
-people you trust to reconcile Stripe events and cancel pending paid registrations.
+people you trust to reconcile Stripe events, cancel pending paid registrations, and refund
+registrations. Registration refunds use the `charge.refunded` event you already send to the
+webhook.
 
 Paid registration records no live or test marker of its own. Rehearse in test mode, make one
 small live registration before collecting real fees, and resolve pending checkout requests
@@ -434,6 +692,28 @@ before switching modes.
   `src/lib/regDb.ts`, `src/lib/regBlock.ts` (page-builder card), and the React island for the
   admin form editor (admin only; public pages are unchanged). Tests: shared cases in
   `test/shared/regBuilderCases.ts`.
+- **Back office (Phase 4):** D1 `migrations/0053_registration_back_office.sql` and Postgres
+  `migrations-supabase/0045_registration_back_office.sql` add `reg_events.requires_approval` and
+  `reminder_days`; `registrations.admin_note`, `decided_at`, `decided_by`, `reminder_sent_at`,
+  `version`, `refunded_cents`, and `payment_method` (`stripe`, `offline`, or `comp`; backfilled to
+  `stripe` where a Checkout session exists); and the tables `reg_checkins`, `reg_activity`,
+  `reg_event_access`, and `reg_outbox`. The `review` and `declined` statuses, allowed since
+  0050 and 0042, are now used. Modules:
+  `src/lib/regAccess.ts` (roles and needs), `src/lib/regAdmin.ts` and `src/lib/regAdminCore.ts`
+  (roster, detail panel writes with `version` checks and the `NEEDS_CONFIRM` soft confirm,
+  approval, manual add, duplicates, overview), `src/lib/regAdminPage.ts` (the one POST action
+  table, `REG_ADMIN_ACTIONS`, each with its need), `src/lib/regCheckin.ts`, `src/lib/regDesk.ts`
+  and `src/lib/reg-desk-client.ts` (the desk; `jsqr` is imported only there, and only when the
+  browser has no `BarcodeDetector`), `src/lib/regOutbox.ts` and `src/lib/regMessaging.ts`
+  (reminder candidates, bulk audience and outbox), `src/lib/regRefunds.ts` (Stripe refunds with
+  an idempotency key, offline refunds), and `src/lib/regExport.ts` (per-person CSV and the BOM).
+  `sweepReminders` (`REMINDER_SWEEP_LIMIT` 40) runs in the daily `0 13 * * *` cron, and
+  `sweepOutbox` (`CRON_DRAIN_LIMIT` 60) in the hourly `0 * * * *` cron; a send drains
+  `DRAIN_ON_REQUEST` (20) at once. `charge.refunded` for a registration's PaymentIntent goes
+  through `syncRefundedTotal`, which only raises `refunded_cents` to Stripe's cumulative amount.
+  Pages: `src/pages/admin/registration/[id].astro` with `src/components/regAdmin/`, plus
+  `[id]/checkin.astro`, `[id]/badges.astro`, `[id]/sign-in-sheet.astro`,
+  `[id]/export.csv.ts`, and `[id]/export-people.csv.ts`.
 - **Key modules:** `src/lib/regDb.ts` (reads, the shared locked registration writer that
   enforces capacity, waitlist, confirmation numbers, roster and CSV, `cloneEvent`,
   `setEventLifecycle`), `src/lib/regPhase.ts` (pure `eventPhase`, `isEventFull`,
@@ -443,7 +723,17 @@ before switching modes.
   `/api/identity/continuation/start` and finish after email verification.
 - **Stripe:** paid registrations ride the shared webhook, `src/pages/api/stripe/webhook.ts`
   to `src/lib/givingWebhook.ts`, routed by `metadata.kind === 'registration'`.
-- **Access:** admin pages and the CSV route require `editor` or `admin` before any read.
+- **Access:** registration admins (`hasRegistrationArea`: an editor, or an admin with the
+  `registration` area) are registrars on every event. Per-event roles live in `reg_event_access`
+  and are capabilities, not a ladder: `viewer` = view, `desk` = checkin, `registrar` = view,
+  checkin, and manage. `REG_EVENT_STAFF_PATHS` in `src/lib/routePolicy.ts` is the one table of
+  per-event pages (`/admin/registration/<id>` and its exports, badges, and sign-in sheet need
+  view; `/checkin` needs checkin). Those paths are the `regEventStaff` route class, and
+  `src/middleware.ts` runs `requireRegRole` for the event in the URL before the page (fail
+  closed; a path the table does not know is refused). Pages and every action check again, and
+  each action derives the event from the registration or attendee it targets. Event settings,
+  the builder, and grants need `canEditEvent`; refunds need `canRefund`. Every other
+  `/admin/registration` path stays registration-admins only.
 - **Demo data:** `seed/registration-seed.sql` (Postgres) seeds fictional events and
   registrations.
 - **Tests:** `test/e2e/registration.e2e.test.ts` (D1 end to end), `test/regCore.d1.test.ts`
@@ -453,4 +743,11 @@ before switching modes.
   `regSchema.test.ts`, `regWebhook.test.ts`. Phase 2 adds `test/regCampus.d1.test.ts`,
   `test/regManageApi.d1.test.ts`, `test/regNotify.d1.test.ts` and `test/pg/regNotify.pg.test.ts`
   (shared cases in `test/shared/regNotifyCases.ts`), `test/regEmails.test.ts`, `test/qrPng.test.ts`,
-  `test/regPublic.test.ts`, and more e2e cases. See [Modules](modules.md).
+  `test/regPublic.test.ts`, and more e2e cases. Phase 4 adds shared cases in
+  `test/shared/regOfficeCases.ts`, `regMessagingCases.ts`, `regDeskCases.ts`, and
+  `regBackOfficeUiCases.ts` (run by `test/regOffice.d1.test.ts`, `test/regMessaging.d1.test.ts`,
+  `test/regDesk.d1.test.ts`, `test/regBackOfficeUi.d1.test.ts` and their `test/pg/` twins),
+  `test/pg/regRefunds.pg.test.ts`, `test/regBackOfficeSchema.d1.test.ts`,
+  `test/regEventStaffGate.test.ts`, `test/regEventStaffMiddleware.test.ts`,
+  `test/regExportGuard.test.ts`, `test/node/registrationBackOfficeMigration.test.ts`, and
+  `test/e2e/regBackOffice.e2e.test.ts` and `test/e2e/regDesk.e2e.test.ts`. See [Modules](modules.md).

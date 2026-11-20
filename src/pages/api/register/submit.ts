@@ -245,7 +245,8 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
       // replayed submission has no token and is not mailed again). Awaited rather than
       // deferred: on Postgres the request's client is drained once the redirect returns.
       // Never throws; a failed send is retried by the daily sweep.
-      if (created.manageToken && (created.status === 'confirmed' || created.status === 'waitlist')) {
+      // An approval event's sign-up is 'review': it gets the "received, waiting for approval" mail (no QR).
+      if (created.manageToken && (created.status === 'confirmed' || created.status === 'waitlist' || created.status === 'review')) {
         await deps.sendConfirmation(env as unknown as RegNotifyEnv, locals.db, created.id, { manageToken: created.manageToken });
       }
       // The confirmed-or-waitlisted registration opens on its manage page (the token only exists

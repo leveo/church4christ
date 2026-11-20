@@ -75,6 +75,7 @@
     "@fontsource-variable/space-grotesk": "^5.3.0",
     "astro": "^7.3.3",
     "jose": "^6.2.12",
+    "jsqr": "1.4.0",
     "postgres": "^3.4.9",
     "qrcode-generator": "2.0.4",
     "react": "^19.3.0",

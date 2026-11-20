@@ -77,30 +77,30 @@ export interface ValidSubmission {
 
 export type SubmissionResult = { ok: true; value: ValidSubmission } | { ok: false; errors: SubmissionError[] };
 
-const clean = (value: unknown): string => (typeof value === 'string' ? value.normalize('NFC').trim() : '');
+export const clean = (value: unknown): string => (typeof value === 'string' ? value.normalize('NFC').trim() : '');
 const codePoints = (value: string): number => Array.from(value).length;
 
-function nameError(value: string, required: boolean): string | null {
+export function nameError(value: string, required: boolean): string | null {
   if (value === '') return required ? 'required' : null;
   if (codePoints(value) > MAX_NAME_LENGTH) return 'too_long';
   if (CONTROL_RE.test(value)) return 'invalid';
   return null;
 }
 
-function phoneError(value: string): string | null {
+export function phoneError(value: string): string | null {
   if (value === '') return null;
   if (value.length > MAX_PHONE_LENGTH) return 'too_long';
   if (!PHONE_RE.test(value) || !/[0-9]/u.test(value)) return 'invalid';
   return null;
 }
 
-const toConditionQuestion = (q: RegQuestion): ConditionQuestion => ({
+export const toConditionQuestion = (q: RegQuestion): ConditionQuestion => ({
   id: q.id, type: q.type, scope: q.scope, options: q.options, condition: q.condition,
 });
 
 /** Check one set of raw answers against the questions of one scope: shown questions only (conditions
  *  applied; a hidden question is never required and its value is dropped), collecting every problem. */
-function checkScopeAnswers(
+export function checkScopeAnswers(
   questions: RegQuestion[],
   shown: Set<number>,
   scope: RegQuestion['scope'],
@@ -654,7 +654,11 @@ export async function updateRegistrationSelf(
   for (const [attendeeId, pairs] of personAnswers) personAnswers.set(attendeeId, await keepAcceptance(pairs, 'reg_attendee_answers', attendeeId));
 
   const open = `status NOT IN ('cancelled','declined')`;
-  const stmts: AppStatement[] = [];
+  // Any registrant edit moves the version (first, like the back office's guarded writes: registration row before
+  // its child rows), so a staff drawer opened before it cannot save over it unnoticed.
+  const stmts: AppStatement[] = [
+    db.prepare(`UPDATE registrations SET version = version + 1, updated_at = datetime('now') WHERE id = ?1 AND ${open}`).bind(id),
+  ];
   if (name !== null) {
     stmts.push(db.prepare(`UPDATE registrations SET name = ?1, updated_at = datetime('now') WHERE id = ?2 AND ${open}`).bind(name, id));
   }
@@ -706,7 +710,7 @@ export async function updateRegistrationSelf(
       );
     }
   }
-  if (stmts.length > 0) await db.batch(stmts);
+  if (stmts.length > 1) await db.batch(stmts);
   return { ok: true };
 }
 
@@ -747,7 +751,7 @@ export async function cancelAttendee(
     // party_size follows the active count (idempotent: it only moves while it is above it)...
     db
       .prepare(
-        `UPDATE registrations SET party_size = party_size - 1, updated_at = datetime('now')
+        `UPDATE registrations SET party_size = party_size - 1, version = version + 1, updated_at = datetime('now')
          WHERE id = ?1 AND status NOT IN ('cancelled','declined')
            AND ${activeCount} >= 1 AND party_size > ${activeCount}`,
       )
@@ -755,7 +759,7 @@ export async function cancelAttendee(
     // ...and the last person leaving cancels the registration (party_size stays 1, the column minimum).
     db
       .prepare(
-        `UPDATE registrations SET status = 'cancelled', cancelled_at = datetime('now'), updated_at = datetime('now')
+        `UPDATE registrations SET status = 'cancelled', cancelled_at = datetime('now'), version = version + 1, updated_at = datetime('now')
          WHERE id = ?1 AND status NOT IN ('cancelled','declined') AND ${activeCount} = 0
          RETURNING id`,
       )

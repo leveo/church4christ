@@ -34,8 +34,14 @@ export async function saveEventFromForm(
   if (backend === 'd1' && data.price_cents !== null) {
     return { ok: false, errors: { price: 'admin.reg.priceD1Error' } };
   }
-  const id = await saveEvent(db, { ...(opts.id !== null ? { id: opts.id } : {}), ...data });
-  return { ok: true, id };
+  try {
+    const id = await saveEvent(db, { ...(opts.id !== null ? { id: opts.id } : {}), ...data });
+    return { ok: true, id };
+  } catch (error) {
+    // "Requires approval" holds a seat for a FREE sign-up: a price on the event or an active ticket type is refused.
+    if ((error as Error).message === 'approval_requires_free') return { ok: false, errors: { requires_approval: 'admin.reg.bo.e.approvalFree' } };
+    throw error;
+  }
 }
 
 const LIFECYCLE_ACTIONS: readonly RegLifecycleAction[] = ['open_now', 'close_now', 'hide', 'show'];

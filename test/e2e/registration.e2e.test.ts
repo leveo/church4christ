@@ -38,6 +38,9 @@ async function enableRegistration(): Promise<void> {
 /** Put the seeded events and their data back to the seed state (worker writes are not rolled back between tests). */
 async function resetRegistrationData(): Promise<void> {
   const run = (sql: string) => env.DB.prepare(sql).run();
+  await run(`DELETE FROM reg_outbox`);
+  await run(`DELETE FROM reg_activity`);
+  await run(`DELETE FROM reg_event_access`);
   await run(`DELETE FROM reg_ticket_types WHERE event_id IN (920, 930)`);
   await run(`DELETE FROM reg_answers`);
   await run(`DELETE FROM reg_attendees`);
@@ -49,7 +52,7 @@ async function resetRegistrationData(): Promise<void> {
   await run(`DELETE FROM email_log`);
   await run(`DELETE FROM newcomer_rate_limits`);
   await run(`UPDATE reg_events SET active = 1, price_cents = NULL, waitlist_enabled = 1, next_confirmation = 1, capacity = 3,
-    max_party_size = 4, allow_self_edit = 1,
+    max_party_size = 4, allow_self_edit = 1, requires_approval = 0, reminder_days = NULL,
     confirmation_prefix = NULL, visible_from = NULL, starts_at = datetime('now','+14 days','start of day','+18 hours'),
     opens_at = NULL, closes_at = datetime('now','+12 days','start of day','+23 hours') WHERE id = 920`);
   await run(`UPDATE reg_events SET active = 1, price_cents = NULL, waitlist_enabled = 1, next_confirmation = 1,
@@ -850,7 +853,10 @@ describe('Registration on D1: ticket types, per-person questions and show-if', (
     // The roster shows each person with their type, and the CSV appends the new columns at the END.
     const roster = await (await get(`/admin/registration/${id}`, { cookie: await ADMIN() })).text();
     expect(roster).toMatch(/data-ticket> · Child/);
-    expect(roster).toContain('Shirt size: Medium');
+    // The people's answers are in the registration's detail panel (?reg=), not in the roster rows.
+    const regId = (await env.DB.prepare(`SELECT id FROM registrations WHERE event_id = ?1 ORDER BY id LIMIT 1`).bind(id).first<number>('id'))!;
+    const detail = await (await get(`/admin/registration/${id}?reg=${regId}`, { cookie: await ADMIN() })).text();
+    expect(detail).toContain('Shirt size: Medium');
     const csv = (await (await get(`/admin/registration/${id}/export.csv`, { cookie: await ADMIN() })).text()).split('\r\n');
     expect(csv[0]).toBe('Confirmation,Name,Email,Status,Party size,Amount,Registered,Need childcare?,Photo release,People,Phone,Ticket types,Shirt size,Allergies');
     expect(csv[1]).toContain('Sarah Johnson: Adult; Mia Johnson: Child,Sarah Johnson: Small; Mia Johnson: Medium,Mia Johnson: none');

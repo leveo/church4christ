@@ -18,8 +18,9 @@ import { MODULE_KEYS, filterByBackend, getEnabledModules, moduleForPath } from '
 import { applySecurityHeaders } from './lib/securityHeaders';
 import { SESSION_COOKIE, verifySession } from './lib/session';
 import { loadSessionUser, loadSessionUserByEmail } from './lib/currentUser';
-import { canAccess, classifyRoute } from './lib/routePolicy';
+import { canAccess, classifyRoute, regEventStaffGate } from './lib/routePolicy';
 import { adminAreaForPath, hasAreaAccess } from './lib/adminAreas';
+import { requireRegRole } from './lib/regAccess';
 import { hasValidMutationProvenance } from './lib/csrf';
 import { openDb, type DbEnv } from './lib/dbProvider';
 import {
@@ -385,11 +386,24 @@ export const onRequest = defineMiddleware(async (context, next) => {
     // pre-session), role short = 403 (canAccess), grant missing = 403 (here).
     // Unknown /admin paths carry no area and fail closed to super-admin-only.
     const u = context.locals.user;
-    if (u?.isAdmin && !u.isSuperAdmin && (rest === '/admin' || rest.startsWith('/admin/'))) {
+    // The per-event registration pages are the exception: a limited admin with only a per-event role (no
+    // `registration` area) must reach them, and the page itself checks the role (regEventRole).
+    if (u?.isAdmin && !u.isSuperAdmin && cls !== 'regEventStaff' && (rest === '/admin' || rest.startsWith('/admin/'))) {
       if (rest !== '/admin') {
         const area = adminAreaForPath(rest);
         if (!area || !hasAreaAccess(u, area)) return finish(forbidden(context.locals.locale));
       }
+    }
+
+    // regEventStaff only requires a session in canAccess, so fail closed HERE: the person must hold the
+    // capability for the event in the URL (view for the event page, checkin for the desk) before the page runs.
+    // Pages still check each action's own need; this gate means a page that forgets cannot leak to every member.
+    if (cls === 'regEventStaff') {
+      const gate = regEventStaffGate(rest);
+      // A path the policy class admits but the gate table does not know can never pass: fail closed.
+      if (!gate) return finish(forbidden(context.locals.locale));
+      const check = await requireRegRole(context.locals.db, u, gate.eventId, gate.need);
+      if (!check.ok) return finish(check.status === 404 ? opaqueNotFound() : forbidden(context.locals.locale));
     }
 
     const res = await next();

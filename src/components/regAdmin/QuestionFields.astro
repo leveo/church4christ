@@ -1,0 +1,60 @@
+---
+// The form fields for one scope of an event's questions, used by the staff edit form and the manual add form.
+// Field names are `<prefix><questionId>` (a checkbox posts several values); `values` are the stored answers
+// (option keys, a JSON list for checkboxes). Staff may leave any question blank, so nothing is `required`.
+import { decodeChoices, type RegQuestion } from '../../lib/regDb';
+import { tin, lab } from '../../lib/adminUi';
+import { t } from '../../lib/i18n';
+import type { Locale } from '../../lib/locales';
+
+interface Props {
+  questions: RegQuestion[];
+  prefix: string;
+  values?: Record<number, string>;
+  lang: Locale;
+}
+const { questions, prefix, values = {}, lang } = Astro.props;
+const INPUT_TYPE: Record<string, string> = { text: 'text', number: 'text', date: 'date', email: 'email', phone: 'tel' };
+---
+{questions.map((q) => {
+  const name = `${prefix}${q.id}`;
+  const raw = values[q.id];
+  if (q.type === 'section') return <p class="mt-2 text-xs font-semibold uppercase tracking-caps text-ink-subtle">{q.label}</p>;
+  if (q.type === 'checkbox') {
+    const chosen = new Set(raw === undefined ? [] : decodeChoices(raw));
+    return (
+      <fieldset class="block">
+        <legend class={lab}>{q.label}</legend>
+        <div class="flex flex-wrap gap-x-4 gap-y-1">
+          {(q.options ?? []).map((key) => (
+            <label class="inline-flex min-h-9 items-center gap-2 text-sm"><input type="checkbox" name={name} value={key} checked={chosen.has(key)} /> {q.option_labels[key] ?? key}</label>
+          ))}
+        </div>
+      </fieldset>
+    );
+  }
+  if (q.type === 'terms') {
+    return <label class="flex min-h-9 items-center gap-2 text-sm"><input type="checkbox" name={name} value="yes" checked={raw !== undefined && raw !== ''} /> {q.label}</label>;
+  }
+  return (
+    <label class="block">
+      <span class={lab}>{q.label}</span>
+      {q.type === 'textarea' ? (
+        <textarea name={name} rows="2" class={tin}>{raw ?? ''}</textarea>
+      ) : q.type === 'select' ? (
+        <select name={name} class={tin}>
+          <option value=""></option>
+          {(q.options ?? []).map((key) => <option value={key} selected={raw === key}>{q.option_labels[key] ?? key}</option>)}
+        </select>
+      ) : q.type === 'yesno' ? (
+        <select name={name} class={tin}>
+          <option value=""></option>
+          <option value="yes" selected={raw === 'yes'}>{t(lang, 'register.yes')}</option>
+          <option value="no" selected={raw === 'no'}>{t(lang, 'register.no')}</option>
+        </select>
+      ) : (
+        <input name={name} type={(INPUT_TYPE[q.type] ?? 'text') as 'text'} inputmode={q.type === 'number' ? 'decimal' : undefined} value={raw ?? ''} class={tin} />
+      )}
+    </label>
+  );
+})}

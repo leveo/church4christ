@@ -1,12 +1,13 @@
 // The registration email builders: per status, per language, escaping, and which parts
 // (manage link, QR, calendar) each variant carries.
 import { describe, expect, it } from 'vitest';
-import { cancelledEmail, confirmationEmail, promotedEmail, registrationManageUrl, registrationQrUrl } from '../src/lib/regEmails';
+import { bulkEmail, cancelledEmail, confirmationEmail, decisionEmail, promotedEmail, registrationManageUrl, registrationQrUrl, reminderEmail } from '../src/lib/regEmails';
+import { bannerKey, statusLabelKey } from '../src/lib/regViewHtml';
 import { loadDict } from '../src/lib/i18n';
 import { SUPPORTED_LOCALES, type Locale } from '../src/lib/locales';
 import type { RegistrationSummary } from '../src/lib/regManage';
 
-function summary(over: { status?: 'confirmed' | 'waitlist' | 'cancelled'; amount?: number; notes?: string | null } = {}): RegistrationSummary {
+function summary(over: { status?: 'confirmed' | 'waitlist' | 'cancelled' | 'review' | 'declined'; amount?: number; notes?: string | null } = {}): RegistrationSummary {
   return {
     event: {
       id: 12, title: 'Fall <Retreat> & Picnic', starts_at: '2031-05-01 23:00:00', ends_at: '2031-05-02 01:00:00',
@@ -156,5 +157,86 @@ describe('attendee lines with ticket types', () => {
     expect(mail.html).toContain('Ada &lt;script&gt; (Adult · $20.00), Bob &amp; Co (Child &lt;3&gt;)');
     expect(mail.text).not.toContain('Vegan');
     expect(mail.html).not.toContain('Vegan');
+  });
+});
+
+describe('approval, decision, reminder and bulk emails', () => {
+  it('review: "waiting for approval" in every language, never confirmed, no QR or calendar', async () => {
+    for (const locale of SUPPORTED_LOCALES) {
+      await loadDict(locale);
+      const mail = confirmationEmail(summary({ status: 'review' }), links(locale));
+      const en = confirmationEmail(summary({ status: 'review' }), links('en'));
+      expect(mail.html).not.toContain('<img');
+      expect(mail.html + mail.text).not.toContain('/register/qr/');
+      expect(mail.attachments).toHaveLength(0);
+      expect(mail.subject).toContain('Fall <Retreat> & Picnic');
+      if (locale !== 'en') expect(mail.text).not.toBe(en.text); // translated, not English
+      expect(mail.text).toContain('#t=');
+    }
+    await loadDict('en');
+    const mail = confirmationEmail(summary({ status: 'review' }), links('en'));
+    expect(mail.subject).toBe('We received your registration: Fall <Retreat> & Picnic');
+    expect(mail.text).toContain('Status: Waiting for approval');
+    expect(mail.text + mail.html).not.toMatch(/Confirmed|You’re registered/);
+    // even a promoted-into-review registration (and a stray paid amount) is never labelled confirmed
+    const promoted = promotedEmail(summary({ status: 'review' }), links('en'));
+    expect(promoted.subject).toBe('A place opened up, waiting for approval: Fall <Retreat> & Picnic');
+    expect(promoted.html + promoted.text).not.toMatch(/Confirmed|<img|qr\//);
+    expect(promotedEmail(summary(), links('en')).subject).toBe('A place opened up for you: Fall <Retreat> & Picnic');
+  });
+
+  it('decisions: accepted carries QR and calendar, waitlisted a link and calendar, declined nothing but a courteous no', async () => {
+    await loadDict('en');
+    const accepted = decisionEmail(summary(), 'accept', links('en'));
+    expect(accepted.subject).toBe('Your registration is approved: Fall <Retreat> & Picnic');
+    expect(accepted.html).toContain('<img');
+    expect(accepted.html).toContain('Confirmed');
+    expect(accepted.attachments).toHaveLength(1);
+    const waitlisted = decisionEmail(summary({ status: 'waitlist' }), 'waitlist', links('en'));
+    expect(waitlisted.subject).toBe('Update on your registration: Fall <Retreat> & Picnic');
+    expect(waitlisted.html).not.toContain('<img');
+    expect(waitlisted.html).toContain('#t=');
+    expect(waitlisted.attachments).toHaveLength(1);
+    const declined = decisionEmail(summary({ status: 'declined' }), 'decline', links('en'));
+    expect(declined.subject).toBe('About your registration: Fall <Retreat> & Picnic');
+    expect(declined.html + declined.text).not.toMatch(/#t=|<img|register\/manage|Hall|Parking/);
+    expect(declined.text).toContain('Not accepted');
+    expect(declined.attachments).toHaveLength(0);
+    // an accepted mail for a registration that is NOT confirmed never shows a QR
+    expect(decisionEmail(summary({ status: 'review' }), 'accept', links('en')).html).not.toContain('<img');
+  });
+
+  it('reminder: details, people, notes, QR and link, escaped once', async () => {
+    await loadDict('en');
+    const mail = reminderEmail(summary(), links('en'));
+    expect(mail.subject).toBe('Reminder: Fall <Retreat> & Picnic');
+    expect(mail.html).toContain('Ada &lt;script&gt;, Bob &amp; Co');
+    expect(mail.html).toContain('Bring a dish<br>Parking &lt;behind&gt;');
+    expect(mail.html).toContain('<img');
+    expect(mail.html).toContain('#t=');
+    expect(mail.attachments).toHaveLength(1);
+  });
+
+  it('bulk: plain text in, escaped once, placeholders filled in a single pass, no links', async () => {
+    await loadDict('en');
+    const mail = bulkEmail(
+      { subject: 'Hi {name}\nBcc: x', body: '<b>Dear</b> {name}, {event} {confirmation} {name}\n{event}', name: '{event} & <i>Ada</i>', eventTitle: 'Retreat <1>', confirmationNo: null },
+      { locale: 'en' },
+    );
+    expect(mail.subject).toBe('Hi {event} & <i>Ada</i> Bcc: x'); // one line, raw; a value holding a placeholder is not expanded again
+    expect(mail.html).toContain('&lt;b&gt;Dear&lt;/b&gt; {event} &amp; &lt;i&gt;Ada&lt;/i&gt;, Retreat &lt;1&gt;  {event} &amp; &lt;i&gt;Ada&lt;/i&gt;<br>Retreat &lt;1&gt;');
+    expect(mail.html).not.toMatch(/<b>|<i>|href|<img/);
+    expect(mail.html).toContain('because you registered for Retreat &lt;1&gt;.');
+    expect(mail.text).toContain('You’re receiving this message because you registered for Retreat <1>.');
+    expect(mail.attachments).toEqual([]);
+  });
+});
+
+describe('review status labels', () => {
+  it('the manage page banner and status label for a registration waiting for approval', () => {
+    expect(bannerKey('review', false)).toBe('register.manage.bannerReview');
+    expect(bannerKey('waitlist', false)).toBe('register.manage.bannerWaitlist');
+    expect(bannerKey('confirmed', true)).toBe('register.manage.bannerPaid');
+    expect(statusLabelKey('review')).toBe('register.manage.status.review');
   });
 });

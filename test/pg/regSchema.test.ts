@@ -482,3 +482,67 @@ describe.skipIf(!hasPg)('Postgres registration builder migration (0044) on exist
     expect(left[0].n).toBe(0);
   });
 });
+
+// 0045 on a database that already holds registrations: every registration with a Checkout session is
+// backfilled as a card payment, everything else keeps NULL, and the new columns default sensibly.
+describe.skipIf(!hasPg)('Postgres registration back office migration (0045) on existing data', () => {
+  const sql = hasPg ? pgClient() : (null as never);
+  const repo = resolve(process.cwd());
+  const scratch = hasPg ? mkdtempSync(join(tmpdir(), 'c4c-reg-office-')) : '';
+  const run = () =>
+    execFileSync('node', [join(repo, 'scripts/db/migrate-supabase.mjs')], {
+      cwd: scratch,
+      env: { ...process.env, SUPABASE_DB_URL: DATABASE_URL },
+      encoding: 'utf8',
+    });
+
+  beforeAll(async () => {
+    await resetSchema(sql);
+    mkdirSync(join(scratch, 'migrations-supabase'));
+    for (const file of readdirSync(join(repo, 'migrations-supabase'))) {
+      if (file.endsWith('.sql') && file < '0045') cpSync(join(repo, 'migrations-supabase', file), join(scratch, 'migrations-supabase', file));
+    }
+    run();
+    await sql.unsafe(`
+      INSERT INTO reg_events (id, starts_at) VALUES (1001, '2026-08-01 09:00:00');
+      INSERT INTO registrations (id, event_id, name, email, status, submission_key, amount_cents, stripe_checkout_session_id) VALUES
+        (3001, 1001, 'Paid', 'paid@example.com', 'confirmed', 'legacy-3001', 500, 'cs_test_3001'),
+        (3002, 1001, 'Free', 'free@example.com', 'confirmed', 'legacy-3002', 0, NULL);
+    `);
+    cpSync(join(repo, 'migrations-supabase/0045_registration_back_office.sql'), join(scratch, 'migrations-supabase/0045_registration_back_office.sql'));
+    run();
+  });
+  afterAll(async () => {
+    await sql?.end();
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it('backfills payment_method only where a Checkout session exists and defaults the new columns', async () => {
+    const rows = await sql.unsafe('SELECT id, payment_method, version, refunded_cents, admin_note, decided_at, reminder_sent_at FROM registrations ORDER BY id');
+    expect(rows.map((r) => [Number(r.id), r.payment_method, r.version, r.refunded_cents, r.admin_note, r.decided_at, r.reminder_sent_at])).toEqual([
+      [3001, 'stripe', 1, 0, null, null, null],
+      [3002, null, 1, 0, null, null, null],
+    ]);
+    const [event] = await sql.unsafe('SELECT requires_approval, reminder_days FROM reg_events WHERE id = 1001');
+    expect([event.requires_approval, event.reminder_days]).toEqual([0, null]);
+  });
+
+  it('constrains the new columns and tables', async () => {
+    await expect(sql.unsafe("UPDATE registrations SET payment_method = 'cash' WHERE id = 3002")).rejects.toMatchObject({ code: '23514' });
+    await expect(sql.unsafe('UPDATE registrations SET refunded_cents = -1 WHERE id = 3002')).rejects.toMatchObject({ code: '23514' });
+    await expect(sql.unsafe('UPDATE reg_events SET reminder_days = 0 WHERE id = 1001')).rejects.toMatchObject({ code: '23514' });
+    await expect(sql.unsafe('UPDATE reg_events SET reminder_days = 31 WHERE id = 1001')).rejects.toMatchObject({ code: '23514' });
+    await expect(sql.unsafe('UPDATE reg_events SET requires_approval = 2 WHERE id = 1001')).rejects.toMatchObject({ code: '23514' });
+    await sql.unsafe('UPDATE reg_events SET reminder_days = 30 WHERE id = 1001');
+    await expect(sql.unsafe("INSERT INTO reg_event_access (event_id, person_id, role) VALUES (1001, 1, 'boss')")).rejects.toMatchObject({ code: '23514' });
+    await expect(sql.unsafe("INSERT INTO reg_outbox (event_id, registration_id, kind, subject, body, status) VALUES (1001, 3001, 'bulk', 's', 'b', 'sending')")).rejects.toMatchObject({ code: '23514' });
+    await expect(sql.unsafe("INSERT INTO reg_outbox (event_id, registration_id, kind, subject, body) VALUES (1001, 3001, 'promo', 's', 'b')")).rejects.toMatchObject({ code: '23514' });
+    const [row] = await sql.unsafe("INSERT INTO reg_outbox (event_id, registration_id, kind, subject, body) VALUES (1001, 3001, 'bulk', 's', 'b') RETURNING status, attempts, claimed_at");
+    expect([row.status, row.attempts, row.claimed_at]).toEqual(['queued', 0, null]);
+    // Deleting the registration cascades its history and queue rows.
+    await sql.unsafe("INSERT INTO reg_activity (event_id, registration_id, action) VALUES (1001, 3001, 'note')");
+    await sql.unsafe('DELETE FROM registrations WHERE id = 3001');
+    const left = await sql.unsafe('SELECT (SELECT count(*)::int FROM reg_activity) AS a, (SELECT count(*)::int FROM reg_outbox) AS o');
+    expect([left[0].a, left[0].o]).toEqual([0, 0]);
+  });
+});

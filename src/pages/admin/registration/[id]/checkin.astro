@@ -1,0 +1,230 @@
+---
+// The check-in desk for one registration event, built phone-first for volunteers at the door. Search by name,
+// confirmation number, email or phone (a scanned QR code holds the confirmation number), then check people in,
+// undo, check out, or check a whole party in. Shows only what the door needs: names, ticket types, the
+// confirmation number and the status; never emails, phones or answers.
+//
+// Access: the route class is `regEventStaff`; the middleware already required the 'checkin' capability for
+// this event (desk, registrar, or registration admins). This page checks it again before any read, and every
+// action re-checks it and requires the person or registration to belong to this event (performDeskAction).
+// Works without JavaScript (plain forms, redirect back); with it, actions run in place and the page follows
+// other desks by polling a cheap change marker every 10 s while visible. GET ?poll=1 answers that marker.
+import Kiosk from '../../../../layouts/Kiosk.astro';
+import { requireRegRole } from '../../../../lib/regAccess';
+import { getEventAdmin } from '../../../../lib/regDb';
+import { deskCounts, deskVersion, findForDesk } from '../../../../lib/regCheckin';
+import { performDeskAction } from '../../../../lib/regDesk';
+import { t } from '../../../../lib/i18n';
+import type { Locale } from '../../../../lib/locales';
+
+export const prerender = false;
+
+const user = Astro.locals.user;
+const rawId = Astro.params.id ?? '';
+if (!user || !/^\d+$/.test(rawId)) return new Response(null, { status: user ? 404 : 403 });
+const eventId = Number(rawId);
+const db = Astro.locals.db;
+const role = await requireRegRole(db, user, eventId, 'checkin');
+if (!role.ok) return new Response(null, { status: role.status });
+const event = await getEventAdmin(db, eventId);
+if (!event || event.is_template === 1) return new Response(null, { status: 404 });
+
+const lang: Locale = user.lang ?? 'en';
+const base = `/admin/registration/${eventId}/checkin`;
+const wantsJson = (Astro.request.headers.get('accept') ?? '').includes('application/json');
+const noStore = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
+
+if (Astro.request.method === 'GET' && Astro.url.searchParams.get('poll') === '1') {
+  const [version, counts] = await Promise.all([deskVersion(db, eventId), deskCounts(db, eventId)]);
+  return new Response(JSON.stringify({ version, ...counts }), { headers: noStore });
+}
+
+if (Astro.request.method === 'POST') {
+  let form: FormData;
+  try {
+    form = await Astro.request.formData();
+  } catch {
+    return new Response(null, { status: 400 });
+  }
+  const outcome = await performDeskAction(db, user, eventId, form);
+  if (wantsJson) return new Response(JSON.stringify(outcome), { status: outcome.ok ? 200 : outcome.status, headers: noStore });
+  if (!outcome.ok && (outcome.status === 403 || outcome.status === 404 || outcome.status === 400)) {
+    return new Response(null, { status: outcome.status });
+  }
+  const back = new URLSearchParams();
+  const q = String(form.get('q') ?? '').slice(0, 120);
+  if (q) back.set('q', q);
+  if (outcome.ok) {
+    back.set('done', outcome.done);
+    if (outcome.count !== undefined) back.set('count', String(outcome.count));
+  } else {
+    back.set('error', outcome.code === 'NEEDS_CONFIRM' ? 'confirm' : outcome.code);
+  }
+  return Astro.redirect(`${base}?${back.toString()}`, 303);
+}
+
+const q = (Astro.url.searchParams.get('q') ?? '').slice(0, 120);
+const [search, counts, version] = await Promise.all([
+  q ? findForDesk(db, eventId, q, lang) : Promise.resolve({ exact: false, parties: [] }),
+  deskCounts(db, eventId),
+  deskVersion(db, eventId),
+]);
+const defaultLocale = Astro.locals.locales.default;
+const eventTitle = event.titles[lang] || event.titles[defaultLocale] || event.title_en || `#${eventId}`;
+const done = Astro.url.searchParams.get('done');
+const doneCount = Number(Astro.url.searchParams.get('count') ?? '0');
+const error = Astro.url.searchParams.get('error');
+const notice = done
+  ? done === 'party' ? t(lang, 'admin.reg.desk.done.party', { count: doneCount }) : t(lang, `admin.reg.desk.done.${done}`)
+  : error === 'confirm' ? t(lang, 'admin.reg.desk.needsConfirm')
+  : error ? t(lang, 'admin.reg.desk.error') : '';
+const warnText = (reason: string | null) => (reason ? t(lang, `admin.reg.desk.warn.${reason}`) : '');
+const backToEvent = role.role === 'desk' ? null : `/admin/registration/${eventId}`;
+const copy = {
+  scanHint: t(lang, 'admin.reg.desk.scanHint'),
+  scanDenied: t(lang, 'admin.reg.desk.scanDenied'),
+  scanStop: t(lang, 'admin.reg.desk.scanStop'),
+  error: t(lang, 'admin.reg.desk.error'),
+  confirm: t(lang, 'admin.reg.desk.needsConfirm'),
+};
+---
+
+<Kiosk title={`${t(lang, 'admin.reg.desk.title')} · ${eventTitle}`} lang={lang}>
+  <main class="reg-desk w-full text-base" data-reg-desk data-poll={`${base}?poll=1`} data-version={version} data-copy={JSON.stringify(copy)}>
+    <header class="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-wide text-ink-muted">{t(lang, 'admin.reg.desk.title')}</p>
+        <h1 class="font-display text-2xl font-bold">{eventTitle}</h1>
+      </div>
+      {backToEvent && <a href={backToEvent} class="desk-link">{t(lang, 'admin.reg.backToEvent')}</a>}
+    </header>
+
+    <p class="desk-counts" data-desk-counts aria-live="polite">
+      {t(lang, 'admin.reg.desk.counts', { in: counts.checkedIn, expected: counts.expected })}
+    </p>
+
+    <form method="get" action={base} class="desk-search" role="search" data-desk-search>
+      <label for="desk-q" class="sr-only">{t(lang, 'admin.reg.desk.search')}</label>
+      <input id="desk-q" name="q" type="search" value={q} enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false"
+        placeholder={t(lang, 'admin.reg.desk.searchPlaceholder')} class="desk-input" />
+      <div class="flex gap-2">
+        <button type="submit" class="desk-btn desk-btn-primary">{t(lang, 'admin.reg.desk.searchButton')}</button>
+        <button type="button" class="desk-btn" data-desk-scan hidden>{t(lang, 'admin.reg.desk.scan')}</button>
+      </div>
+    </form>
+
+    <div class="desk-scanner" data-desk-scanner hidden>
+      <p class="text-sm text-ink-muted" data-desk-scan-status>{t(lang, 'admin.reg.desk.scanHint')}</p>
+      <video data-desk-video playsinline muted class="desk-video"></video>
+      <button type="button" class="desk-btn" data-desk-scan-stop>{t(lang, 'admin.reg.desk.scanStop')}</button>
+    </div>
+
+    <p class="desk-notice" data-desk-notice role="status" aria-live="polite">{notice}</p>
+
+    <section data-desk-results aria-label={t(lang, 'admin.reg.desk.results')}>
+      {q && search.parties.length === 0 && <p class="text-ink-muted">{t(lang, 'admin.reg.desk.noResults')}</p>}
+      {search.parties.map((party) => {
+        const active = party.people.filter((p) => !p.cancelled);
+        const waiting = active.filter((p) => !p.checkedIn).length;
+        return (
+          <article class="desk-party" data-party={party.registrationId}>
+            <div class="flex flex-wrap items-baseline justify-between gap-2">
+              <h2 class="text-lg font-bold">{party.name}</h2>
+              <span class="text-sm font-semibold text-ink-muted">
+                {party.confirmationNo ?? ''} · <span class={`desk-status desk-status-${party.status}`}>{t(lang, `admin.reg.status.${party.status}`)}</span>
+              </span>
+            </div>
+            {party.warning && <p class="desk-warning" role="note">{warnText(party.warning)}</p>}
+            <ul class="mt-3 space-y-2">
+              {party.people.map((person) => {
+                const reason = party.warning ?? (person.cancelled ? 'attendee_cancelled' : null);
+                return (
+                  <li class="desk-person">
+                    <div>
+                      <p class="font-semibold">{person.name}</p>
+                      <p class="text-sm text-ink-muted">
+                        {person.ticketLabel ?? ''}
+                        {person.cancelled && <span> · {t(lang, 'admin.reg.desk.cancelledPerson')}</span>}
+                        {person.checkedIn && <span class="desk-here"> · {t(lang, 'admin.reg.desk.here')}</span>}
+                        {!person.checkedIn && person.checkedOutAt && <span> · {t(lang, 'admin.reg.desk.left')}</span>}
+                      </p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                      {!person.checkedIn && (
+                        <form method="post" action={base} data-desk-action>
+                          <input type="hidden" name="op" value="checkin" />
+                          <input type="hidden" name="attendee_id" value={person.attendeeId} />
+                          <input type="hidden" name="q" value={q} />
+                          {reason && (
+                            <label class="desk-confirm">
+                              <input type="checkbox" name="confirm" value="1" required /> {t(lang, 'admin.reg.desk.confirmAnyway')}
+                            </label>
+                          )}
+                          <button type="submit" class="desk-btn desk-btn-primary">{t(lang, 'admin.reg.desk.checkIn')}</button>
+                        </form>
+                      )}
+                      {person.checkedIn && (
+                        <form method="post" action={base} data-desk-action>
+                          <input type="hidden" name="op" value="checkout" />
+                          <input type="hidden" name="attendee_id" value={person.attendeeId} />
+                          <input type="hidden" name="q" value={q} />
+                          <button type="submit" class="desk-btn">{t(lang, 'admin.reg.desk.checkOut')}</button>
+                        </form>
+                      )}
+                      {(person.checkedIn || person.checkedOutAt) && (
+                        <form method="post" action={base} data-desk-action>
+                          <input type="hidden" name="op" value="undo" />
+                          <input type="hidden" name="attendee_id" value={person.attendeeId} />
+                          <input type="hidden" name="q" value={q} />
+                          <button type="submit" class="desk-btn">{t(lang, 'admin.reg.desk.undo')}</button>
+                        </form>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            {waiting > 1 && (
+              <form method="post" action={base} data-desk-action class="mt-3">
+                <input type="hidden" name="op" value="party" />
+                <input type="hidden" name="registration_id" value={party.registrationId} />
+                <input type="hidden" name="q" value={q} />
+                {party.warning && (
+                  <label class="desk-confirm">
+                    <input type="checkbox" name="confirm" value="1" required /> {t(lang, 'admin.reg.desk.confirmAnyway')}
+                  </label>
+                )}
+                <button type="submit" class="desk-btn desk-btn-primary w-full">{t(lang, 'admin.reg.desk.checkInAll', { count: waiting })}</button>
+              </form>
+            )}
+          </article>
+        );
+      })}
+    </section>
+  </main>
+</Kiosk>
+
+<style>
+  .reg-desk { max-width: 40rem; margin: 0 auto; }
+  .desk-counts { margin-bottom: 1rem; padding: .75rem 1rem; border-radius: var(--radius-sm); background: var(--color-surface-raised); border: 1px solid var(--color-border); font-weight: 700; font-size: 1.125rem; }
+  .desk-search { display: grid; gap: .5rem; margin-bottom: .75rem; }
+  .desk-input { width: 100%; min-height: 3rem; padding: .5rem .875rem; font-size: 1.125rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-ink); }
+  .desk-btn { min-height: 2.75rem; padding: .5rem 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-ink); font-size: 1rem; font-weight: 600; }
+  .desk-btn-primary { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-on-primary); }
+  .desk-link { min-height: 2.75rem; display: inline-flex; align-items: center; font-size: .9375rem; font-weight: 600; text-decoration: underline; }
+  .desk-notice:empty { display: none; }
+  .desk-notice { margin-bottom: .75rem; padding: .5rem .875rem; border-radius: var(--radius-sm); background: var(--color-surface-raised); border: 1px solid var(--color-border); font-weight: 600; }
+  .desk-party { margin-bottom: 1rem; padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-raised); }
+  .desk-person { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; padding: .5rem 0; border-top: 1px solid var(--color-border); }
+  .desk-warning { margin-top: .5rem; padding: .5rem .75rem; border-radius: var(--radius-sm); border: 1px solid var(--color-warning, var(--color-border)); background: var(--color-surface); font-weight: 600; }
+  .desk-confirm { display: flex; align-items: center; gap: .5rem; min-height: 2.75rem; font-size: .875rem; }
+  .desk-confirm input { width: 1.25rem; height: 1.25rem; }
+  .desk-here { color: var(--color-primary); font-weight: 700; }
+  .desk-scanner { margin-bottom: 1rem; display: grid; gap: .5rem; }
+  .desk-video { width: 100%; max-height: 60vh; border-radius: var(--radius-md); background: var(--color-ink); }
+</style>
+
+<script>
+  import { initDesk } from '../../../../lib/reg-desk-client';
+  initDesk();
+</script>

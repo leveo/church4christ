@@ -15,7 +15,7 @@
 import type { SessionUser } from './types';
 import { hasAreaAccess } from './adminAreas';
 
-export type RouteClass = 'public' | 'authed' | 'team' | 'finance' | 'console' | 'newcomerStaff' | 'adminOnly';
+export type RouteClass = 'public' | 'authed' | 'team' | 'finance' | 'console' | 'newcomerStaff' | 'regEventStaff' | 'adminOnly';
 
 // Exact-match public paths (no session). Prefix families live in PUBLIC_PREFIXES.
 const PUBLIC_EXACT = new Set([
@@ -125,6 +125,43 @@ const ADMIN_CONSOLE = [
   '/admin/registration',
 ];
 
+// The registration admin pages a person with just a per-event role (reg_event_access) may reach, each with the
+// capability it needs. This is the ONE table behind both the route class (classifyRoute -> `regEventStaff`) and
+// the middleware's fail-closed role check, so a page added here is gated the moment it is listed and a path
+// missing here stays `console` (registration admins only). The page (or endpoint) still checks every action's
+// own need; the route needs a session and the middleware checks the role before the page runs.
+//   /admin/registration/<id>                 view     event page: overview, roster, drawer, printing links
+//   /admin/registration/<id>/checkin         checkin  the check-in desk
+//   /admin/registration/<id>/export.csv      view     roster CSV (one row per registration)
+//   /admin/registration/<id>/export-people.csv  view  roster CSV (one row per person)
+//   /admin/registration/<id>/badges          view     printable badges
+//   /admin/registration/<id>/sign-in-sheet   view     printable sign-in sheet
+// Extend this table, never the class, when a new per-event page is added.
+const REG_EVENT_STAFF_PATHS: ReadonlyArray<{ re: RegExp; need: 'view' | 'checkin' }> = [
+  { re: /^\/admin\/registration\/(\d+)$/, need: 'view' },
+  { re: /^\/admin\/registration\/(\d+)\/checkin$/, need: 'checkin' },
+  { re: /^\/admin\/registration\/(\d+)\/export\.csv$/, need: 'view' },
+  { re: /^\/admin\/registration\/(\d+)\/export-people\.csv$/, need: 'view' },
+  { re: /^\/admin\/registration\/(\d+)\/badges$/, need: 'view' },
+  { re: /^\/admin\/registration\/(\d+)\/sign-in-sheet$/, need: 'view' },
+];
+
+/** The event and capability a per-event registration page needs (locale-stripped, one trailing slash tolerated), or null. */
+export function regEventStaffGate(pathname: string): { eventId: number; need: 'view' | 'checkin' } | null {
+  const p = norm(pathname);
+  for (const { re, need } of REG_EVENT_STAFF_PATHS) {
+    const match = re.exec(p);
+    if (match) {
+      const eventId = Number(match[1]);
+      return Number.isSafeInteger(eventId) ? { eventId, need } : null;
+    }
+  }
+  return null;
+}
+
+/** True for the per-event registration pages open to per-event roles. */
+export const isRegEventStaffPath = (pathname: string): boolean => regEventStaffGate(pathname) !== null;
+
 /** Strip a single trailing slash (but keep the bare root `/`). */
 function norm(pathname: string): string {
   return pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
@@ -155,6 +192,7 @@ export function classifyRoute(pathname: string): RouteClass {
   // admin-only fallback. Finance follows, then admin-only areas, the console
   // root + explicit console list, and finally fail closed.
   if (under(p, '/admin/newcomers')) return 'newcomerStaff';
+  if (isRegEventStaffPath(p)) return 'regEventStaff';
   if (under(p, '/admin/giving') || under(p, '/admin/stripe-events')) return 'finance';
   if (ADMIN_ONLY.some((base) => under(p, base))) return 'adminOnly';
   if (p === '/admin' || ADMIN_CONSOLE.some((base) => under(p, base))) return 'console';
@@ -199,6 +237,8 @@ export function canAccess(cls: RouteClass, user: SessionUser | null): boolean {
       return user !== null && (user.isAdmin || user.isEditor || user.leaderTeamIds.length > 0);
     case 'newcomerStaff':
       return hasAreaAccess(user, 'newcomers');
+    case 'regEventStaff':
+      return user !== null;
     case 'adminOnly':
       return user?.isAdmin ?? false;
   }

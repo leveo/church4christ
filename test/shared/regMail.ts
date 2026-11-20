@@ -16,18 +16,21 @@ export interface CapturedMail {
   attachments?: Array<{ filename: string; contentType: string; content: string | Uint8Array }>;
 }
 
-export const mail = { sent: [] as CapturedMail[], fail: false };
+/** `fail`: every send reports failure. `failTo` / `throwTo`: only sends to those addresses fail / throw. */
+export const mail = { sent: [] as CapturedMail[], fail: false, failTo: new Set<string>(), throwTo: new Set<string>() };
 
 export function mockEmailModule() {
   return {
     escapeHtml: (value: string) => value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!),
     sendEmail: async (_env: unknown, db: AppDb, msg: CapturedMail): Promise<boolean> => {
-      const status = mail.fail ? 'failed' : 'devlog';
+      if (mail.throwTo.has(msg.to)) throw new Error('mail transport exploded');
+      const failing = mail.fail || mail.failTo.has(msg.to);
+      const status = failing ? 'failed' : 'devlog';
       await db
         .prepare(`INSERT INTO email_log (to_email, to_name, kind, detail, status) VALUES (?1, ?2, ?3, ?4, ?5)`)
         .bind(msg.to, msg.toName ?? '', msg.kind, msg.detail ?? null, status)
         .run();
-      if (mail.fail) return false;
+      if (failing) return false;
       mail.sent.push(msg);
       return true;
     },

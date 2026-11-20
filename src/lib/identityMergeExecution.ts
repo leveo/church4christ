@@ -222,6 +222,7 @@ const HARD_CONFLICT_QUERIES: readonly HardConflictQuery[] = [
   { referenceKey: 'team_applications.person_id', sql: () => 'SELECT COUNT(*) n FROM team_applications WHERE person_id=?1' },
   { referenceKey: 'testimonies.person_id', sql: () => 'SELECT COUNT(*) n FROM testimonies WHERE person_id=?1' },
   { referenceKey: 'event_admins.person_id', sql: () => 'SELECT COUNT(*) n FROM event_admins WHERE person_id=?1' },
+  { referenceKey: 'reg_event_access.person_id', sql: () => 'SELECT COUNT(*) n FROM reg_event_access WHERE person_id=?1' },
   { referenceKey: 'gifts.person_id', sql: (backend) => backend === 'supabase'
     ? 'SELECT COUNT(*) n FROM gifts WHERE person_id=?1' : null },
   { referenceKey: 'stripe_customers.person_id', sql: (backend) => backend === 'supabase' ? 'SELECT COUNT(*) n FROM stripe_customers WHERE person_id=?1' : null },

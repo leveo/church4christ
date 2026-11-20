@@ -34,7 +34,25 @@ export interface BuiltRegEmail {
   attachments: EmailAttachment[];
 }
 
-type Variant = 'confirmed' | 'waitlist' | 'paid' | 'promoted' | 'cancelled' | 'cancelledPerson';
+type Variant =
+  | 'confirmed' | 'waitlist' | 'paid' | 'promoted' | 'cancelled' | 'cancelledPerson'
+  // Approval events: "received, waiting for approval" (a new sign-up, or one moved off the waitlist) and the
+  // staff decision mails (accepted, waitlisted, declined); the reminder goes to confirmed registrations.
+  | 'review' | 'promotedReview' | 'accepted' | 'decidedWaitlist' | 'declined' | 'reminder';
+
+/** Variants that tell the registrant they are registered: the only ones that may carry the QR code. */
+const CONFIRMED_VARIANTS: Variant[] = ['confirmed', 'paid', 'promoted', 'accepted', 'reminder'];
+/** Variants that carry the calendar file (the registrant has, or may get, a place). */
+const CALENDAR_VARIANTS: Variant[] = ['confirmed', 'paid', 'promoted', 'accepted', 'reminder', 'waitlist', 'decidedWaitlist'];
+/** Variants that never carry a manage link. */
+const NO_LINK_VARIANTS: Variant[] = ['cancelled', 'cancelledPerson', 'declined'];
+
+/** The status line a registration's own status earns: review is never labelled confirmed. */
+function statusLine(status: RegistrationSummary['registration']['status'], variant: Variant): string {
+  if (variant === 'cancelled') return 'cancelled';
+  if (status === 'review' || status === 'waitlist' || status === 'declined' || status === 'cancelled') return status;
+  return 'confirmed';
+}
 
 // Email clients cannot read CSS variables, so the markup carries inline literals.
 const C_INK = '#1f2937'; /* tokens-ok */
@@ -114,9 +132,9 @@ function build(summary: RegistrationSummary, variant: Variant, opts: RegEmailOpt
     const price = (a.ticket_price_cents ?? 0) > 0 ? ` · ${moneyText(a.ticket_price_cents!, registration.currency, locale)}` : '';
     return `${a.name} (${a.ticket_label}${price})`;
   });
-  const showDetails = variant !== 'cancelled';
+  const showDetails = variant !== 'cancelled' && variant !== 'declined';
 
-  const statusKey = variant === 'cancelled' ? 'cancelled' : registration.status === 'waitlist' ? 'waitlist' : 'confirmed';
+  const statusKey = statusLine(registration.status, variant);
   const intro = copy(locale, `intro.${variant}`, { person: person ?? '' });
   const subject = copy(locale, `subject.${variant}`, { title });
   const greeting = copy(locale, 'greeting', { name: registration.name });
@@ -138,10 +156,10 @@ function build(summary: RegistrationSummary, variant: Variant, opts: RegEmailOpt
   }
 
   const manageLabel = copy(locale, 'manage.button');
-  const showManage = variant !== 'cancelled' && variant !== 'cancelledPerson' && Boolean(opts.manageUrl);
-  const showQr = (variant === 'confirmed' || variant === 'paid' || variant === 'promoted')
-    && registration.status === 'confirmed' && Boolean(opts.qrUrl);
-  const attach = (variant === 'confirmed' || variant === 'paid' || variant === 'promoted' || variant === 'waitlist');
+  const showManage = !NO_LINK_VARIANTS.includes(variant) && Boolean(opts.manageUrl);
+  // The QR is the check-in pass: only a registration that really is confirmed gets one.
+  const showQr = CONFIRMED_VARIANTS.includes(variant) && registration.status === 'confirmed' && Boolean(opts.qrUrl);
+  const attach = CALENDAR_VARIANTS.includes(variant) && (registration.status === 'confirmed' || registration.status === 'waitlist');
 
   const textParts = [greeting, '', intro, '', title];
   if (rows.length > 0) textParts.push('', ...rows.map(([label, value]) => `${label}: ${value}`));
@@ -198,15 +216,65 @@ function build(summary: RegistrationSummary, variant: Variant, opts: RegEmailOpt
  * a paid registration, "payment received" (a priced registration that is confirmed).
  */
 export function confirmationEmail(summary: RegistrationSummary, opts: RegEmailOptions): BuiltRegEmail {
-  const variant: Variant = summary.registration.status === 'waitlist'
-    ? 'waitlist'
-    : summary.registration.amount_cents > 0 ? 'paid' : 'confirmed';
+  const status = summary.registration.status;
+  const variant: Variant = status === 'review'
+    ? 'review' // "received, waiting for approval": no QR, never "confirmed"
+    : status === 'waitlist'
+      ? 'waitlist'
+      : summary.registration.amount_cents > 0 ? 'paid' : 'confirmed';
   return build(summary, variant, opts);
 }
 
-/** "A place opened up": a waitlisted registration that is now confirmed. */
+/**
+ * "A place opened up": a waitlisted registration that is now confirmed, or, on an event that requires
+ * approval, one that is now waiting for approval (status review: no QR, no confirmation wording).
+ */
 export function promotedEmail(summary: RegistrationSummary, opts: RegEmailOptions): BuiltRegEmail {
-  return build(summary, 'promoted', opts);
+  return build(summary, summary.registration.status === 'review' ? 'promotedReview' : 'promoted', opts);
+}
+
+/**
+ * The staff decision on an approval event: accepted (the confirmation: QR and calendar), waitlisted (the
+ * waitlist notice) or declined (a courteous no: no manage link, no details, no calendar).
+ */
+export function decisionEmail(summary: RegistrationSummary, decision: 'accept' | 'waitlist' | 'decline', opts: RegEmailOptions): BuiltRegEmail {
+  return build(summary, decision === 'accept' ? 'accepted' : decision === 'waitlist' ? 'decidedWaitlist' : 'declined', opts);
+}
+
+/** The pre-event reminder to a confirmed registration: details, people, notes, the manage link and the QR. */
+export function reminderEmail(summary: RegistrationSummary, opts: RegEmailOptions): BuiltRegEmail {
+  return build(summary, 'reminder', opts);
+}
+
+export const BULK_SUBJECT_MAX = 200;
+export const BULK_BODY_MAX = 10_000;
+
+/** `{name}`, `{event}`, `{confirmation}` filled in one pass (a value that itself holds a placeholder is not expanded again). */
+export function fillBulkPlaceholders(text: string, vars: { name: string; event: string; confirmation: string }): string {
+  return text.replace(/\{(name|event|confirmation)\}/g, (_m, key: 'name' | 'event' | 'confirmation') => vars[key]);
+}
+
+/**
+ * A staff-written message to registrants. The subject and body are PLAIN TEXT: placeholders are filled with
+ * raw values and the result is escaped exactly once into the standard layout (line breaks become <br>), so no
+ * markup typed by staff, or hidden in a name, ever reaches the HTML. No manage link and no QR (nothing is
+ * rotated, so a bulk email can never invalidate a link the registrant already holds).
+ */
+export function bulkEmail(
+  input: { subject: string; body: string; name: string; eventTitle: string; confirmationNo: string | null },
+  opts: { locale: Locale },
+): BuiltRegEmail {
+  const vars = { name: input.name, event: input.eventTitle, confirmation: input.confirmationNo ?? '' };
+  const subject = fillBulkPlaceholders(input.subject, vars).replace(/[\r\n]+/g, ' ').trim();
+  const body = fillBulkPlaceholders(input.body, vars);
+  const footer = copy(opts.locale, 'bulk.footer', { title: input.eventTitle });
+  const html = [
+    `<div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:16px;line-height:1.5;color:${C_INK};max-width:560px">`, /* tokens-ok */
+    `<p style="white-space:normal">${multiline(body)}</p>`,
+    `<p style="margin:24px 0 0;padding-top:12px;border-top:1px solid ${C_RULE};color:${C_MUTED};font-size:14px">${escapeHtml(footer)}</p>`,
+    '</div>',
+  ].join('');
+  return { subject, html, text: `${body}\n\n${footer}\n`, attachments: [] };
 }
 
 /**
