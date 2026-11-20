@@ -13,6 +13,8 @@ import { mintSession, SESSION_COOKIE } from '../src/lib/session';
 import { clearThemeCache } from '../src/lib/theme';
 import { setSetting } from '../src/lib/settings';
 import { onRequest } from '../src/middleware';
+import { loadSessionUser } from '../src/lib/currentUser';
+import { grantEventRole, hasRegistrationArea, regEventRole } from '../src/lib/regAccess';
 
 function context(path: string, session?: string) {
   const url = new URL(`http://localhost${path}`);
@@ -85,5 +87,18 @@ describe('per-event registration roles at the middleware', () => {
     for (const path of ['/admin/registration', '/admin/registration/5/export.csv']) {
       expect(await status(path, token), path).toEqual({ status: 403, reached: false });
     }
+  });
+
+  it('through the real session loader a limited admin is not a registration admin; only an explicit role makes them staff', async () => {
+    const limited = await loadSessionUser(env.DB, 981, 0);
+    expect(limited).toMatchObject({ isAdmin: true, isEditor: false, adminAreas: ['people'] });
+    expect(hasRegistrationArea(limited)).toBe(false);
+    const event = await env.DB.prepare(`INSERT INTO reg_events (starts_at) VALUES ('2032-01-01 09:00:00') RETURNING id`).first<{ id: number }>();
+    expect(await regEventRole(env.DB, limited, event!.id)).toBeNull();
+    await grantEventRole(env.DB, event!.id, 981, 'viewer');
+    expect(await regEventRole(env.DB, limited, event!.id)).toBe('viewer');
+    const volunteer = await loadSessionUser(env.DB, 980, 0);
+    expect(volunteer).toMatchObject({ isAdmin: false, isEditor: false });
+    expect(await regEventRole(env.DB, volunteer, event!.id)).toBeNull();
   });
 });

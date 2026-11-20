@@ -593,6 +593,19 @@ export function defineRegOfficeCases(label: string, getDb: () => AppDb, backend:
         expect(await versionOf(reg.id)).toBe(2);
         await cancelAttendee(getDb(), reg.id, tim.id);
         expect(await versionOf(reg.id)).toBeGreaterThan(2);
+        // answers-only and people-only edits move it too (the person edited here is still active)
+        await mustForm(id, { questions: [{ type: 'text', labels: { en: 'Note' } }, { type: 'text', scope: 'attendee', labels: { en: 'Nick' } }] });
+        const [note, nick] = await listQuestions(getDb(), 'en', id);
+        const [ann] = await attendeesOf(reg.id);
+        const before = await versionOf(reg.id);
+        expect((await updateRegistrationSelf(getDb(), reg.id, { answers: { [note.id]: 'hi' } })).ok).toBe(true);
+        expect(await versionOf(reg.id)).toBe(before + 1);
+        expect((await updateRegistrationSelf(getDb(), reg.id, { attendees: [{ id: ann.id, name: 'Annie' }] })).ok).toBe(true);
+        expect(await versionOf(reg.id)).toBe(before + 2);
+        expect((await updateRegistrationSelf(getDb(), reg.id, { attendees: [{ id: ann.id, answers: { [nick.id]: 'A' } }] })).ok).toBe(true);
+        expect(await versionOf(reg.id)).toBe(before + 3);
+        expect((await updateRegistrationSelf(getDb(), reg.id, {})).ok).toBe(true); // nothing to change: no bump
+        expect(await versionOf(reg.id)).toBe(before + 3);
         expect(await adminSetNote(getDb(), reg.id, { version: 1, note: 'stale' }, { actor: null })).toEqual({ ok: false, code: 'version_conflict' });
       });
 

@@ -654,12 +654,16 @@ export async function updateRegistrationSelf(
   for (const [attendeeId, pairs] of personAnswers) personAnswers.set(attendeeId, await keepAcceptance(pairs, 'reg_attendee_answers', attendeeId));
 
   const open = `status NOT IN ('cancelled','declined')`;
-  const stmts: AppStatement[] = [];
+  // Any registrant edit moves the version (first, like the back office's guarded writes: registration row before
+  // its child rows), so a staff drawer opened before it cannot save over it unnoticed.
+  const stmts: AppStatement[] = [
+    db.prepare(`UPDATE registrations SET version = version + 1, updated_at = datetime('now') WHERE id = ?1 AND ${open}`).bind(id),
+  ];
   if (name !== null) {
-    stmts.push(db.prepare(`UPDATE registrations SET name = ?1, version = version + 1, updated_at = datetime('now') WHERE id = ?2 AND ${open}`).bind(name, id));
+    stmts.push(db.prepare(`UPDATE registrations SET name = ?1, updated_at = datetime('now') WHERE id = ?2 AND ${open}`).bind(name, id));
   }
   if (phone !== undefined) {
-    stmts.push(db.prepare(`UPDATE registrations SET phone = ?1, version = version + 1, updated_at = datetime('now') WHERE id = ?2 AND ${open}`).bind(phone, id));
+    stmts.push(db.prepare(`UPDATE registrations SET phone = ?1, updated_at = datetime('now') WHERE id = ?2 AND ${open}`).bind(phone, id));
   }
   for (const edit of attendeeEdits) {
     if (edit.name !== null) {
@@ -706,7 +710,7 @@ export async function updateRegistrationSelf(
       );
     }
   }
-  if (stmts.length > 0) await db.batch(stmts);
+  if (stmts.length > 1) await db.batch(stmts);
   return { ok: true };
 }
 
