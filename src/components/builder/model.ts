@@ -4,6 +4,9 @@
 import type { AnyNode, ColumnsNode, PageLayout } from '../../lib/pageLayout';
 import { uid } from './uid';
 
+/** A registration event the picker offers (label = title and date, built on the server). */
+export interface BuilderEvent { id: number; label: string }
+
 export type ContainerRef = 'root' | `sec:${string}` | `col:${string}:${number}`;
 
 export function parseContainerRef(ref: ContainerRef):

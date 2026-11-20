@@ -11,7 +11,7 @@ import {
   textClass, imageRender, buttonRender, spacerClass, dividerClass,
 } from '../../lib/blockStyles';
 import { renderMarkdown } from '../../lib/markdown';
-import { canDrop, type ContainerRef } from './model';
+import { canDrop, type BuilderEvent, type ContainerRef } from './model';
 
 export interface CanvasProps {
   layout: PageLayout;
@@ -19,6 +19,7 @@ export interface CanvasProps {
   editLocale: 'en' | 'zh';
   draggingType: AnyNode['type'] | null;
   strings: Record<string, string>;
+  events: BuilderEvent[];
   onSelect: (id: string | null) => void;
   onRemove: (id: string) => void;
   onDuplicate: (id: string) => void;
@@ -37,7 +38,7 @@ function DropGap({ container, index, draggingType }: { container: ContainerRef; 
   );
 }
 
-function LeafView({ node, editLocale }: { node: LeafNode; editLocale: 'en' | 'zh' }) {
+function LeafView({ node, editLocale, events, strings }: { node: LeafNode; editLocale: 'en' | 'zh'; events: BuilderEvent[]; strings: Record<string, string> }) {
   switch (node.type) {
     case 'heading': {
       const text = pickLocalizedText(node.props.text, editLocale);
@@ -82,6 +83,18 @@ function LeafView({ node, editLocale }: { node: LeafNode; editLocale: 'en' | 'zh
       return <div className={`${spacerClass(node.props)} rounded bg-surface-sunken/50`} aria-hidden="true" />;
     case 'divider':
       return <hr className={dividerClass()} />;
+    case 'registration': {
+      const label = events.find((e) => e.id === node.props.eventId)?.label;
+      return (
+        <div data-testid="builder-registration" className="rounded-lg border border-border bg-surface-raised p-5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink-subtle">🎟 {strings['block.registration']}</p>
+          <p className="mt-1 font-display text-lg font-bold">{label ?? strings.registrationPlaceholder}</p>
+          <span className="mt-3 inline-block rounded-full bg-primary px-6 py-2 text-sm font-semibold text-on-primary">
+            {pickLocalizedText(node.props.buttonLabel, editLocale) || strings['block.registration']}
+          </span>
+        </div>
+      );
+    }
   }
 }
 
@@ -119,7 +132,7 @@ function BlockFrame({
 }
 
 export default function Canvas(props: CanvasProps) {
-  const { layout, selectedId, editLocale, draggingType, strings } = props;
+  const { layout, selectedId, editLocale, draggingType, strings, events } = props;
   const frame = (node: AnyNode, children: React.ReactNode) => (
     <BlockFrame
       key={node.id}
@@ -140,7 +153,7 @@ export default function Canvas(props: CanvasProps) {
       <DropGap container={container} index={0} draggingType={draggingType} />
       {leaves.map((leaf, i) => (
         <div key={leaf.id}>
-          {frame(leaf, <LeafView node={leaf} editLocale={editLocale} />)}
+          {frame(leaf, <LeafView node={leaf} editLocale={editLocale} events={events} strings={strings} />)}
           <DropGap container={container} index={i + 1} draggingType={draggingType} />
         </div>
       ))}
@@ -174,7 +187,7 @@ export default function Canvas(props: CanvasProps) {
                             ))}
                           </div>,
                         )
-                      : frame(child, <LeafView node={child as LeafNode} editLocale={editLocale} />)}
+                      : frame(child, <LeafView node={child as LeafNode} editLocale={editLocale} events={events} strings={strings} />)}
                     <DropGap container={`sec:${section.id}`} index={j + 1} draggingType={draggingType} />
                   </div>
                 ))}

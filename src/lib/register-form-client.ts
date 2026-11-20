@@ -1,8 +1,10 @@
 // Progressive enhancement for the register form. Without JavaScript every person row is
-// visible and the household chips stay hidden; with it, blank extra rows collapse behind
+// visible, every question shows and the household chips stay hidden; with it, blank extra rows collapse behind
 // "Add another person", rows can be removed, a household member is one tap, and the first
 // invalid field (or the error summary) takes focus after a bounced review.
 // Bundled with the page (no inline script), so it works under a strict script policy.
+
+import { initShowIf } from './reg-showif-client';
 
 export function initRegisterForm(root: Document = document): void {
   const form = root.querySelector<HTMLFormElement>('[data-register-form]');
@@ -14,6 +16,8 @@ export function initRegisterForm(root: Document = document): void {
   if (firstInvalid) firstInvalid.focus();
   else summary?.focus();
 
+  // Show-if (and the required toggling of each person's questions): runs again whenever a person row appears or goes.
+  const refresh = initShowIf(form) ?? (() => {});
   const party = form.querySelector<HTMLElement>('[data-party]');
   if (!party) return;
   const rows = [...party.querySelectorAll<HTMLElement>('[data-person-row]')];
@@ -35,6 +39,7 @@ export function initRegisterForm(root: Document = document): void {
       const on = chosen.has((chip.dataset.personId ?? '') + '|' + (chip.dataset.name ?? '').trim());
       chip.setAttribute('aria-pressed', on ? 'true' : 'false');
     }
+    refresh();
   };
 
   // Collapse the rows nobody filled in; the first extra row stays out of sight too until asked for.

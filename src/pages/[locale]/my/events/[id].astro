@@ -103,3 +103,9 @@ const html = renderRegistrationView(view, {
     </div>
   </GatheringSurface>
 </Member>
+
+<script>
+  // Show-if on the edit form (without it every question shows and the server ignores hidden answers).
+  import { initShowIf } from '../../../../lib/reg-showif-client';
+  for (const form of document.querySelectorAll<HTMLElement>('#reg-edit form')) initShowIf(form);
+</script>

@@ -20,6 +20,9 @@ It replaces the paper sign-up sheet, the separate payment link, and the spreadsh
 - **The questions you need.** Each event has its own short form. Ask for a T-shirt size as a
   dropdown, dietary needs as a paragraph, or "first time?" as yes/no. You choose which
   questions are required.
+- **A form builder, ticket types and templates.** Drag your questions into order, ask some
+  once and some for each person, show a question only when an earlier answer fits, offer
+  ticket types such as Adult and Child, and save a finished event as a template for next time.
 - **Seat limits that hold.** When the last seat is taken, the next person is never let in by
   mistake, even if two people press the button at the same moment.
 - **A waitlist for free events.** When a free event is full, people can join a waitlist
@@ -103,12 +106,77 @@ you open an event whose closing time has already passed, you are asked for a new
 **Duplicate** copies an event's details and questions, but not its registrations. The copy
 starts hidden so you can change the dates and then show it.
 
-### Questions
+### The form builder
 
-Each event has a **Questions & roster** page. Add as many questions as you like. Each has a
-type, a label in every site language, and a **Required** switch. Dropdown and checkbox
-questions get an **Options** box with one choice per line. Editing a question later keeps the
-answers people have already given.
+Open an event from **Admin → Registration**. The **Registration form** section on that page
+is where you build the questions. Each question is a card. Drag a card by its handle to move
+it. The up and down buttons do the same from the keyboard. Open a card to change it. Press
+**Save form** when you are done. **Undo** and **Redo** are always there, and the page tells you
+about unsaved changes.
+
+![The form builder: question cards you can drag into order](../images/registration/builder-questions.png)
+
+**Question types.** Short answer, Paragraph, Dropdown, Checkboxes, Yes / No, Number, Date,
+Email address, Phone number, Section heading, and Terms checkbox.
+
+**For each question you can set:**
+
+- **Once per registration** or **For each person.** A shirt size is asked for each person. A
+  contact note is asked once.
+- **Required.**
+- **Help text.** People see it as a small ⓘ next to the question.
+- **Placeholder** and **maximum length** for text questions.
+- **A label in every site language.** Dropdown and checkbox options are translated too, one
+  box per option and language. Blank translations fall back to your default language.
+- **Show only if…** Show the question only when an earlier answer matches, for example show
+  "Which allergies?" only if "Any allergies?" is Yes. Only an earlier question can be used.
+
+![A dropdown question with its options and translations](../images/registration/builder-options.png)
+
+**Terms agreement.** A Terms checkbox shows your text next to a checkbox. The server records
+the time the person agreed. It does not trust the time sent by the browser.
+
+**Rules that protect your data:**
+
+- A question that another question's "Show only if…" depends on cannot be deleted. Remove
+  that condition first.
+- A question that already has answers cannot switch between once per registration and for
+  each person.
+- Deleting a question that has answers also deletes those answers when you save. The page
+  warns you first.
+
+Editing a question's wording later keeps the answers people have already given.
+
+### Ticket types
+
+Use ticket types when people at the same event pay different amounts or fill different
+seats, for example **Adult** and **Child**. Add them in the **Ticket types** section below
+the form.
+
+![Ticket types with their own price and limit](../images/registration/builder-tickets.png)
+
+- Each type has a **name**, an optional **description**, a **price**, and an optional
+  **limit**.
+- Each person picks one ticket type. The event's own price is ignored once the event has an
+  active ticket type.
+- Limits hold, even when two people sign up at the same moment. On a free event with a
+  waitlist, a group that does not fit joins the waitlist as a whole.
+- A type that people already hold cannot be deleted. Turn off **Active** to stop new
+  sign-ups.
+- On the default D1 database, ticket prices must be free. Paid tickets need Postgres
+  (Supabase) and Stripe, like paid events.
+- People cannot change their ticket type on the private manage page. To change one, ask the
+  office to cancel that person and register them again.
+
+### Templates
+
+When an event is set up the way you like, press **Save as template** on the events list. A
+template keeps the form and the ticket types. Under **Templates** on the same page you can
+open one to edit it, start a **New event from template** (the new event is hidden until you
+turn it on), or delete the template. Events made from a template are not changed when you
+delete it. Templates never appear on the public site and nobody can register for them.
+
+![The Templates section](../images/registration/admin-templates.png)
 
 ### Signing up
 
@@ -119,10 +187,34 @@ event shows its details and its form.
 
 ![An event page and its sign-up form](../images/registration/event-detail.png)
 
+Events with ticket types show a card for each type, with its price and the seats left. A
+type that is full is marked **Sold out**. On the event list, an event shows **Full** when every
+ticket type is sold out.
+
+![The sign-up form with ticket types](../images/registration/form-tickets.png)
+
+Each person picks a ticket type and answers the questions meant for each person. Questions
+you asked once per registration appear once, and "Show only if…" questions appear when they
+apply.
+
+![A second person's ticket type and answers](../images/registration/form-person-two.png)
+
+![The questions on the form](../images/registration/form-questions.png)
+
+The review step and the private manage page show each person's ticket type and answers too,
+and so do the confirmation emails, My events, and the roster.
+
+![The review step with ticket types](../images/registration/review-tickets.png)
+
+![The manage page with ticket types](../images/registration/manage-tickets.png)
+
 On a phone, the same pages fit the screen.
 
 ![The event list on a phone](../images/mobile/register-list.png)
 ![An event page on a phone](../images/mobile/register-detail.png)
+![The sign-up form with ticket types on a phone](../images/mobile/register-form-tickets.png)
+![The review step on a phone](../images/mobile/register-review-tickets.png)
+![The manage page on a phone](../images/mobile/register-manage-tickets.png)
 
 ### Families and groups
 
@@ -226,10 +318,17 @@ the phone number. Statuses are confirmed,
 pending, waitlist, and cancelled. 
 
 **Export CSV** downloads the roster. The columns are, in this order: Confirmation, Name,
-Email, Status, Party size, Amount, Registered, one column per question, then **People** and
-**Phone** at the very end. The earlier columns keep their order, so existing scripts that read
-by position keep working. Cancelling a registration frees its seats and starts waitlist
+Email, Status, Party size, Amount, Registered, one column per question that is asked once, then **People** and
+**Phone**. After those come **Ticket types** (only for events that have ticket types, written
+like "Ana: Adult; Ben: Child") and one column for each per-person question. The earlier
+columns keep their order, so existing scripts that read by position keep working. Cancelling a registration frees its seats and starts waitlist
 promotion.
+
+### Show registration on a page
+
+The page builder has a **Registration** block that puts an event on any custom page. See
+[Page builder](page-builder.md#show-a-registration-event-on-a-page). In **Admin → Events**,
+an event card can also link straight to a registration event.
 
 ### Who can manage events
 
@@ -325,6 +424,16 @@ before switching modes.
   `src/pages/register/qr/[eventId]/[confirmation].png.ts` (QR PNG), and `src/lib/regPublic.ts`.
   Pages: `src/pages/[locale]/register/manage.astro` (token read from the URL fragment) and
   `src/pages/[locale]/my/events/[id].astro`.
+- **Event builder (Phase 3):** D1 `migrations/0052_registration_builder.sql` and Postgres
+  `migrations-supabase/0044_registration_builder.sql` add question scope (once or per person),
+  option keys with per-language labels, help text, placeholder, max length, show-if
+  conditions, ticket types (`reg_ticket_types` and per-person ticket columns), consent time,
+  and template events. Existing option text becomes option keys with the labels copied, and
+  stored answers are not rewritten. New modules: `src/lib/regConditions.ts` (show-if
+  evaluator and validator), `src/lib/regFormSave.ts` and the form writer in
+  `src/lib/regDb.ts`, `src/lib/regBlock.ts` (page-builder card), and the React island for the
+  admin form editor (admin only; public pages are unchanged). Tests: shared cases in
+  `test/shared/regBuilderCases.ts`.
 - **Key modules:** `src/lib/regDb.ts` (reads, the shared locked registration writer that
   enforces capacity, waitlist, confirmation numbers, roster and CSV, `cloneEvent`,
   `setEventLifecycle`), `src/lib/regPhase.ts` (pure `eventPhase`, `isEventFull`,

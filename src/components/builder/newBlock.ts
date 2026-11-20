@@ -26,5 +26,7 @@ export function newBlock(type: AnyNode['type']): AnyNode {
       return { id, type, props: { size: 'md' } };
     case 'divider':
       return { id, type, props: {} };
+    case 'registration':
+      return { id, type, props: { eventId: null, showSeats: true, buttonLabel: l10n() } };
   }
 }

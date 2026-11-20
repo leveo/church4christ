@@ -90,6 +90,34 @@ const { mode = 'admin' } = Astro.props;
   .gathering-surface :global(.reg-party) { padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); min-width: 0; }
   .gathering-surface :global(.reg-person-you) { font-size: .875rem; font-weight: 600; }
   .gathering-surface :global(.reg-person-row) { display: flex; align-items: flex-end; gap: .5rem; flex-wrap: wrap; }
+  .gathering-surface :global(.reg-person-block) { display: grid; gap: .75rem; min-width: 0; padding-block: .25rem; }
+  .gathering-surface :global(.reg-person-block + .reg-person-block) { border-top: 1px solid var(--color-border); padding-top: 1rem; }
+  .gathering-surface :global(.reg-person-block[hidden]) { display: none; }
+  .gathering-surface :global(.reg-person-extra) { display: grid; gap: 1rem; min-width: 0; }
+  .gathering-surface :global(.reg-person-solo) { padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); }
+  .gathering-surface :global([data-qid][hidden]), .gathering-surface :global(.reg-person-extra[hidden]) { display: none; }
+  .gathering-surface :global(.reg-star) { color: var(--color-danger); font-weight: 700; }
+  .gathering-surface :global(.reg-section) { padding-top: .75rem; border-top: 1px solid var(--color-border); }
+  .gathering-surface :global(.reg-section h3) { font-family: var(--font-display); font-size: 1.0625rem; font-weight: 650; }
+  .gathering-surface :global(.reg-section p), .gathering-surface :global(.reg-help p) { margin-top: .25rem; font-size: .875rem; line-height: 1.5; color: var(--color-ink-muted); white-space: pre-line; }
+  .gathering-surface :global(.reg-help) { margin: .125rem 0 .5rem; }
+  .gathering-surface :global(.reg-help summary) { display: inline-flex; align-items: center; justify-content: center; min-width: 2.75rem; min-height: 2.75rem; margin: -.5rem 0 -.5rem -.5rem; cursor: pointer; color: var(--color-primary); font-size: 1rem; list-style: none; }
+  .gathering-surface :global(.reg-help summary::-webkit-details-marker) { display: none; }
+  .gathering-surface :global(.reg-terms) { margin-bottom: .5rem; padding: .75rem 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-sunken); font-size: .875rem; line-height: 1.55; white-space: pre-line; }
+  .gathering-surface :global(.reg-ticket-cards) { display: grid; gap: .6rem; }
+  .gathering-surface :global(.reg-ticket-card) { display: flex; align-items: flex-start; gap: .75rem; min-height: 3.5rem; padding: .8rem 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-raised); cursor: pointer; }
+  .gathering-surface :global(.reg-ticket-card:has(input:checked)) { border-color: var(--color-primary); background: var(--color-primary-soft); }
+  .gathering-surface :global(.reg-ticket-card:has(input:focus-visible)) { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+  .gathering-surface :global(.reg-ticket-card input) { margin-top: .2rem; flex: none; }
+  .gathering-surface :global(.reg-ticket-off) { opacity: .6; cursor: not-allowed; }
+  .gathering-surface :global(.reg-ticket-body) { display: grid; gap: .15rem; min-width: 0; flex: 1; }
+  .gathering-surface :global(.reg-ticket-head) { display: flex; justify-content: space-between; gap: .75rem; flex-wrap: wrap; font-weight: 650; }
+  .gathering-surface :global(.reg-ticket-price) { font-variant-numeric: tabular-nums; }
+  .gathering-surface :global(.reg-ticket-desc) { font-size: .8125rem; color: var(--color-ink-muted); }
+  .gathering-surface :global(.reg-ticket-left), .gathering-surface :global(.reg-ticket-note) { font-size: .8125rem; font-weight: 600; color: var(--color-warn); }
+  .gathering-surface :global(.reg-person-who) { display: grid; gap: .1rem; min-width: 0; }
+  .gathering-surface :global(.reg-ticket-text) { font-size: .8125rem; color: var(--color-ink-muted); }
+  .gathering-surface :global(.reg-person-answers) { flex-basis: 100%; gap: .5rem; padding-bottom: .25rem; }
   .gathering-surface :global(.reg-person-row[hidden]), .gathering-surface :global([data-household][hidden]), .gathering-surface :global([data-add-person][hidden]), .gathering-surface :global([data-remove-person][hidden]) { display: none; }
   .gathering-surface :global(.reg-chip) { min-height: 2.75rem; padding: .4rem .9rem; border: 1px solid var(--color-border); border-radius: var(--radius-full); background: var(--color-surface-raised); font-size: .875rem; font-weight: 600; color: var(--color-ink); }
   .gathering-surface :global(.reg-chip[aria-pressed="true"]) { border-color: var(--color-primary); background: var(--color-primary-soft); color: var(--color-on-primary-soft); }

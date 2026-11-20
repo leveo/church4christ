@@ -14,7 +14,7 @@ builder is simply a second, visual way to create a *new* page, for whoever prefe
 dragging blocks over writing Markdown.
 
 - **Blocks to build with.** Sections (a full-width band with its own background), Columns
-  (side-by-side layout), Heading, Text, Image, Button, Spacer, and Divider. A section can
+  (side-by-side layout), Heading, Text, Image, Button, Spacer, Divider, and Registration. A section can
   hold columns and other blocks; columns hold everything else.
 - **Bilingual by design.** Every piece of text — headings, paragraphs, button labels,
   image alt text — has its own English and Chinese version, switched with one toggle at the
@@ -56,6 +56,30 @@ through its history.
 Chinese titles, are set at the top of the builder alongside Save. The classic Pages list
 still shows every page — builder-made or classic — with its status, and a **Design** link
 to reopen a builder page for more editing.
+
+## Show a registration event on a page
+
+The **Registration** block puts one event from the [Registration](registration.md) module on
+your page as a card. In the properties panel, pick the event. You can also:
+
+- set the **button label** for each language,
+- choose whether to show **seats left**.
+
+The card shows the event's title, date, and place. It also shows the right state: when
+sign-up opens, **Full** or the waitlist, or closed. The button leads to the event's sign-up
+page. Before sign-up opens, the button says **View details**. A hidden event, a template, or
+an event that was deleted shows nothing on the public page.
+
+Put several blocks in columns to build a "Join us this season" row.
+
+![The Registration block in the builder](../images/admin/page-builder-registration.png)
+
+![The same page as visitors see it](../images/public/page-builder-registration.png)
+
+![The same page on a phone](../images/mobile/page-builder-registration.png)
+
+The **Events** cards in **Admin → Events** have an optional **Link to a registration event**
+picker. It fills the card's link with that event's sign-up page, in your default language.
 
 ## What visitors see
 

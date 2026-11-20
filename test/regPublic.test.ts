@@ -21,8 +21,8 @@ import { validateSubmission } from '../src/lib/regManage';
 import type { RegQuestion } from '../src/lib/regDb';
 
 const questions: RegQuestion[] = [
-  { id: 11, sort: 0, type: 'text', required: 1, options: null, label: 'Dish' },
-  { id: 12, sort: 1, type: 'checkbox', required: 0, options: ['a', 'b'], label: 'Allergies' },
+  { id: 11, sort: 0, type: 'text', required: 1, options: null, label: 'Dish', scope: 'registration', condition: null, max_length: null, help: null, placeholder: null, option_labels: {} },
+  { id: 12, sort: 1, type: 'checkbox', required: 0, options: ['a', 'b'], label: 'Allergies', scope: 'registration', condition: null, max_length: null, help: null, placeholder: null, option_labels: {} },
 ];
 
 const formOf = (entries: Array<[string, string]>): FormData => {
@@ -120,5 +120,104 @@ describe('landing targets', () => {
     expect(parsed.hash).toBe(`#t=${'T'.repeat(43)}`);
     expect(myEventLanding('zh', 12)).toBe('/zh/my/events/12?new=1');
     expect(myEventLanding('zh', undefined)).toBe('/zh/my/events');
+  });
+});
+
+// ── Phase 3: ticket types and per-person questions ──────────────────────────
+
+const q = (over: Partial<RegQuestion> & Pick<RegQuestion, 'id' | 'type'>): RegQuestion => ({
+  sort: over.id, required: 0, options: null, label: `Q${over.id}`, scope: 'registration', condition: null, max_length: null, help: null, placeholder: null, option_labels: {}, ...over,
+});
+const phase3: RegQuestion[] = [
+  q({ id: 31, type: 'yesno', label: 'Bringing a car seat?' }),
+  q({ id: 32, type: 'select', scope: 'attendee', options: ['vegan', 'plain'], required: 1, label: 'Meal' }),
+  q({ id: 33, type: 'text', scope: 'attendee', condition: { q: 32, op: 'eq', value: 'vegan' }, label: 'Notes' }),
+  q({ id: 34, type: 'terms', required: 1, label: 'Photo release' }),
+  q({ id: 35, type: 'section', scope: 'attendee', label: 'About you' }),
+];
+const types = [{ id: 7, active: 1 }, { id: 8, active: 1 }];
+
+describe('submissionFromBag: ticket types and per-person answers', () => {
+  const bag = bagFromFormData(formOf([
+    ['name', 'Ada'], ['email', 'ada@example.com'],
+    ['ticket_0', '7'], ['pq_0_32', 'vegan'], ['pq_0_33', 'no nuts'],
+    ['person_name_1', 'Byron'], ['ticket_1', '8'], ['pq_1_32', 'plain'], ['pq_1_33', 'ignored: hidden'],
+    ['person_name_2', ''], ['ticket_2', '7'],
+    ['31', 'yes'], ['34', 'on'], ['32', 'forged registration-level answer'],
+  ]));
+
+  it('reads each row\'s ticket type and per-person answers, including the rows added with "Add another person"', () => {
+    const input = submissionFromBag(bag, phase3, 3);
+    expect(input.attendees).toEqual([
+      { name: '', ticketTypeId: '7', answers: { '32': ['vegan'], '33': ['no nuts'] } },
+      { name: 'Byron', personId: null, ticketTypeId: '8', answers: { '32': ['plain'], '33': ['ignored: hidden'] } },
+      { name: '', personId: null, ticketTypeId: '7', answers: { '32': [], '33': [] } },
+    ]);
+    // Only the once-per-registration questions are read at registration level (a forged key for a per-person question is not).
+    expect(input.answers).toEqual({ '31': ['yes'], '34': ['on'] });
+  });
+
+  it('validates to one ticket and one answer set per person, drops a hidden answer and makes terms a plain checkbox', () => {
+    const result = validateSubmission({ max_party_size: 3 }, phase3, submissionFromBag(bag, phase3, 3), { ticketTypes: types });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.attendees.map((a) => [a.name, a.ticketTypeId, a.answers])).toEqual([
+      ['Ada', 7, [[32, 'vegan'], [33, 'no nuts']]],
+      ['Byron', 8, [[32, 'plain']]], // Notes depends on Meal = vegan, so Byron's value is dropped
+    ]);
+    expect(result.value.answers.map(([id]) => id)).toEqual([31, 34]);
+  });
+
+  it('asks every person for a ticket type and reports it by row', () => {
+    const noTicket = bagFromFormData(formOf([['name', 'Ada'], ['email', 'a@b.co'], ['person_name_1', 'Byron'], ['ticket_0', '7'], ['pq_0_32', 'plain'], ['pq_1_32', 'plain'], ['34', 'on']]));
+    const result = validateSubmission({ max_party_size: 2 }, phase3, submissionFromBag(noTicket, phase3, 2), { ticketTypes: types });
+    expect(result.ok ? [] : result.errors.map((e) => `${e.path}:${e.code}`)).toEqual(['attendees.1.ticket:required']);
+    const missingTerms = bagFromFormData(formOf([['name', 'Ada'], ['email', 'a@b.co'], ['ticket_0', '7'], ['pq_0_32', 'plain']]));
+    const terms = validateSubmission({ max_party_size: 1 }, phase3, submissionFromBag(missingTerms, phase3, 1), { ticketTypes: types });
+    expect(terms.ok ? [] : terms.errors.map((e) => `${e.path}:${e.code}`)).toEqual(['q.34:missing_required']);
+  });
+
+  it('leaves a plain form exactly as it was (no ticket or answer keys unless the form has them)', () => {
+    const plain = submissionFromBag(bagFromFormData(formOf([['name', 'A'], ['email', 'a@b.co']])), questions, 2);
+    expect(plain.attendees).toEqual([{ name: '' }, { name: '', personId: null }]);
+  });
+});
+
+describe('editFromBag: per-person answers', () => {
+  it('collects each person\'s full answer set, and the marker alone means "all cleared"', () => {
+    const edit = editFromBag({ attendee_5: ['Ada'], attendee_6: ['Byron'], pa_5: ['1'], pa_5_32: ['vegan'], pa_6: ['1'], a_31: ['yes'] });
+    expect(edit.attendees).toEqual([{ id: 5, name: 'Ada', answers: { '32': ['vegan'] } }, { id: 6, name: 'Byron', answers: {} }]);
+    expect(editFromBag({ attendee_5: ['Ada'] }).attendees).toEqual([{ id: 5, name: 'Ada' }]); // no per-person questions: not edited
+  });
+});
+
+describe('validation copy and focus for the new fields', () => {
+  it('reads a ticket problem, a missing terms box and a bad number as what they are', () => {
+    const typesById = new Map<number, string>([[34, 'terms'], [40, 'number'], [32, 'select']]);
+    expect(submissionErrorKey({ path: 'attendees.1.ticket', code: 'required' })).toBe('register.err.ticketRequired');
+    expect(submissionErrorKey({ path: 'attendees.1.ticket', code: 'invalid' })).toBe('register.err.ticketInvalid');
+    expect(submissionErrorKey({ path: 'q.34', code: 'missing_required' }, typesById)).toBe('register.err.termsRequired');
+    expect(submissionErrorKey({ path: 'attendees.0.q.40', code: 'bad_answer' }, typesById)).toBe('register.err.invalid');
+    expect(submissionErrorKey({ path: 'attendees.0.q.32', code: 'bad_answer' }, typesById)).toBe('register.err.answerInvalid');
+    for (const key of ['register.err.ticketRequired', 'register.err.ticketInvalid', 'register.err.termsRequired']) expect(en).toHaveProperty([key]);
+    expect(fieldIdForPath('attendees.2.ticket')).toBe('f-ticket-2');
+    expect(fieldIdForPath('attendees.1.q.32')).toBe('f-pq-1-32');
+  });
+});
+
+describe('party versus seats with ticket types', () => {
+  const free = { capacity: 10, taken_count: 2, price_cents: null, waitlist_enabled: 1 };
+  const child = { id: 8, seats_left: 1 };
+  it('waitlists the whole party when a type limit is exceeded, even with seats left in the event', () => {
+    expect(partyFit(free, 2, { types: [{ id: 7, seats_left: null }, child], picks: [7, 8] })).toBe('fits');
+    expect(partyFit(free, 3, { types: [{ id: 7, seats_left: null }, child], picks: [7, 8, 8] })).toBe('waitlist');
+    expect(partyFit({ ...free, waitlist_enabled: 0 }, 2, { types: [child], picks: [8, 8] })).toBe('no_room');
+    expect(partyFit(free, 2, { types: [child], picks: [8, 8], free: false })).toBe('no_room'); // a paid total never waitlists
+  });
+  it('counts the seats left as the smaller of the event and its (all limited) types', () => {
+    expect(seatsLeft(free, [{ seats_left: 3 }, { seats_left: 2 }])).toBe(5);
+    expect(seatsLeft(free, [{ seats_left: 9 }, { seats_left: 9 }])).toBe(8);
+    expect(seatsLeft({ capacity: null, taken_count: 0 }, [{ seats_left: 3 }, { seats_left: 2 }])).toBe(5);
+    expect(seatsLeft({ capacity: null, taken_count: 0 }, [{ seats_left: 3 }, { seats_left: null }])).toBeNull();
   });
 });

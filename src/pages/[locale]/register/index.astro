@@ -15,8 +15,8 @@ import Base from '../../../layouts/Base.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { formatDate, utcToDatetimeLocal } from '../../../lib/dates';
-import { listPublicEvents, type RegPublicEvent } from '../../../lib/regDb';
-import { isEventFull, offersWaitlist } from '../../../lib/regPhase';
+import { listPublicEvents, listTicketTypes, type RegPublicEvent } from '../../../lib/regDb';
+import { seatState, type SeatState } from '../../../lib/regPublic';
 import { mediaPath } from '../../../lib/mediaRef';
 import { badge, badgeInactive, badgeScheduled } from '../../../lib/adminUi';
 
@@ -28,8 +28,13 @@ if (!locale) {
 
 const copy = gatheringsCopy(locale);
 let events: RegPublicEvent[] = [];
+// Full = the event's capacity is reached or every active ticket type is at its limit.
+const seats = new Map<number, SeatState>();
 try {
   events = await listPublicEvents(Astro.locals.db, locale);
+  await Promise.all(events.filter((e) => e.phase === 'open').map(async (e) => {
+    seats.set(e.id, seatState(e, await listTicketTypes(Astro.locals.db, locale, e.id, { activeOnly: true })));
+  }));
 } catch (err) {
   console.error('register index: load failed', err);
 }
@@ -60,8 +65,8 @@ const when = (e: RegPublicEvent) => stamp(e.starts_at);
                     {e.title}
                   </a>
                 </h2>
-                {e.phase === 'open' && isEventFull(e) && (
-                  offersWaitlist(e)
+                {e.phase === 'open' && seats.get(e.id)?.full && (
+                  seats.get(e.id)?.waitlist
                     ? <span class={`${badge} ${badgeScheduled}`}>{t(locale, 'register.joinWaitlist')}</span>
                     : <span class={`${badge} ${badgeInactive}`}>{t(locale, 'register.full')}</span>
                 )}

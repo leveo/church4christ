@@ -5,9 +5,9 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createManageHandler } from '../src/pages/api/register/manage';
-import { createRegistration, saveEvent, saveQuestions } from '../src/lib/regDb';
+import { createRegistration, listQuestions, listTicketTypes, saveEvent, saveEventForm, saveQuestions } from '../src/lib/regDb';
 import { findRegistrationByToken, issueManageToken } from '../src/lib/regManage';
-import { performManageAction } from '../src/lib/regManageApi';
+import { buildRegistrationView, performManageAction } from '../src/lib/regManageApi';
 
 const DAY = 24 * 3600_000;
 const ts = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString().slice(0, 19).replace('T', ' ');
@@ -241,5 +241,98 @@ describe('manage API: calendar file', () => {
     expect(text).toContain('BEGIN:VCALENDAR');
     expect(text).toContain(`UID:registration-${created.id}@church.example`);
     expect(text).not.toContain(created.manageToken!);
+  });
+});
+
+
+describe('manage view and edit with ticket types and per-person answers', () => {
+  async function typedEvent() {
+    const eventId = await saveEvent(env.DB, { title_en: 'Family Camp', title_zh: '家庭营', starts_at: ts(10 * DAY), active: 1, max_party_size: 4 });
+    expect(await saveEventForm(env.DB, eventId, {
+      questions: [
+        { key: 'meal', type: 'select', scope: 'attendee', required: true, labels: { en: 'Meal' }, options: [{ key: 'veg', labels: { en: 'Vegan' } }, { key: 'any', labels: { en: 'Anything' } }] },
+        { type: 'text', scope: 'attendee', labels: { en: 'Notes' }, condition: { q: 'meal', op: 'eq', value: 'veg' } },
+      ],
+      tickets: [{ labels: { en: 'Adult' }, price_cents: 0 }, { labels: { en: 'Child' }, price_cents: 0, capacity: 1 }],
+    }, { backend: 'd1' })).toEqual({ ok: true });
+    const [meal, notes] = await listQuestions(env.DB, 'en', eventId);
+    const [adult, child] = await listTicketTypes(env.DB, 'en', eventId);
+    const created = await createRegistration(env.DB, {
+      eventId, personId: null, name: 'Ada', email: 'ada@example.com', status: 'confirmed', amountCents: 0, currency: 'usd', answers: [],
+      attendees: [
+        { name: 'Ada', ticketTypeId: adult.id, answers: [[meal.id, 'veg'], [notes.id, 'no nuts']] },
+        { name: 'Mia', ticketTypeId: child.id, answers: [[meal.id, 'any']] },
+      ],
+      submissionKey: `manage-typed-${Date.now()}-${++seq}`, locale: 'en',
+    });
+    return { eventId, meal, notes, adult, child, registrationId: created.id };
+  }
+
+  it('shows each person\'s ticket type and answers (as labels) and offers the per-person questions for editing', async () => {
+    const { registrationId, meal } = await typedEvent();
+    const view = (await buildRegistrationView(env.DB, registrationId, 'en'))!;
+    expect(view.attendees.map((a) => [a.name, a.ticketText, a.answers?.map((x) => `${x.label}=${x.value}`)])).toEqual([
+      ['Ada', 'Adult', ['Meal=Vegan', 'Notes=no nuts']],
+      ['Mia', 'Child', ['Meal=Anything']],
+    ]);
+    expect(view.personQuestions?.map((q) => q.label)).toEqual(['Meal', 'Notes']);
+    expect(view.attendees[0].values).toEqual({ [String(meal.id)]: ['veg'], [String(view.personQuestions![1].id)]: ['no nuts'] });
+  });
+
+  it('saves edited per-person answers by attendee id, drops a hidden one, and never changes the ticket type', async () => {
+    const { registrationId, meal, notes, child } = await typedEvent();
+    const view = (await buildRegistrationView(env.DB, registrationId, 'en'))!;
+    const [ada, mia] = view.attendees;
+    const ref = { id: registrationId } as never;
+    const outcome = await performManageAction(env.DB, ref, 'en', {
+      action: 'update',
+      fields: {
+        name: ['Ada'], [`attendee_${ada.id}`]: ['Ada'], [`attendee_${mia.id}`]: ['Mia'],
+        [`pa_${ada.id}`]: ['1'], [`pa_${ada.id}_${meal.id}`]: ['any'], [`pa_${ada.id}_${notes.id}`]: ['stale'],
+        [`pa_${mia.id}`]: ['1'], [`pa_${mia.id}_${meal.id}`]: ['veg'], [`pa_${mia.id}_${notes.id}`]: ['likes soup'],
+        ticket_0: [String(child.id)], // never read
+      },
+    }, notify);
+    expect(outcome.kind).toBe('view');
+    const after = (await buildRegistrationView(env.DB, registrationId, 'en'))!;
+    expect(after.attendees.map((a) => [a.name, a.ticketText, a.answers?.map((x) => `${x.label}=${x.value}`)])).toEqual([
+      ['Ada', 'Adult', ['Meal=Anything']], // Notes is only asked of people who eat vegan
+      ['Mia', 'Child', ['Meal=Vegan', 'Notes=likes soup']],
+    ]);
+  });
+
+  it('reports a missing required per-person answer under that person (by position)', async () => {
+    const { registrationId, meal } = await typedEvent();
+    const view = (await buildRegistrationView(env.DB, registrationId, 'en'))!;
+    const [ada, mia] = view.attendees;
+    const outcome = await performManageAction(env.DB, { id: registrationId } as never, 'en', {
+      action: 'update',
+      fields: { name: ['Ada'], [`attendee_${ada.id}`]: ['Ada'], [`attendee_${mia.id}`]: ['Mia'], [`pa_${ada.id}`]: ['1'], [`pa_${mia.id}`]: ['1'], [`pa_${ada.id}_${meal.id}`]: ['any'] },
+    }, notify);
+    expect(outcome.kind).toBe('invalid');
+    if (outcome.kind === 'invalid') expect(outcome.errors).toEqual([{ path: `attendees.1.q.${meal.id}`, code: 'missing_required' }]);
+  });
+
+  it('shows yes/no and terms answers as people read them, not as stored', async () => {
+    const eventId = await saveEvent(env.DB, { title_en: 'Readable', title_zh: '可读', starts_at: ts(10 * DAY), active: 1, max_party_size: 2 });
+    expect(await saveEventForm(env.DB, eventId, {
+      questions: [{ type: 'yesno', labels: { en: 'First time?' } }, { type: 'terms', required: true, labels: { en: 'Photo release' } }],
+    }, { backend: 'd1' })).toEqual({ ok: true });
+    const [first, terms] = await listQuestions(env.DB, 'en', eventId);
+    const created = await createRegistration(env.DB, {
+      eventId, personId: null, name: 'Ada', email: 'ada@example.com', status: 'confirmed', amountCents: 0, currency: 'usd',
+      answers: [[first.id, 'yes'], [terms.id, '@accepted']], submissionKey: `manage-readable-${Date.now()}-${++seq}`, locale: 'en',
+    });
+    const view = (await buildRegistrationView(env.DB, created.id, 'en'))!;
+    expect(view.answers).toEqual([{ label: 'First time?', value: 'Yes' }, { label: 'Photo release', value: 'Accepted' }]);
+  });
+
+  it('frees the seat of that person\'s ticket type when they cannot come', async () => {
+    const { eventId, registrationId, child } = await typedEvent();
+    expect((await listTicketTypes(env.DB, 'en', eventId)).find((t) => t.id === child.id)!.seats_left).toBe(0);
+    const view = (await buildRegistrationView(env.DB, registrationId, 'en'))!;
+    const outcome = await performManageAction(env.DB, { id: registrationId } as never, 'en', { action: 'cancel_attendee', attendeeId: view.attendees[1].id }, notify);
+    expect(outcome.kind).toBe('view');
+    expect((await listTicketTypes(env.DB, 'en', eventId)).find((t) => t.id === child.id)!.seats_left).toBe(1);
   });
 });

@@ -11,7 +11,7 @@ import { parseLocaleText, type LocaleText } from './locales';
 
 export type L10nString = { en: string; zh: string } & LocaleText;
 export type Align = 'left' | 'center' | 'right';
-export type LeafType = 'heading' | 'text' | 'image' | 'button' | 'spacer' | 'divider';
+export type LeafType = 'heading' | 'text' | 'image' | 'button' | 'spacer' | 'divider' | 'registration';
 
 export interface HeadingNode { id: string; type: 'heading'; props: { level: 1 | 2 | 3; text: L10nString; align: Align; size: 'sm' | 'md' | 'lg' | 'xl'; customSizePx?: number } }
 export interface TextNode { id: string; type: 'text'; props: { md: L10nString; align: Align } }
@@ -19,7 +19,9 @@ export interface ImageNode { id: string; type: 'image'; props: { src: string; al
 export interface ButtonNode { id: string; type: 'button'; props: { label: L10nString; href: string; variant: 'primary' | 'secondary'; align: Align } }
 export interface SpacerNode { id: string; type: 'spacer'; props: { size: 'sm' | 'md' | 'lg' | 'xl' } }
 export interface DividerNode { id: string; type: 'divider'; props: Record<string, never> }
-export type LeafNode = HeadingNode | TextNode | ImageNode | ButtonNode | SpacerNode | DividerNode;
+/** A registration event card. `eventId` null = not chosen yet (renders nothing); an unknown, hidden or template event also renders nothing. */
+export interface RegistrationNode { id: string; type: 'registration'; props: { eventId: number | null; showSeats: boolean; buttonLabel: L10nString } }
+export type LeafNode = HeadingNode | TextNode | ImageNode | ButtonNode | SpacerNode | DividerNode | RegistrationNode;
 
 export interface ColumnsNode { id: string; type: 'columns'; props: { count: 2 | 3 | 4; gap: 'sm' | 'md' | 'lg' }; columns: LeafNode[][] }
 export interface SectionNode { id: string; type: 'section'; props: { bg: 'none' | 'soft' | 'primary' | 'accent'; width: 'narrow' | 'content' | 'wide'; padY: 'sm' | 'md' | 'lg' }; children: (ColumnsNode | LeafNode)[] }
@@ -101,6 +103,12 @@ function buildLeaf(id: string, node: Record<string, unknown>): LeafNode | null {
     }
     case 'divider':
       return { id, type: 'divider', props: {} };
+    case 'registration': {
+      const { eventId, showSeats, buttonLabel } = p;
+      if (!(eventId === null || (typeof eventId === 'number' && Number.isSafeInteger(eventId) && eventId > 0)) ||
+          typeof showSeats !== 'boolean' || !isL10n(buttonLabel, LAYOUT_LIMITS.maxShortLen)) return null;
+      return { id, type: 'registration', props: { eventId, showSeats, buttonLabel: l10nCopy(buttonLabel) } };
+    }
     default:
       return null;
   }

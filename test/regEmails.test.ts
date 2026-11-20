@@ -18,9 +18,9 @@ function summary(over: { status?: 'confirmed' | 'waitlist' | 'cancelled'; amount
       locale: 'en', party_size: 2, amount_cents: over.amount ?? 0, currency: 'usd', created_at: '2031-01-01 00:00:00', cancelled_at: null,
     },
     attendees: [
-      { id: 1, name: 'Ada <script>', status: 'active', person_id: null },
-      { id: 2, name: 'Bob & Co', status: 'active', person_id: null },
-      { id: 3, name: 'Gone Person', status: 'cancelled', person_id: null },
+      { id: 1, name: 'Ada <script>', status: 'active', person_id: null, ticket_type_id: null, ticket_label: null, ticket_price_cents: null, answers: [] },
+      { id: 2, name: 'Bob & Co', status: 'active', person_id: null, ticket_type_id: null, ticket_label: null, ticket_price_cents: null, answers: [] },
+      { id: 3, name: 'Gone Person', status: 'cancelled', person_id: null, ticket_type_id: null, ticket_label: null, ticket_price_cents: null, answers: [] },
     ],
     answers: [],
     canEdit: true,
@@ -142,5 +142,19 @@ describe('promotedEmail and cancelledEmail', () => {
     expect(person.text).toContain('Bob & Co has been removed');
     expect(person.html).not.toContain('register/manage');
     expect(person.attachments).toHaveLength(0);
+  });
+});
+
+describe('attendee lines with ticket types', () => {
+  it('lists a person with their ticket type, and the price when it costs something (per-person answers stay out)', async () => {
+    await loadDict('en');
+    const s = summary({ amount: 3000 });
+    s.attendees[0] = { ...s.attendees[0], ticket_type_id: 7, ticket_label: 'Adult', ticket_price_cents: 2000, answers: [{ question_id: 1, label: 'Meal', value: 'Vegan' }] };
+    s.attendees[1] = { ...s.attendees[1], ticket_type_id: 8, ticket_label: 'Child <3>', ticket_price_cents: 0, answers: [] };
+    const mail = confirmationEmail(s, links('en'));
+    expect(mail.text).toContain('People: Ada <script> (Adult · $20.00), Bob & Co (Child <3>)');
+    expect(mail.html).toContain('Ada &lt;script&gt; (Adult · $20.00), Bob &amp; Co (Child &lt;3&gt;)');
+    expect(mail.text).not.toContain('Vegan');
+    expect(mail.html).not.toContain('Vegan');
   });
 });

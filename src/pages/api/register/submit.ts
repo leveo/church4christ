@@ -7,6 +7,7 @@ import { createRegistrationCheckoutFromParams, type StripeEnv } from '../../../l
 import {
   attachRegistrationCheckoutRequest,
   cancelRegistrationCheckoutRequest,
+  checkoutParamsTotal,
   continueRegistrationCheckoutRequest,
   parseCheckoutRequestId,
   resolveRegistrationCheckoutRequest,
@@ -15,6 +16,8 @@ import {
 import {
   getOpenEvent,
   listQuestions,
+  listTicketTypes,
+  registrationPricing,
   createRegistration,
 } from '../../../lib/regDb';
 import { restrictAttendeePersons, validateSubmission } from '../../../lib/regManage';
@@ -32,6 +35,7 @@ interface RegistrationSubmitDeps {
   stripeEnv: StripeEnv;
   getOpenEvent: typeof getOpenEvent;
   listQuestions: typeof listQuestions;
+  listTicketTypes: typeof listTicketTypes;
   validateSubmission: typeof validateSubmission;
   restrictAttendeePersons: typeof restrictAttendeePersons;
   createRegistration: typeof createRegistration;
@@ -51,6 +55,7 @@ const defaultDeps: RegistrationSubmitDeps = {
   stripeEnv: env as unknown as StripeEnv,
   getOpenEvent,
   listQuestions,
+  listTicketTypes,
   validateSubmission,
   restrictAttendeePersons,
   createRegistration,
@@ -107,8 +112,8 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
           registrationId: resolution.registrationId,
           sessionId: session.id,
           sessionUrl: session.url,
-          // The registration's amount is the whole party's: unit price times quantity.
-          amountCents: price.unit_amount * resolution.requestJson.line_items[0].quantity,
+          // The registration's amount is the whole party's: the sum of every line item.
+          amountCents: checkoutParamsTotal(resolution.requestJson),
           currency: price.currency,
         });
         if (attached) return redirect(session.url);
@@ -156,7 +161,9 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
 
     const event = await deps.getOpenEvent(locals.db, locale, eventId);
     if (!event) return back(locale, eventId, 'closed');
-    const paid = event.price_cents !== null && event.price_cents > 0;
+    const ticketTypes = await deps.listTicketTypes(locals.db, locale, eventId, { activeOnly: true });
+    // With active ticket types the event price is ignored: what is paid is decided from the chosen types below.
+    let paid = ticketTypes.length === 0 && event.price_cents !== null && event.price_cents > 0;
     // Paid registration needs Stripe + Postgres: on D1 a priced event is refused.
     if (paid && locals.dbBackend === 'd1') return back(locale, eventId, 'paid_unavailable');
 
@@ -176,13 +183,25 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
       event,
       questions,
       submissionFromBag(bagFromFormData(form), questions, event.max_party_size ?? 1, { name, email }),
+      { ticketTypes },
     );
     if (!checked.ok) return redirect307(`/${locale}/register/${eventId}`);
     const answers = checked.value.answers;
     // Household links are only honoured for the contact's own household (a forged person id is dropped).
-    const attendees = await deps.restrictAttendeePersons(locals.db, user.id, checked.value.attendees);
+    // Ticket type and per-person answers ride along only when used, so a plain party keeps its plain shape.
+    const attendees = (await deps.restrictAttendeePersons(locals.db, user.id, checked.value.attendees)).map((a) => ({
+      name: a.name, personId: a.personId,
+      ...(a.ticketTypeId != null ? { ticketTypeId: a.ticketTypeId } : {}),
+      ...(a.answers && a.answers.length > 0 ? { answers: a.answers } : {}),
+    }));
     const phone = checked.value.contact.phone;
-    const party = { phone, attendees: attendees.map((a) => ({ name: a.name, personId: a.personId })) };
+    const party = { phone, attendees };
+    const pricing = registrationPricing(event, ticketTypes, attendees);
+    const tickets = ticketTypes.length > 0 ? ticketTypes.map((t) => ({ ticketTypeId: t.id, unitAmountCents: t.price_cents, label: t.label })) : undefined;
+    if (tickets) {
+      paid = pricing.amountCents > 0;
+      if (paid && locals.dbBackend === 'd1') return back(locale, eventId, 'paid_unavailable');
+    }
 
     let requestId: string;
     try {
@@ -236,7 +255,7 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
 
     await deps.attachIdentitySource(locals.rawDb, deps.identityEnv, {
       campusId, source: 'registration', intentId: requestId, personId: user.id, sessionEpoch: epoch,
-      sourceDigest: await continuationPayloadDigest({ eventId, name, email, amountCents: event.price_cents!, currency: event.currency, locale, answers, party }), name, email,
+      sourceDigest: await continuationPayloadDigest({ eventId, name, email, amountCents: tickets ? pricing.amountCents : event.price_cents!, currency: event.currency, locale, answers, party }), name, email,
     });
 
     let resolution: Awaited<ReturnType<typeof resolveRegistrationCheckoutRequest>>;
@@ -248,7 +267,8 @@ export function createRegistrationSubmitHandler(deps: RegistrationSubmitDeps = d
         name,
         email,
         // The per-person price: the checkout multiplies it by the party.
-        amountCents: event.price_cents!,
+        amountCents: tickets ? pricing.amountCents : event.price_cents!,
+        ...(tickets ? { tickets } : {}),
         currency: event.currency,
         answers,
         party,

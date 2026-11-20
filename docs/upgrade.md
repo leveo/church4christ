@@ -540,3 +540,21 @@ promotion. It adds one more migration on each database and no new binding or cro
   order.
 - **Paid cancellations** do not refund automatically. Refund in Stripe.
 - No down migration. Restore the pre-upgrade backup as in section 5 if you must go back.
+
+### Registration form builder, ticket types and templates
+
+This part adds the form builder, ticket types, per-person questions, templates, and the
+page-builder Registration block. It adds one more migration on each database. There is no new
+secret, binding, or cron trigger.
+
+- **Apply the migrations** before deploying: D1 `migrations/0052_registration_builder.sql`
+  (`npm run db:migrate:remote`) and Postgres `migrations-supabase/0044_registration_builder.sql`
+  (`npm run db:migrate:supabase`). Back up first. Existing option text for dropdown and
+  checkbox questions becomes option keys, with the old text copied as the labels. Stored
+  answers are not rewritten, and existing events behave as before.
+- **CSV.** **Ticket types** (only for events that have them) and one column per per-person
+  question are added at the end. Earlier columns keep their order.
+- **Admin editor.** The question editor is now a React island. It loads on admin pages only.
+  Public pages are unchanged.
+- **Paid tickets** need Postgres (Supabase) and Stripe. On D1 ticket prices must be free.
+- No down migration. Restore the pre-upgrade backup as in section 5 if you must go back.

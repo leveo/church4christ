@@ -1,7 +1,7 @@
 import { isSupportedLocale, type SupportedLocale } from './locales';
 import type { AppDb, AppStatement } from './appDb';
 import { sha256Utf8 } from './stripeWebhookInbox';
-import { EVENT_LOCK_AND_NUMBER_SQL, confirmationNoSql, seatsTakenSql } from './regDb';
+import { EVENT_LOCK_AND_NUMBER_SQL, SEAT_STATUSES, confirmationNoSql, priceTicketSelection, seatsTakenSql, storedAnswerSql } from './regDb';
 
 export interface StripeCheckoutParams {
   mode: 'payment';
@@ -26,10 +26,25 @@ interface RegistrationCheckoutMetadata {
   request_id: string;
 }
 
-/** The people a paid registration covers (one Checkout line item of quantity = attendees.length). */
+/** The people a paid registration covers (one Checkout line item of quantity = attendees.length, or one
+ *  per ticket type when the event sells ticket types). */
 export interface RegistrationCheckoutParty {
   phone: string | null;
-  attendees: Array<{ name: string; personId: number | null }>;
+  attendees: Array<{
+    name: string;
+    personId: number | null;
+    /** The ticket type this person holds (events with active ticket types). */
+    ticketTypeId?: number | null;
+    /** This person's answers to the per-person questions. */
+    answers?: Array<[number, string]>;
+  }>;
+}
+
+/** A ticket type the request bills: its price comes from the database (the caller read it), never from the form. */
+export interface RegistrationCheckoutTicket {
+  ticketTypeId: number;
+  unitAmountCents: number;
+  label: string;
 }
 
 export interface RegistrationCheckoutRequestInput {
@@ -40,12 +55,17 @@ export interface RegistrationCheckoutRequestInput {
   email: string;
   /** The PER-PERSON price in cents (the event's price_cents). The registration's amount is
    *  this times the party size (1 when `party` is absent) and the Stripe line item is
-   *  unit_amount = this, quantity = party size. */
+   *  unit_amount = this, quantity = party size. Ignored when `tickets` is given (the amount is then
+   *  the sum of the people's ticket prices). */
   amountCents: number;
   currency: string;
   answers: Array<[number, string]>;
   /** Party members and phone; omitted = a single person, exactly as before the party flow. */
   party?: RegistrationCheckoutParty;
+  /** The event's active ticket types (id, price, label), when it sells them: every attendee in `party`
+   *  must carry one of these ids; the amount is the sum of their prices and Checkout gets one line item
+   *  per type. Omitted = a single implicit type at `amountCents`, digested exactly as before. */
+  tickets?: RegistrationCheckoutTicket[];
   eventTitle: string;
   locale: SupportedLocale;
   appOrigin: string;
@@ -70,6 +90,8 @@ interface NormalizedRegistrationCheckoutInput {
   answers: Array<[number, string]>;
   /** Present only when the caller passed a party, so a request without one digests exactly as it always did. */
   party?: RegistrationCheckoutParty;
+  /** Present only for a ticket-typed event; `amountCents` is then the whole registration's total. */
+  tickets?: RegistrationCheckoutTicket[];
 }
 
 interface CheckoutRequestRow {
@@ -84,6 +106,8 @@ interface CheckoutRequestRow {
   event_id: number;
   amount_cents: number;
   party_size: number;
+  /** Truthy when any attendee holds a ticket type (the request then bills one line item per type). */
+  typed: boolean | number;
   currency: string;
   email: string;
   reconcile_attempts: number;
@@ -179,41 +203,89 @@ function normalizeInput(input: RegistrationCheckoutRequestInput): NormalizedRegi
   if (!(input.personId === null || (Number.isSafeInteger(input.personId) && input.personId > 0))) {
     throw new Error('checkout_person_invalid');
   }
-  if (!Number.isSafeInteger(input.amountCents) || input.amountCents <= 0) throw new Error('checkout_amount_invalid');
+  const typed = input.tickets !== undefined;
+  if (!typed && (!Number.isSafeInteger(input.amountCents) || input.amountCents <= 0)) throw new Error('checkout_amount_invalid');
   const currency = normalizeText(input.currency, 'checkout_currency_invalid').toLowerCase();
   if (!/^[a-z]{3}$/.test(currency)) throw new Error('checkout_currency_invalid');
-  const answers = input.answers.map(([questionId, value]) => {
-    if (!Number.isSafeInteger(questionId) || questionId <= 0) throw new Error('checkout_answer_invalid');
-    return [questionId, normalizeText(value, 'checkout_answer_invalid')] as [number, string];
-  });
-  answers.sort(([leftId, leftValue], [rightId, rightValue]) => leftId - rightId || leftValue.localeCompare(rightValue));
-  if (answers.some(([questionId], index) => index > 0 && answers[index - 1][0] === questionId)) {
-    throw new Error('checkout_answer_invalid');
+  const normalizeAnswers = (list: Array<[number, string]>): Array<[number, string]> => {
+    const answers = list.map(([questionId, value]) => {
+      if (!Number.isSafeInteger(questionId) || questionId <= 0) throw new Error('checkout_answer_invalid');
+      return [questionId, normalizeText(value, 'checkout_answer_invalid')] as [number, string];
+    });
+    answers.sort(([leftId, leftValue], [rightId, rightValue]) => leftId - rightId || leftValue.localeCompare(rightValue));
+    if (answers.some(([questionId], index) => index > 0 && answers[index - 1][0] === questionId)) {
+      throw new Error('checkout_answer_invalid');
+    }
+    return answers;
+  };
+  const answers = normalizeAnswers(input.answers);
+
+  let tickets: RegistrationCheckoutTicket[] | undefined;
+  if (typed) {
+    tickets = input.tickets!.map((ticket) => {
+      if (!Number.isSafeInteger(ticket.ticketTypeId) || ticket.ticketTypeId <= 0
+        || !Number.isSafeInteger(ticket.unitAmountCents) || ticket.unitAmountCents < 0) throw new Error('checkout_ticket_invalid');
+      return { ticketTypeId: ticket.ticketTypeId, unitAmountCents: ticket.unitAmountCents, label: normalizeText(ticket.label, 'checkout_ticket_invalid') };
+    }).sort((a, b) => a.ticketTypeId - b.ticketTypeId);
+    if (tickets.some((t, i) => i > 0 && tickets![i - 1].ticketTypeId === t.ticketTypeId)) throw new Error('checkout_ticket_invalid');
   }
+
   let party: RegistrationCheckoutParty | undefined;
   if (input.party !== undefined) {
     const attendees = input.party.attendees.map((attendee) => {
       const personId = attendee.personId ?? null;
       if (!(personId === null || (Number.isSafeInteger(personId) && personId > 0))) throw new Error('checkout_person_invalid');
-      return { name: normalizeText(attendee.name, 'checkout_identity_invalid'), personId };
+      const ticketTypeId = attendee.ticketTypeId ?? null;
+      if (ticketTypeId !== null && !tickets?.some((t) => t.ticketTypeId === ticketTypeId)) throw new Error('checkout_ticket_invalid');
+      const personAnswers = attendee.answers && attendee.answers.length > 0 ? normalizeAnswers(attendee.answers) : null;
+      // New keys appear only when used, so a plain party digests exactly as it always did.
+      return {
+        name: normalizeText(attendee.name, 'checkout_identity_invalid'),
+        personId,
+        ...(ticketTypeId !== null ? { ticketTypeId } : {}),
+        ...(personAnswers ? { answers: personAnswers } : {}),
+      };
     });
     if (attendees.length < 1 || attendees.length > 20) throw new Error('checkout_party_invalid');
     const phone = input.party.phone === null ? null : input.party.phone.normalize('NFC').trim() || null;
     party = { phone, attendees };
+  }
+
+  let amountCents = input.amountCents;
+  if (tickets) {
+    // The whole registration's total: every person needs a type of this event.
+    const people = party?.attendees ?? [{ ticketTypeId: null as number | null }];
+    amountCents = 0;
+    for (const person of people) {
+      const ticket = tickets.find((t) => t.ticketTypeId === person.ticketTypeId);
+      if (!ticket) throw new Error('checkout_ticket_invalid');
+      amountCents += ticket.unitAmountCents;
+    }
+    if (amountCents <= 0) throw new Error('checkout_amount_invalid');
   }
   return {
     eventId: input.eventId,
     personId: input.personId,
     name: normalizeText(input.name, 'checkout_identity_invalid'),
     email: normalizeText(input.email, 'checkout_identity_invalid').toLowerCase(),
-    amountCents: input.amountCents,
+    amountCents,
     currency,
     answers,
     ...(party ? { party } : {}),
+    ...(tickets ? { tickets } : {}),
   };
 }
 
 const partySizeOf = (normalized: NormalizedRegistrationCheckoutInput): number => normalized.party?.attendees.length ?? 1;
+
+/** What the registration costs: the typed total, or the per-person price times the party. */
+const totalOf = (normalized: NormalizedRegistrationCheckoutInput): number =>
+  normalized.tickets ? normalized.amountCents : normalized.amountCents * partySizeOf(normalized);
+
+/** The total a stored Checkout request bills: the sum of unit amount x quantity over its line items. */
+export function checkoutParamsTotal(params: Pick<StripeCheckoutParams, 'line_items'>): number {
+  return params.line_items.reduce((sum, item) => sum + item.price_data.unit_amount * item.quantity, 0);
+}
 
 /** SHA-256 over only the normalized submitted registration identity. */
 export async function registrationCheckoutRequestDigest(input: RegistrationCheckoutRequestInput): Promise<string> {
@@ -261,6 +333,32 @@ export function registrationCheckoutCancelUrl(
   return `${origin}/${locale}/register/${eventId}?${query.toString()}`;
 }
 
+/** One line item for the party at the event price, or one per ticket type (people x unit price). A $0 type
+ *  adds no line: it contributes nothing to the total. */
+function lineItemsFor(normalized: NormalizedRegistrationCheckoutInput, eventTitle: string): StripeCheckoutParams['line_items'] {
+  if (!normalized.tickets) {
+    return [{
+      quantity: partySizeOf(normalized),
+      price_data: { currency: normalized.currency, unit_amount: normalized.amountCents, product_data: { name: eventTitle } },
+    }];
+  }
+  const people = normalized.party?.attendees ?? [{ ticketTypeId: null }];
+  const lines: StripeCheckoutParams['line_items'] = [];
+  for (const ticket of normalized.tickets) {
+    const quantity = people.filter((p) => p.ticketTypeId === ticket.ticketTypeId).length;
+    if (quantity === 0 || ticket.unitAmountCents === 0) continue;
+    lines.push({
+      quantity,
+      price_data: {
+        currency: normalized.currency,
+        unit_amount: ticket.unitAmountCents,
+        product_data: { name: `${eventTitle} - ${ticket.label}` },
+      },
+    });
+  }
+  return lines;
+}
+
 /** Build the exact non-secret Stripe parameter map persisted for same-key recovery. */
 export function buildRegistrationCheckoutParams(
   input: RegistrationCheckoutRequestInput & { registrationId: number },
@@ -279,14 +377,7 @@ export function buildRegistrationCheckoutParams(
   };
   return {
     mode: 'payment',
-    line_items: [{
-      quantity: partySizeOf(normalized),
-      price_data: {
-        currency: normalized.currency,
-        unit_amount: normalized.amountCents,
-        product_data: { name: normalizeText(input.eventTitle, 'checkout_event_title_invalid') },
-      },
-    }],
+    line_items: lineItemsFor(normalized, normalizeText(input.eventTitle, 'checkout_event_title_invalid')),
     success_url: `${origin}/${input.locale}/register/done?ok=1&paid=1`,
     cancel_url: registrationCheckoutCancelUrl(origin, input.locale, normalized.eventId, requestId),
     customer_email: normalized.email,
@@ -344,7 +435,9 @@ function requireStoredParams(raw: string, row: CheckoutRequestRow): StripeChecko
     ])
     || parsed.mode !== 'payment'
     || !Array.isArray(parsed.line_items)
-    || parsed.line_items.length !== 1
+    || parsed.line_items.length < 1
+    || parsed.line_items.length > 20
+    || (!row.typed && parsed.line_items.length !== 1)
     || typeof parsed.customer_email !== 'string'
     || parsed.customer_email !== row.email
     || !isPlainObject(parsed.metadata)
@@ -367,26 +460,34 @@ function requireStoredParams(raw: string, row: CheckoutRequestRow): StripeChecko
     }
   }
 
-  const lineItem = parsed.line_items[0];
-  if (
-    !isPlainObject(lineItem)
-    || !hasExactKeys(lineItem, ['quantity', 'price_data'])
-    || lineItem.quantity !== row.party_size
-    || !isPlainObject(lineItem.price_data)
-    || !hasExactKeys(lineItem.price_data, ['currency', 'unit_amount', 'product_data'])
-    || !Number.isSafeInteger(lineItem.price_data.unit_amount)
-    || (lineItem.price_data.unit_amount as number) * row.party_size !== row.amount_cents
-    || (lineItem.price_data.unit_amount as number) <= 0
-    || lineItem.price_data.currency !== row.currency
-    || typeof lineItem.price_data.currency !== 'string'
-    || !/^[a-z]{3}$/.test(lineItem.price_data.currency)
-    || !isPlainObject(lineItem.price_data.product_data)
-    || !hasExactKeys(lineItem.price_data.product_data, ['name'])
-    || typeof lineItem.price_data.product_data.name !== 'string'
-    || lineItem.price_data.product_data.name.trim().length < 1
-  ) {
-    corruptRequest();
+  // A plain registration bills one line of party_size people; a ticket-typed one bills one line per
+  // paid type, and the lines must add up to exactly the registration's amount.
+  let quantity = 0;
+  let total = 0;
+  for (const lineItem of parsed.line_items as unknown[]) {
+    if (
+      !isPlainObject(lineItem)
+      || !hasExactKeys(lineItem, ['quantity', 'price_data'])
+      || !Number.isSafeInteger(lineItem.quantity)
+      || (lineItem.quantity as number) < 1
+      || !isPlainObject(lineItem.price_data)
+      || !hasExactKeys(lineItem.price_data, ['currency', 'unit_amount', 'product_data'])
+      || !Number.isSafeInteger(lineItem.price_data.unit_amount)
+      || (lineItem.price_data.unit_amount as number) <= 0
+      || lineItem.price_data.currency !== row.currency
+      || typeof lineItem.price_data.currency !== 'string'
+      || !/^[a-z]{3}$/.test(lineItem.price_data.currency)
+      || !isPlainObject(lineItem.price_data.product_data)
+      || !hasExactKeys(lineItem.price_data.product_data, ['name'])
+      || typeof lineItem.price_data.product_data.name !== 'string'
+      || lineItem.price_data.product_data.name.trim().length < 1
+    ) {
+      corruptRequest();
+    }
+    quantity += lineItem.quantity as number;
+    total += (lineItem.price_data.unit_amount as number) * (lineItem.quantity as number);
   }
+  if (total !== row.amount_cents || (row.typed ? quantity > row.party_size : quantity !== row.party_size)) corruptRequest();
 
   const success = safeApplicationUrl(parsed.success_url);
   const cancel = safeApplicationUrl(parsed.cancel_url);
@@ -417,6 +518,7 @@ async function loadRequest(db: AppDb, requestId: string): Promise<CheckoutReques
               q.session_url AS session_url, q.state AS state,
               r.status AS status, r.stripe_checkout_session_id AS stripe_checkout_session_id,
               r.event_id AS event_id, r.amount_cents AS amount_cents, r.party_size AS party_size,
+              EXISTS (SELECT 1 FROM reg_attendees ta WHERE ta.registration_id = r.id AND ta.ticket_type_id IS NOT NULL) AS typed,
               r.currency AS currency, r.email AS email,
               q.reconcile_attempts AS reconcile_attempts,
               q.next_reconcile_at AS next_reconcile_at,
@@ -778,6 +880,12 @@ export async function resolveRegistrationCheckoutRequest(
   if (!reserved || !Number.isSafeInteger(reserved.id) || reserved.id <= 0) throw new Error('checkout_registration_id_unavailable');
   const registrationId = reserved.id;
   const requestJson = buildRegistrationCheckoutParams({ ...input, registrationId });
+  // Ticket-typed event: the types must be this event's active ones at the prices billed (priceTicketSelection
+  // throws ticket_type_required / ticket_type_invalid), so the form can never name a type or a price.
+  // Always checked, whatever the caller sent: an event with active ticket types never accepts an untyped
+  // request (priceTicketSelection throws ticket_type_required) and the totals must match the database.
+  const priced = await priceTicketSelection(db, normalized.eventId, normalized.party?.attendees ?? [{ ticketTypeId: null }]);
+  if (normalized.tickets ? priced !== normalized.amountCents : priced !== null) throw new Error('ticket_type_invalid');
   const serializedRequest = JSON.stringify(requestJson);
   const statements: AppStatement[] = [
     // Acquire the parent-row lock before the registration insert takes its FK
@@ -797,7 +905,7 @@ export async function resolveRegistrationCheckoutRequest(
            (id, event_id, person_id, name, email, status, amount_cents, currency, submission_key, confirmation_no, party_size,
             locale, phone)
          SELECT ?1, e.id, ?3, ?4, ?5, 'pending', ?6, ?7, ?8, ${confirmationNoSql('e')}, ?9, ?10, ?11
-         FROM reg_events e WHERE e.id = ?2`,
+         FROM reg_events e WHERE e.id = ?2 AND e.is_template = 0`,
       )
       .bind(
         registrationId,
@@ -805,8 +913,8 @@ export async function resolveRegistrationCheckoutRequest(
         normalized.personId,
         normalized.name,
         normalized.email,
-        // The registration's amount is the whole party's: per-person price times people.
-        normalized.amountCents * partySize,
+        // The registration's amount is the whole party's: per-person price times people, or the sum of the ticket prices.
+        totalOf(normalized),
         normalized.currency,
         `checkout:${requestId}`,
         partySize,
@@ -820,17 +928,30 @@ export async function resolveRegistrationCheckoutRequest(
     const personId = index === 0 ? (attendee.personId ?? normalized.personId) : attendee.personId;
     statements.push(
       db
-        .prepare(`INSERT INTO reg_attendees (registration_id, sort, name, person_id) VALUES (?1, ?2, ?3, ?4)`)
-        .bind(registrationId, index, attendee.name, personId),
+        .prepare(`INSERT INTO reg_attendees (registration_id, sort, name, person_id, ticket_type_id) VALUES (?1, ?2, ?3, ?4, ?5)`)
+        .bind(registrationId, index, attendee.name, personId, (attendee as { ticketTypeId?: number | null }).ticketTypeId ?? null),
     );
   });
   for (const [questionId, value] of normalized.answers) {
     statements.push(
       db
-        .prepare(`INSERT INTO reg_answers (registration_id, question_id, value) VALUES (?1, ?2, ?3)`)
+        .prepare(`INSERT INTO reg_answers (registration_id, question_id, value) VALUES (?1, ?2, ${storedAnswerSql('?3')})`)
         .bind(registrationId, questionId, value),
     );
   }
+  attendees.forEach((attendee, index) => {
+    for (const [questionId, value] of (attendee as { answers?: Array<[number, string]> }).answers ?? []) {
+      statements.push(
+        db
+          .prepare(
+            `INSERT INTO reg_attendee_answers (attendee_id, question_id, value)
+             SELECT a.id, CAST(?3 AS INTEGER), ${storedAnswerSql('?4')} FROM reg_attendees a
+             WHERE a.registration_id = ?1 AND a.sort = CAST(?2 AS INTEGER)`,
+          )
+          .bind(registrationId, index, questionId, value),
+      );
+    }
+  });
   statements.push(
     db
       .prepare(
@@ -860,6 +981,23 @@ export async function resolveRegistrationCheckoutRequest(
       )
       .bind(normalized.eventId),
   );
+
+  // Each ticket type's limit holds the seats (people) already taken, this party included.
+  {
+    statements.push(
+      db
+        .prepare(
+          `SELECT 1 / CASE WHEN NOT EXISTS (
+             SELECT 1 FROM reg_ticket_types tt
+             WHERE tt.event_id = ?1 AND tt.capacity IS NOT NULL
+               AND (SELECT COUNT(*) FROM reg_attendees ta JOIN registrations r2 ON r2.id = ta.registration_id
+                    WHERE ta.ticket_type_id = tt.id AND ta.status = 'active'
+                      AND r2.status IN (${SEAT_STATUSES.map((status) => `'${status}'`).join(',')})) > tt.capacity
+           ) THEN 1 ELSE 0 END AS ticket_capacity_guard`,
+        )
+        .bind(normalized.eventId),
+    );
+  }
 
   try {
     await db.batch(statements);

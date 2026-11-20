@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import type { EmailEnv } from '../../../../lib/email';
 import { getFund } from '../../../../lib/fundDb';
-import { getOpenEvent, listQuestions } from '../../../../lib/regDb';
+import { getOpenEvent, listQuestions, listTicketTypes } from '../../../../lib/regDb';
 import { validateSubmission } from '../../../../lib/regManage';
 import { bagFromFormData, submissionFromBag } from '../../../../lib/regPublic';
 import {
@@ -88,12 +88,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
         event,
         questions,
         submissionFromBag(bagFromFormData(form), questions, event.max_party_size ?? 1),
+        { ticketTypes: await listTicketTypes(locals.db, locale, eventId, { activeOnly: true }) },
       );
       if (!checked.ok) return redirect307(`/${locale}/register/${event.id}`, headers);
       const { contact, attendees, answers } = checked.value;
       // A guest has no household: people are names only. A single person with no phone stays a plain registration.
-      const party = attendees.length > 1 || contact.phone !== null
-        ? { phone: contact.phone, attendees: attendees.map((a) => ({ name: a.name })) }
+      const party = attendees.length > 1 || contact.phone !== null || attendees.some((a) => a.ticketTypeId !== null || a.answers.length > 0)
+        ? { phone: contact.phone, attendees: attendees.map((a) => ({
+            name: a.name,
+            ...(a.ticketTypeId !== null ? { ticketTypeId: a.ticketTypeId } : {}),
+            ...(a.answers.length > 0 ? { answers: a.answers } : {}),
+          })) }
         : undefined;
       const begun = await beginRegistrationContinuation(locals.rawDb, vars, {
         campusId, intentId, requestContext, event, name: contact.name, email: contact.email, locale, answers,

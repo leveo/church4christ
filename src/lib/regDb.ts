@@ -17,20 +17,63 @@ import type { AppDb, AppDbResult, AppStatement } from './appDb';
 import { i18nJoin, type Locale } from './db';
 import { csvCell } from './csv';
 import { toUtcSql } from './dates';
-import { getRuntimeDefaultLocale, isSupportedLocale } from './locales';
+import { fallbackChain, getRuntimeDefaultLocale, isSupportedLocale } from './locales';
+import type { DbBackend } from './dbProvider';
 import { eventPhase, type RegPhase } from './regPhase';
+import { parseCondition, validateConditions, type Condition, type ConditionScope, type DraftConditionQuestion } from './regConditions';
 
 export type { RegPhase } from './regPhase';
 
 export type RegStatus = 'pending' | 'review' | 'confirmed' | 'waitlist' | 'declined' | 'cancelled';
 
+/** Every question type the application accepts (the DB CHECK allows exactly these). */
+export const QUESTION_TYPES = ['text', 'textarea', 'select', 'checkbox', 'yesno', 'section', 'number', 'date', 'email', 'phone', 'terms'] as const;
+export type RegQuestionType = (typeof QUESTION_TYPES)[number];
+export type RegQuestionScope = ConditionScope;
+
+/** A question as the public form and the validators see it (localized). */
 export interface RegQuestion {
   id: number;
   sort: number;
-  type: 'text' | 'textarea' | 'select' | 'checkbox' | 'yesno';
+  type: RegQuestionType;
   required: number;
+  /** The option KEYS (select / checkbox); answers store keys. */
   options: string[] | null;
+  /** Localized label (requested -> installation default -> en); the heading text of a section. */
   label: string;
+  /** Asked once per registration, or once per person. */
+  scope: RegQuestionScope;
+  /** Show-if condition (null = always shown). */
+  condition: Condition | null;
+  /** Maximum answer length for text / textarea (null = the global 2000). */
+  max_length: number | null;
+  /** The ⓘ help text (the terms text for `terms`), localized; null when none. */
+  help: string | null;
+  placeholder: string | null;
+  /** Option key -> localized label (per key: requested -> default -> en); a key without a label shows as itself. */
+  option_labels: Record<string, string>;
+}
+
+/** The label to show for an option key. */
+export const optionLabel = (question: Pick<RegQuestion, 'option_labels'>, key: string): string => question.option_labels[key] ?? key;
+
+/** A stored checkbox answer (a JSON array of keys) as a list; anything else is the stored text itself. */
+export function decodeChoices(raw: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((v) => typeof v === 'string')) return parsed;
+  } catch {
+    // fall through: show the stored text
+  }
+  return [raw];
+}
+
+/** The display text of one stored answer: option labels for select / checkbox (a checkbox's choices joined by ", "; a key
+ *  without a label shows as itself), the stored text for everything else. */
+export function answerDisplayText(question: Pick<RegQuestion, 'type' | 'option_labels'>, raw: string): string {
+  if (question.type === 'checkbox') return decodeChoices(raw).map((key) => optionLabel(question, key)).join(', ');
+  if (question.type === 'select') return optionLabel(question, raw);
+  return raw;
 }
 
 export interface RegEvent {
@@ -133,7 +176,7 @@ const toEvent = (row: EventRow): RegEvent => ({ ...row, title: row.title ?? '' }
 // open until the event starts). This is exactly eventPhase() === 'open'. All
 // timestamps are the app's UTC 'YYYY-MM-DD HH:MM:SS' text, so lexical comparison
 // against datetime('now') is chronological.
-const OPEN_WHERE = `e.active = 1
+const OPEN_WHERE = `e.active = 1 AND e.is_template = 0
   AND (e.visible_from IS NULL OR e.visible_from <= datetime('now'))
   AND (e.opens_at IS NULL OR e.opens_at <= datetime('now'))
   AND (COALESCE(e.closes_at, e.starts_at) > datetime('now'))`;
@@ -157,7 +200,7 @@ export async function getOpenEvent(db: AppDb, locale: Locale, id: number): Promi
 
 // Visible = active and past its visible_from time. A visible event is either
 // preview, open or (for the detail page only) closed.
-const VISIBLE_WHERE = `e.active = 1 AND (e.visible_from IS NULL OR e.visible_from <= ?1)`;
+const VISIBLE_WHERE = `e.active = 1 AND e.is_template = 0 AND (e.visible_from IS NULL OR e.visible_from <= ?1)`;
 
 /**
  * The public list: visible events that are in preview or open, soonest first,
@@ -229,6 +272,7 @@ export async function listRegistrationsForPerson(
        ${joins}
        WHERE (r.person_id = ?1 OR LOWER(r.email) = LOWER(?2))
          AND r.status IN ('pending','review','confirmed','waitlist')
+         AND e.is_template = 0
        ORDER BY e.starts_at DESC`,
     )
     .bind(personId, email)
@@ -236,68 +280,261 @@ export async function listRegistrationsForPerson(
   return results.map((r) => ({ ...r, event_title: r.event_title ?? '' }));
 }
 
-/** An event's questions in sort order, localized label (requested -> default -> en);
- *  options JSON-decoded to a string[] (null for non-select/checkbox or unparseable). */
+/** An event's questions in sort order, localized (requested -> default -> en): label, help, placeholder
+ *  and per-key option labels; options JSON-decoded to a string[] of keys (null for non-option types or
+ *  unparseable) and the condition parsed (null when absent or malformed). */
 export async function listQuestions(db: AppDb, locale: Locale, eventId: number): Promise<RegQuestion[]> {
-  const { select, joins } = i18nJoin('reg_question_i18n', 'q', 'question_id', ['label'], locale);
+  const { select: rawSelect, joins } = i18nJoin('reg_question_i18n', 'q', 'question_id', ['label', 'help', 'placeholder'], locale);
+  const select = blankLabelAsMissing(rawSelect);
+  const chain = fallbackChain(locale);
+  const aliases = ['q_l', 'q_d', 'q_e'].slice(0, chain.length === 1 ? 2 : Math.min(3, chain.length));
+  const optionColumns = aliases.map((alias, i) => `${alias}.option_labels AS ol_${i}`).join(', ');
   const { results } = await db
     .prepare(
       `SELECT q.id AS id, q.sort AS sort, q.type AS type, q.required AS required, q.options AS options,
-              ${select}
+              q.scope AS scope, q.condition AS condition, q.max_length AS max_length,
+              ${select}, ${optionColumns}
        FROM reg_questions q
        ${joins}
        WHERE q.event_id = ?1
        ORDER BY q.sort, q.id`,
     )
     .bind(eventId)
-    .all<{ id: number; sort: number; type: RegQuestion['type']; required: number; options: string | null; label: string | null }>();
-  return results.map((r) => ({ ...r, label: r.label ?? '', options: parseOptions(r.options) }));
+    .all<{
+      id: number; sort: number; type: RegQuestionType; required: number; options: string | null; scope: RegQuestionScope;
+      condition: string | null; max_length: number | null; label: string | null; help: string | null; placeholder: string | null;
+      ol_0: string | null; ol_1: string | null; ol_2?: string | null;
+    }>();
+  return results.map((r) => {
+    const options = parseOptions(r.options);
+    // Per key, the first language in the chain that names it wins.
+    const option_labels: Record<string, string> = {};
+    for (const raw of [r.ol_0, r.ol_1, r.ol_2]) {
+      for (const [key, value] of Object.entries(parseLabelMap(raw))) if (!(key in option_labels)) option_labels[key] = value;
+    }
+    return {
+      id: r.id, sort: r.sort, type: r.type, required: r.required, options,
+      label: r.label ?? '', scope: r.scope, condition: parseCondition(r.condition), max_length: r.max_length ?? null,
+      help: r.help ?? null, placeholder: r.placeholder ?? null, option_labels,
+    };
+  });
 }
 
-/** An event's questions with EVERY language's label raw (no cross-fallback - the
- *  editor prefills each language, so an absent label is simply missing from
- *  `labels`). label_en / label_zh are conveniences for the two original columns. */
+/** A language row may carry only option labels (label ''): make the label fall through to the next language. */
+function blankLabelAsMissing(select: string): string {
+  return select.replace(/COALESCE\(([^)]*\.label[^)]*)\) AS label/u, (_m, inner: string) =>
+    `COALESCE(${inner.split(', ').map((ref) => `NULLIF(${ref}, '')`).join(', ')}) AS label`);
+}
+
+/** Decode a reg_question_i18n.option_labels TEXT (a JSON object of strings); anything else is {}. */
+function parseLabelMap(raw: string | null | undefined): Record<string, string> {
+  if (raw == null) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) if (typeof value === 'string' && value !== '') out[key] = value;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** An event's questions with EVERY language's texts raw (no cross-fallback - the editor prefills each
+ *  language, so an absent label is simply missing from `labels`). label_en / label_zh are conveniences
+ *  for the two original columns. `option_labels` is language -> (option key -> label). */
 export interface RegQuestionAdmin {
   id: number;
   sort: number;
-  type: RegQuestion['type'];
+  type: RegQuestionType;
   required: number;
+  /** The option keys (select / checkbox). */
   options: string[] | null;
+  scope: RegQuestionScope;
+  condition: Condition | null;
+  max_length: number | null;
   labels: Partial<Record<Locale, string>>;
+  help: Partial<Record<Locale, string>>;
+  placeholder: Partial<Record<Locale, string>>;
+  option_labels: Partial<Record<Locale, Record<string, string>>>;
   label_en: string;
   label_zh: string | null;
 }
 
-/** The question set for the admin builder: raw labels in every language, sort order. */
+/** The question set for the admin builder: raw texts in every language, sort order. */
 export async function listQuestionsAdmin(db: AppDb, eventId: number): Promise<RegQuestionAdmin[]> {
   const { results } = await db
     .prepare(
-      `SELECT q.id AS id, q.sort AS sort, q.type AS type, q.required AS required, q.options AS options
+      `SELECT q.id AS id, q.sort AS sort, q.type AS type, q.required AS required, q.options AS options,
+              q.scope AS scope, q.condition AS condition, q.max_length AS max_length
        FROM reg_questions q
        WHERE q.event_id = ?1
        ORDER BY q.sort, q.id`,
     )
     .bind(eventId)
-    .all<{ id: number; sort: number; type: RegQuestion['type']; required: number; options: string | null }>();
-  const { results: labelRows } = await db
+    .all<{ id: number; sort: number; type: RegQuestionType; required: number; options: string | null; scope: RegQuestionScope; condition: string | null; max_length: number | null }>();
+  const { results: textRows } = await db
     .prepare(
-      `SELECT l.question_id AS question_id, l.locale AS locale, l.label AS label
+      `SELECT l.question_id AS question_id, l.locale AS locale, l.label AS label, l.help AS help,
+              l.placeholder AS placeholder, l.option_labels AS option_labels
        FROM reg_question_i18n l JOIN reg_questions q ON q.id = l.question_id
        WHERE q.event_id = ?1`,
     )
     .bind(eventId)
-    .all<{ question_id: number; locale: string; label: string }>();
-  const byQuestion = new Map<number, Partial<Record<Locale, string>>>();
-  for (const l of labelRows) {
+    .all<{ question_id: number; locale: string; label: string; help: string | null; placeholder: string | null; option_labels: string | null }>();
+  const byQuestion = new Map<number, { labels: Partial<Record<Locale, string>>; help: Partial<Record<Locale, string>>; placeholder: Partial<Record<Locale, string>>; option_labels: Partial<Record<Locale, Record<string, string>>> }>();
+  for (const l of textRows) {
     if (!isSupportedLocale(l.locale)) continue;
-    const m = byQuestion.get(l.question_id) ?? {};
-    m[l.locale] = l.label;
+    const m = byQuestion.get(l.question_id) ?? { labels: {}, help: {}, placeholder: {}, option_labels: {} };
+    if (l.label) m.labels[l.locale] = l.label;
+    if (l.help) m.help[l.locale] = l.help;
+    if (l.placeholder) m.placeholder[l.locale] = l.placeholder;
+    const labels = parseLabelMap(l.option_labels);
+    if (Object.keys(labels).length > 0) m.option_labels[l.locale] = labels;
     byQuestion.set(l.question_id, m);
   }
   return results.map((r) => {
-    const labels = byQuestion.get(r.id) ?? {};
-    return { ...r, options: parseOptions(r.options), labels, label_en: labels.en ?? '', label_zh: labels.zh ?? null };
+    const texts = byQuestion.get(r.id) ?? { labels: {}, help: {}, placeholder: {}, option_labels: {} };
+    return {
+      id: r.id, sort: r.sort, type: r.type, required: r.required, options: parseOptions(r.options),
+      scope: r.scope, condition: parseCondition(r.condition), max_length: r.max_length ?? null,
+      labels: texts.labels, help: texts.help, placeholder: texts.placeholder, option_labels: texts.option_labels,
+      label_en: texts.labels.en ?? '', label_zh: texts.labels.zh ?? null,
+    };
   });
+}
+
+// ── Ticket types ─────────────────────────────────────────────────────────────
+
+/** People holding a seat on ticket type `typeRef` (a column reference such as `t.id`): active
+ *  attendees of seat-holding registrations. */
+export const ticketTakenSql = (typeRef: string): string =>
+  `(SELECT COUNT(*) FROM reg_attendees ta JOIN registrations r ON r.id = ta.registration_id
+    WHERE ta.ticket_type_id = ${typeRef} AND ta.status = 'active' AND ${HOLDS_SEAT})`;
+
+/** A ticket type as the public form sees it (localized). An event with no ACTIVE ticket type
+ *  behaves exactly as before: one implicit type at the event price. */
+export interface RegTicketType {
+  id: number;
+  sort: number;
+  price_cents: number;
+  /** NULL = unlimited. */
+  capacity: number | null;
+  active: number;
+  label: string;
+  description: string | null;
+  /** Seats held on this type right now. */
+  taken: number;
+  /** Seats still free on this type (null = unlimited). */
+  seats_left: number | null;
+}
+
+/** An event's ticket types in sort order, localized (requested -> default -> en). `activeOnly` hides
+ *  deactivated types (what the public form offers). */
+export async function listTicketTypes(
+  db: AppDb,
+  locale: Locale,
+  eventId: number,
+  opts: { activeOnly?: boolean } = {},
+): Promise<RegTicketType[]> {
+  const { select, joins } = i18nJoin('reg_ticket_type_i18n', 't', 'ticket_type_id', ['label', 'description'], locale);
+  const { results } = await db
+    .prepare(
+      `SELECT t.id AS id, t.sort AS sort, t.price_cents AS price_cents, t.capacity AS capacity, t.active AS active,
+              ${select}, ${ticketTakenSql('t.id')} AS taken
+       FROM reg_ticket_types t
+       ${joins}
+       WHERE t.event_id = ?1${opts.activeOnly ? ' AND t.active = 1' : ''}
+       ORDER BY t.sort, t.id`,
+    )
+    .bind(eventId)
+    .all<{ id: number; sort: number; price_cents: number; capacity: number | null; active: number; label: string | null; description: string | null; taken: number }>();
+  return results.map((r) => ({
+    ...r,
+    label: r.label ?? '',
+    taken: Number(r.taken),
+    seats_left: r.capacity === null ? null : Math.max(0, r.capacity - Number(r.taken)),
+  }));
+}
+
+/** A ticket type with every language's raw label / description, for the editor. */
+export interface RegTicketTypeAdmin {
+  id: number;
+  sort: number;
+  price_cents: number;
+  capacity: number | null;
+  active: number;
+  labels: Partial<Record<Locale, string>>;
+  descriptions: Partial<Record<Locale, string>>;
+  taken: number;
+}
+
+export async function listTicketTypesAdmin(db: AppDb, eventId: number): Promise<RegTicketTypeAdmin[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT t.id AS id, t.sort AS sort, t.price_cents AS price_cents, t.capacity AS capacity, t.active AS active,
+              ${ticketTakenSql('t.id')} AS taken
+       FROM reg_ticket_types t WHERE t.event_id = ?1 ORDER BY t.sort, t.id`,
+    )
+    .bind(eventId)
+    .all<{ id: number; sort: number; price_cents: number; capacity: number | null; active: number; taken: number }>();
+  const { results: texts } = await db
+    .prepare(
+      `SELECT l.ticket_type_id AS ticket_type_id, l.locale AS locale, l.label AS label, l.description AS description
+       FROM reg_ticket_type_i18n l JOIN reg_ticket_types t ON t.id = l.ticket_type_id WHERE t.event_id = ?1`,
+    )
+    .bind(eventId)
+    .all<{ ticket_type_id: number; locale: string; label: string; description: string | null }>();
+  const byType = new Map<number, { labels: Partial<Record<Locale, string>>; descriptions: Partial<Record<Locale, string>> }>();
+  for (const l of texts) {
+    if (!isSupportedLocale(l.locale)) continue;
+    const m = byType.get(l.ticket_type_id) ?? { labels: {}, descriptions: {} };
+    m.labels[l.locale] = l.label;
+    if (l.description) m.descriptions[l.locale] = l.description;
+    byType.set(l.ticket_type_id, m);
+  }
+  return results.map((r) => ({ ...r, taken: Number(r.taken), labels: byType.get(r.id)?.labels ?? {}, descriptions: byType.get(r.id)?.descriptions ?? {} }));
+}
+
+/** The events (and templates) that have at least one active ticket type: their event price is ignored. */
+export async function eventIdsWithActiveTickets(db: AppDb): Promise<Set<number>> {
+  const { results } = await db.prepare(`SELECT DISTINCT event_id AS id FROM reg_ticket_types WHERE active = 1`).all<{ id: number }>();
+  return new Set(results.map((r) => Number(r.id)));
+}
+
+/** What a party costs and how it is billed: one line per ticket type used (quantity = people), or a
+ *  single implicit line at the event price when the event has no active ticket types. */
+export interface RegistrationPricing {
+  amountCents: number;
+  lines: Array<{ ticketTypeId: number | null; label: string | null; unitAmountCents: number; quantity: number }>;
+}
+
+/**
+ * The amount rule, in one place: with active ticket types the registration costs the SUM of its people's
+ * type prices (the event price is ignored); without them it is the event price times the party. Types
+ * are the event's ticket types (any language), attendees carry the chosen type id.
+ */
+export function registrationPricing(
+  event: { price_cents: number | null },
+  ticketTypes: ReadonlyArray<Pick<RegTicketType, 'id' | 'active' | 'price_cents' | 'label'>>,
+  attendees: ReadonlyArray<{ ticketTypeId?: number | null }>,
+): RegistrationPricing {
+  const typed = ticketTypes.some((t) => t.active === 1);
+  if (!typed) {
+    const unit = event.price_cents ?? 0;
+    return { amountCents: unit * attendees.length, lines: [{ ticketTypeId: null, label: null, unitAmountCents: unit, quantity: attendees.length }] };
+  }
+  const counts = new Map<number, number>();
+  for (const a of attendees) if (a.ticketTypeId != null) counts.set(a.ticketTypeId, (counts.get(a.ticketTypeId) ?? 0) + 1);
+  const lines: RegistrationPricing['lines'] = [];
+  let amountCents = 0;
+  for (const type of ticketTypes) {
+    const quantity = counts.get(type.id);
+    if (!quantity) continue;
+    lines.push({ ticketTypeId: type.id, label: type.label, unitAmountCents: type.price_cents, quantity });
+    amountCents += type.price_cents * quantity;
+  }
+  return { amountCents, lines };
 }
 
 /** Decode a reg_questions.options TEXT (a JSON array of strings) to string[].
@@ -313,6 +550,29 @@ function parseOptions(raw: string | null): string[] | null {
   }
 }
 
+/** Shared value rules (also the contact fields' rules, see regManage.validateSubmission). */
+export const MAX_EMAIL_LENGTH = 320;
+export const MAX_PHONE_LENGTH = 40;
+export const MAX_ANSWER_LENGTH = 2000;
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+// Digits, spaces and the punctuation people type in phone numbers, extensions included.
+export const PHONE_RE = /^[0-9+()\-.\s#*/xX]+$/u;
+// eslint-disable-next-line no-control-regex
+export const CONTROL_RE = /[\0-\x08\x0b\x0c\x0e-\x1f\x7f]/u;
+
+/** What a checked `terms` answer holds until a writer stamps the acceptance time (UTC
+ *  'YYYY-MM-DD HH:MM:SS') in SQL. A constant keeps validation deterministic, so a retried
+ *  submission digests identically; every writer and the self-service edit replace it. */
+export const TERMS_ACCEPTED = '@accepted';
+const NUMBER_RE = /^-?\d{1,30}(\.\d{1,15})?$/u;
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/u;
+
+/** SQL that turns a bound answer value into what is stored: the acceptance time for TERMS_ACCEPTED. */
+export const storedAnswerSql = (param: string): string =>
+  `CASE WHEN CAST(${param} AS TEXT) = '${TERMS_ACCEPTED}' THEN datetime('now') ELSE CAST(${param} AS TEXT) END`;
+
+const codePoints = (value: string): number => Array.from(value).length;
+
 /**
  * Validate a submitted answer form against an event's questions, returning the
  * normalized [questionId, value] pairs ready for createRegistration, or throwing
@@ -321,6 +581,7 @@ function parseOptions(raw: string | null): string[] | null {
  * the question id as a string; a checkbox arrives as string | string[]. Text and
  * textarea are trimmed; a blank OPTIONAL answer is dropped (no pair emitted).
  * Checkbox values are stored JSON-encoded so the multi-select round-trips.
+ * Conditions are NOT evaluated here (validateSubmission does); sections are skipped.
  */
 export function validateAnswers(
   questions: RegQuestion[],
@@ -335,16 +596,21 @@ export function validateAnswers(
   return out;
 }
 
-export type AnswerErrorCode = 'missing_required' | 'bad_answer';
+export type AnswerErrorCode = 'missing_required' | 'bad_answer' | 'too_long';
 
 /** Check ONE question's raw form value: the normalized value to store (null =
  *  nothing to store), or the error code. Shared by validateAnswers (throws the
- *  first error) and validateSubmission (collects every error). */
+ *  first error) and validateSubmission (collects every error). A section never
+ *  has an answer. */
 export function checkAnswer(
-  q: RegQuestion,
+  q: Pick<RegQuestion, 'type' | 'required' | 'options' | 'max_length'>,
   raw: string | string[] | undefined,
+  /** `trusted` is for server-side replay of answers this code stored itself (the guest continuation): only
+   *  then may a `terms` value already be the TERMS_ACCEPTED marker. Client input is never trusted. */
+  opts: { trusted?: boolean } = {},
 ): { value: string | null } | { code: AnswerErrorCode } {
   const options = q.options ?? [];
+  if (q.type === 'section') return { value: null };
 
   if (q.type === 'checkbox') {
     const values = (raw === undefined ? [] : Array.isArray(raw) ? raw : [raw]).filter((v) => v !== '');
@@ -354,6 +620,14 @@ export function checkAnswer(
   }
 
   const value = (Array.isArray(raw) ? (raw[0] ?? '') : (raw ?? '')).trim();
+  if (q.type === 'terms') {
+    // Client input is boolean only: any checked value means "accepted" and the SERVER stamps the time. A
+    // timestamp (or the internal marker) from a client is rejected.
+    const lower = value.toLowerCase();
+    if (value === '' || ['no', 'n', 'false', '0', 'off'].includes(lower)) return q.required ? { code: 'missing_required' } : { value: null };
+    if (value === TERMS_ACCEPTED) return opts.trusted ? { value } : { code: 'bad_answer' };
+    return ['yes', 'y', 'true', '1', 'on'].includes(lower) ? { value: TERMS_ACCEPTED } : { code: 'bad_answer' };
+  }
   if (value === '') return q.required ? { code: 'missing_required' } : { value: null };
   if (q.type === 'select') return options.includes(value) ? { value } : { code: 'bad_answer' };
   if (q.type === 'yesno') {
@@ -362,7 +636,25 @@ export function checkAnswer(
     if (['no', 'n', 'false', '0', 'off'].includes(v)) return { value: 'no' };
     return { code: 'bad_answer' };
   }
-  // text / textarea — the trimmed value, non-empty by the guard above.
+  if (q.type === 'number') return NUMBER_RE.test(value) ? { value } : { code: 'bad_answer' };
+  if (q.type === 'date') {
+    const m = DATE_RE.exec(value);
+    if (!m) return { code: 'bad_answer' };
+    const probe = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    const real = probe.getUTCFullYear() === Number(m[1]) && probe.getUTCMonth() === Number(m[2]) - 1 && probe.getUTCDate() === Number(m[3]);
+    return real ? { value } : { code: 'bad_answer' };
+  }
+  if (q.type === 'email') {
+    const email = value.toLowerCase();
+    if (email.length > MAX_EMAIL_LENGTH) return { code: 'too_long' };
+    return EMAIL_RE.test(email) && !CONTROL_RE.test(email) ? { value: email } : { code: 'bad_answer' };
+  }
+  if (q.type === 'phone') {
+    if (value.length > MAX_PHONE_LENGTH) return { code: 'too_long' };
+    return PHONE_RE.test(value) && /[0-9]/u.test(value) ? { value } : { code: 'bad_answer' };
+  }
+  // text / textarea - the trimmed value, non-empty by the guard above.
+  if (q.max_length !== null && q.max_length !== undefined && codePoints(value) > q.max_length) return { code: 'too_long' };
   return { value };
 }
 
@@ -371,6 +663,10 @@ export function checkAnswer(
 export interface RegAttendeeInput {
   name: string;
   personId?: number | null;
+  /** The ticket type this person holds (events with active ticket types: required, validated in SQL). */
+  ticketTypeId?: number | null;
+  /** This person's answers to the per-person questions ([questionId, value]); TERMS_ACCEPTED is stamped in SQL. */
+  answers?: Array<[number, string]>;
 }
 
 export interface RegistrationInsertInput {
@@ -438,13 +734,41 @@ export function registrationInsertStatements(db: AppDb, input: RegistrationInser
   };
   const idColumn = input.id !== undefined ? 'id, ' : '';
   const idValue = input.id !== undefined ? `CAST(${bindNext(input.id)} AS INTEGER), ` : '';
+
+  // Ticket types, per distinct type in the party. Hard (nothing is inserted when it fails): every type
+  // is an active type of THIS event and the types' prices add up to the registration's amount. Soft
+  // (like the event capacity: a free party that does not fit goes to the waitlist, a paid one is
+  // refused): each type's limit holds the whole party's people of that type.
+  const typeCounts = new Map<number, number>();
+  for (const a of attendees) if (a.ticketTypeId != null) typeCounts.set(a.ticketTypeId, (typeCounts.get(a.ticketTypeId) ?? 0) + 1);
+  const hasTypes = typeCounts.size > 0;
+  const valid: string[] = [];
+  const fits: string[] = [];
+  const prices: string[] = [];
+  for (const [typeId, count] of typeCounts) {
+    const ref = `CAST(${bindNext(typeId)} AS INTEGER)`;
+    valid.push(`EXISTS (SELECT 1 FROM reg_ticket_types tv WHERE tv.id = ${ref} AND tv.event_id = e.id AND tv.active = 1)`);
+    fits.push(
+      `COALESCE((SELECT CASE WHEN tt.capacity IS NULL THEN 1
+                 WHEN (SELECT COUNT(*) FROM reg_attendees ta JOIN registrations r2 ON r2.id = ta.registration_id
+                       WHERE ta.ticket_type_id = tt.id AND ta.status = 'active' AND r2.status IN (${SEAT_STATUS_LIST})) + ${count} <= tt.capacity
+                 THEN 1 ELSE 0 END
+                FROM reg_ticket_types tt WHERE tt.id = ${ref}), 0) = 1`,
+    );
+    prices.push(`${count} * COALESCE((SELECT tp.price_cents FROM reg_ticket_types tp WHERE tp.id = ${ref}), 0)`);
+  }
+  const typesHard = hasTypes ? `${valid.join(' AND ')} AND (${prices.join(' + ')}) = CAST(?6 AS INTEGER)` : '1 = 1';
+  const typesFit = hasTypes ? fits.join(' AND ') : '1 = 1';
+
+  // A typed event ignores the event price, so the continuation's "still free" guard is the amount check above.
   let guard = '';
   if (input.guard) {
     const now = bindNext(input.guard.now);
     const currency = bindNext(input.guard.currency);
     guard = ` AND e.active = 1 AND COALESCE(e.closes_at, e.starts_at) > CAST(${now} AS TEXT)
-           AND COALESCE(e.price_cents, 0) = 0 AND lower(e.currency) = lower(CAST(${currency} AS TEXT))`;
+           ${hasTypes ? '' : 'AND COALESCE(e.price_cents, 0) = 0'} AND lower(e.currency) = lower(CAST(${currency} AS TEXT))`;
   }
+  const seatsFit = `(e.capacity IS NULL OR h.taken + CAST(?9 AS INTEGER) <= e.capacity) AND ${typesFit}`;
 
   const stmts: AppStatement[] = [
     db.prepare(EVENT_LOCK_AND_NUMBER_SQL).bind(input.eventId),
@@ -454,7 +778,7 @@ export function registrationInsertStatements(db: AppDb, input: RegistrationInser
            (${idColumn}event_id, person_id, name, email, status, amount_cents, currency, submission_key, confirmation_no, party_size,
             locale, phone, manage_token_hash)
          SELECT ${idValue}e.id, CAST(?2 AS INTEGER), CAST(?3 AS TEXT), CAST(?4 AS TEXT),
-                CASE WHEN e.capacity IS NULL OR h.taken + CAST(?9 AS INTEGER) <= e.capacity THEN CAST(?5 AS TEXT) ELSE 'waitlist' END,
+                CASE WHEN ${seatsFit} THEN CAST(?5 AS TEXT) ELSE 'waitlist' END,
                 CAST(?6 AS INTEGER), CAST(?7 AS TEXT), CAST(?8 AS TEXT), ${confirmationNoSql('e')}, CAST(?9 AS INTEGER),
                 CAST(?11 AS TEXT), CAST(?12 AS TEXT), CAST(?13 AS TEXT)
          FROM reg_events e
@@ -462,8 +786,8 @@ export function registrationInsertStatements(db: AppDb, input: RegistrationInser
            SELECT COALESCE(SUM(r.party_size), 0) AS taken
            FROM registrations r WHERE r.event_id = ?1 AND ${HOLDS_SEAT}
          ) h
-         WHERE e.id = ?1
-           AND (e.capacity IS NULL OR h.taken + CAST(?9 AS INTEGER) <= e.capacity
+         WHERE e.id = ?1 AND e.is_template = 0 AND ${typesHard}
+           AND (${seatsFit}
                 OR (CAST(?10 AS INTEGER) = 1 AND e.waitlist_enabled = 1))${guard}
          RETURNING id, status, confirmation_no`,
       )
@@ -474,12 +798,12 @@ export function registrationInsertStatements(db: AppDb, input: RegistrationInser
     stmts.push(
       db
         .prepare(
-          `INSERT INTO reg_attendees (registration_id, sort, name, person_id)
-           SELECT r.id, CAST(?3 AS INTEGER), CAST(?4 AS TEXT), CAST(?5 AS INTEGER) FROM registrations r
+          `INSERT INTO reg_attendees (registration_id, sort, name, person_id, ticket_type_id)
+           SELECT r.id, CAST(?3 AS INTEGER), CAST(?4 AS TEXT), CAST(?5 AS INTEGER), CAST(?6 AS INTEGER) FROM registrations r
            WHERE r.event_id = ?1 AND r.submission_key = ?2
              AND NOT EXISTS (SELECT 1 FROM reg_attendees a WHERE a.registration_id = r.id AND a.sort = CAST(?3 AS INTEGER))`,
         )
-        .bind(input.eventId, input.submissionKey, index, attendee.name, personId),
+        .bind(input.eventId, input.submissionKey, index, attendee.name, personId, attendee.ticketTypeId ?? null),
     );
   });
   for (const [questionId, value] of input.answers) {
@@ -487,13 +811,28 @@ export function registrationInsertStatements(db: AppDb, input: RegistrationInser
       db
         .prepare(
           `INSERT INTO reg_answers (registration_id, question_id, value)
-           SELECT r.id, CAST(?3 AS INTEGER), CAST(?4 AS TEXT) FROM registrations r
+           SELECT r.id, CAST(?3 AS INTEGER), ${storedAnswerSql('?4')} FROM registrations r
            WHERE r.event_id = ?1 AND r.submission_key = ?2
            ON CONFLICT DO NOTHING`,
         )
         .bind(input.eventId, input.submissionKey, questionId, value),
     );
   }
+  attendees.forEach((attendee, index) => {
+    for (const [questionId, value] of attendee.answers ?? []) {
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO reg_attendee_answers (attendee_id, question_id, value)
+             SELECT a.id, CAST(?4 AS INTEGER), ${storedAnswerSql('?5')}
+             FROM reg_attendees a JOIN registrations r ON r.id = a.registration_id
+             WHERE r.event_id = ?1 AND r.submission_key = ?2 AND a.sort = CAST(?3 AS INTEGER)
+             ON CONFLICT DO NOTHING`,
+          )
+          .bind(input.eventId, input.submissionKey, index, questionId, value),
+      );
+    }
+  });
   return stmts;
 }
 
@@ -569,6 +908,13 @@ export const newSubmissionKey = (): string => `srv:${crypto.randomUUID()}`;
  * never waitlists). A full event with no waitlist throws 'event_full' and
  * inserts nothing; an unknown event throws 'event_not_found'.
  *
+ * Ticket types: an event with ACTIVE ticket types requires every attendee to carry one of
+ * them (`ticket_type_required` / `ticket_type_invalid` otherwise), the registration's amount is the
+ * sum of their prices (the passed `amountCents` is ignored), and each type's limit is part of the
+ * same locked capacity decision (a free party over any limit waitlists whole, a paid one throws
+ * 'event_full'). An event without active types rejects a ticketTypeId. A template is never
+ * registerable ('event_not_found').
+ *
  * Idempotent per (event, submissionKey): a repeat returns the original row
  * without a second attendee, and a unique-violation race (two requests with the
  * same key committing together) re-reads the winner.
@@ -597,6 +943,11 @@ export async function createRegistration(
   const existing = await findBySubmissionKey(db, input.eventId, submissionKey);
   if (existing) return { ...existing, manageToken: null };
 
+  const priced = await priceTicketSelection(db, input.eventId, input.attendees);
+  const amountCents = priced ?? input.amountCents;
+  // A priced ticket selection is paid: it can only be created pending (awaiting payment), never confirmed.
+  if (priced !== null && priced > 0 && input.status === 'confirmed') throw new Error('payment_required');
+
   const manage = await generateManageToken();
   const stmts = registrationInsertStatements(db, {
     eventId: input.eventId,
@@ -604,7 +955,7 @@ export async function createRegistration(
     name: input.name,
     email: input.email,
     status: input.status,
-    amountCents: input.amountCents,
+    amountCents,
     currency: input.currency,
     submissionKey,
     partySize: input.partySize,
@@ -612,7 +963,7 @@ export async function createRegistration(
     locale: input.locale ?? null,
     phone: input.phone ?? null,
     manageTokenHash: manage.hash,
-    allowWaitlist: input.amountCents === 0 && input.allowWaitlist !== false,
+    allowWaitlist: amountCents === 0 && input.allowWaitlist !== false,
     answers: input.answers,
   });
   let results: AppDbResult[];
@@ -628,7 +979,42 @@ export async function createRegistration(
   const created = readRegistrationInsert(results, manage.token);
   if (created) return created;
   if (results[0].meta.changes === 0) throw new Error('event_not_found');
+  // Nothing was inserted: a template, a ticket type deactivated or repriced since the form was read, or a full event.
+  const event = await db.prepare(`SELECT is_template FROM reg_events WHERE id = ?1`).bind(input.eventId).first<{ is_template: number }>();
+  if (!event || event.is_template === 1) throw new Error('event_not_found');
+  if (priced !== null && (await priceTicketSelection(db, input.eventId, input.attendees)) !== amountCents) throw new Error('ticket_type_invalid');
   throw new Error('event_full');
+}
+
+/**
+ * The ticket rule shared by every writer: with active ticket types each attendee needs one of them
+ * and the amount is the sum of their prices (returned); without them no attendee may carry a type
+ * (null returned: the caller's amount stands). Throws 'ticket_type_required' / 'ticket_type_invalid'.
+ */
+export async function priceTicketSelection(
+  db: AppDb,
+  eventId: number,
+  attendees: ReadonlyArray<{ ticketTypeId?: number | null }> | undefined,
+): Promise<number | null> {
+  const { results } = await db
+    .prepare(`SELECT id, price_cents FROM reg_ticket_types WHERE event_id = ?1 AND active = 1
+              AND EXISTS (SELECT 1 FROM reg_events e WHERE e.id = ?1 AND e.is_template = 0)`)
+    .bind(eventId)
+    .all<{ id: number; price_cents: number }>();
+  const list = attendees && attendees.length > 0 ? attendees : [{ ticketTypeId: null }];
+  if (results.length === 0) {
+    if (list.some((a) => a.ticketTypeId != null)) throw new Error('ticket_type_invalid');
+    return null;
+  }
+  const price = new Map(results.map((r) => [r.id, r.price_cents]));
+  let total = 0;
+  for (const a of list) {
+    if (a.ticketTypeId == null) throw new Error('ticket_type_required');
+    const unit = price.get(a.ticketTypeId);
+    if (unit === undefined) throw new Error('ticket_type_invalid');
+    total += unit;
+  }
+  return total;
 }
 
 /** Attach the Stripe Checkout session id to a pending registration (paid flow). */
@@ -1089,9 +1475,11 @@ export async function cancelRegistrationPromoting(
 }
 
 /**
- * Move waitlisted registrations onto freed seats, FREE events only (a paid event
- * never waitlists, and its seats are released by Stripe session expiry instead).
- * Runs after any seat is released. Candidates are read first (oldest first:
+ * Move waitlisted registrations onto freed seats, FREE registrations only (amount 0: a paid
+ * registration never waitlists, and its seat is released by Stripe session expiry instead).
+ * "Free" is the registration's own amount, not the event price, so it holds for ticket-typed
+ * events too. A party is promoted only when the event capacity AND every ticket type's limit
+ * hold its people. Runs after any seat is released. Candidates are read first (oldest first:
  * created_at, id), then ONE batch runs: a row lock on the event (so two
  * concurrent releases serialize and each candidate is promoted once), then one
  * guarded UPDATE per candidate - still waitlisted AND the whole party fits in the
@@ -1101,11 +1489,8 @@ export async function cancelRegistrationPromoting(
  * registration ids in promotion order.
  */
 export async function promoteWaitlist(db: AppDb, eventId: number): Promise<number[]> {
-  const event = await db
-    .prepare(`SELECT price_cents FROM reg_events WHERE id = ?1`)
-    .bind(eventId)
-    .first<{ price_cents: number | null }>();
-  if (!event || (event.price_cents ?? 0) > 0) return [];
+  const event = await db.prepare(`SELECT id FROM reg_events WHERE id = ?1`).bind(eventId).first<{ id: number }>();
+  if (!event) return [];
   const { results: candidates } = await db
     .prepare(`SELECT id FROM registrations WHERE event_id = ?1 AND status = 'waitlist' ORDER BY created_at, id`)
     .bind(eventId)
@@ -1120,12 +1505,22 @@ export async function promoteWaitlist(db: AppDb, eventId: number): Promise<numbe
       db
         .prepare(
           `UPDATE registrations SET status = 'confirmed', updated_at = datetime('now')
-           WHERE id = ?1 AND event_id = ?2 AND status = 'waitlist'
+           WHERE id = ?1 AND event_id = ?2 AND status = 'waitlist' AND amount_cents = 0
              AND EXISTS (
                SELECT 1 FROM reg_events e
-               WHERE e.id = ?2 AND COALESCE(e.price_cents, 0) = 0
+               WHERE e.id = ?2
                  AND (e.capacity IS NULL
                       OR ${seatsTakenSql('e.id')} + registrations.party_size <= e.capacity)
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM reg_attendees w
+               JOIN reg_ticket_types tt ON tt.id = w.ticket_type_id
+               WHERE w.registration_id = registrations.id AND w.status = 'active' AND tt.capacity IS NOT NULL
+                 AND (SELECT COUNT(*) FROM reg_attendees ta JOIN registrations r2 ON r2.id = ta.registration_id
+                      WHERE ta.ticket_type_id = tt.id AND ta.status = 'active' AND r2.status IN (${SEAT_STATUS_LIST}))
+                     + (SELECT COUNT(*) FROM reg_attendees mine
+                        WHERE mine.registration_id = registrations.id AND mine.status = 'active' AND mine.ticket_type_id = tt.id)
+                     > tt.capacity
              )
            RETURNING id`,
         )
@@ -1147,7 +1542,7 @@ export async function promoteWaitlist(db: AppDb, eventId: number): Promise<numbe
  *  events table. Localized title/description (requested -> default -> en). */
 export async function listAllEvents(db: AppDb, locale: Locale): Promise<RegEvent[]> {
   const { results } = await db
-    .prepare(`${eventSelect(locale)} ORDER BY e.starts_at DESC, e.id DESC`)
+    .prepare(`${eventSelect(locale)} WHERE e.is_template = 0 ORDER BY e.starts_at DESC, e.id DESC`)
     .all<EventRow>();
   return results.map(toEvent);
 }
@@ -1180,6 +1575,8 @@ export interface RegEventAdmin {
   poster: string | null;
   max_party_size: number;
   allow_self_edit: number;
+  /** 1 = a reusable template: never public, never registerable. */
+  is_template: number;
   /** Per-language notes shown to registrants (only languages that have a row/notes). */
   notes: Partial<Record<Locale, string | null>>;
   confirmed_count: number;
@@ -1196,6 +1593,7 @@ const ADMIN_EVENT_SELECT = `
          e.visible_from AS visible_from, e.waitlist_enabled AS waitlist_enabled,
          e.confirmation_prefix AS confirmation_prefix, e.next_confirmation AS next_confirmation,
          e.poster AS poster, e.max_party_size AS max_party_size, e.allow_self_edit AS allow_self_edit,
+         e.is_template AS is_template,
          (SELECT COALESCE(SUM(r.party_size), 0) FROM registrations r WHERE r.event_id = e.id AND r.status = 'confirmed') AS confirmed_count,
          ${seatsTakenSql('e.id')} AS taken_count,
          (SELECT COALESCE(SUM(r.party_size), 0) FROM registrations r WHERE r.event_id = e.id AND r.status = 'waitlist') AS waitlist_count
@@ -1238,7 +1636,13 @@ async function withEventTexts(db: AppDb, rows: AdminEventRow[], now: string): Pr
 /** Every event with all-language title/description + counts + phase, newest first -
  *  the admin list, which doubles as the ?edit=<id> prefill source. */
 export async function listEventsAdmin(db: AppDb, now: string = toUtcSql()): Promise<RegEventAdmin[]> {
-  const { results } = await db.prepare(`${ADMIN_EVENT_SELECT} ORDER BY e.starts_at DESC, e.id DESC`).all<AdminEventRow>();
+  const { results } = await db.prepare(`${ADMIN_EVENT_SELECT} WHERE e.is_template = 0 ORDER BY e.starts_at DESC, e.id DESC`).all<AdminEventRow>();
+  return withEventTexts(db, results, now);
+}
+
+/** The templates only, newest first, with all-language titles (the admin "Templates" section). */
+export async function listTemplatesAdmin(db: AppDb, now: string = toUtcSql()): Promise<RegEventAdmin[]> {
+  const { results } = await db.prepare(`${ADMIN_EVENT_SELECT} WHERE e.is_template = 1 ORDER BY e.id DESC`).all<AdminEventRow>();
   return withEventTexts(db, results, now);
 }
 
@@ -1420,10 +1824,12 @@ export async function setEventLifecycle(
 ): Promise<void> {
   const now = opts.now ?? toUtcSql();
   const event = await db
-    .prepare(`SELECT starts_at, closes_at FROM reg_events WHERE id = ?1`)
+    .prepare(`SELECT starts_at, closes_at, is_template FROM reg_events WHERE id = ?1`)
     .bind(id)
-    .first<{ starts_at: string; closes_at: string | null }>();
+    .first<{ starts_at: string; closes_at: string | null; is_template: number }>();
   if (!event) throw new Error('event_not_found');
+  // A template is never opened, shown or closed: it only exists to be copied.
+  if (event.is_template === 1) throw new Error('template_not_allowed');
 
   if (action === 'hide' || action === 'show') {
     await db
@@ -1463,30 +1869,65 @@ export async function setEventLifecycle(
 
 /**
  * Duplicate an event for the next edition: the event row (inactive, confirmation
- * counter reset, dates kept), every language's title/description, and the
- * questions with their labels. Registrations, attendees and answers are never
+ * counter reset, dates kept), every language's title/description/notes, the ticket
+ * types (price, limit, labels) and the whole question model (scope, conditions, help,
+ * placeholders, option labels). Registrations, attendees and answers are never
  * copied. Returns the new event id. The copy is two steps (the new id is needed
- * first) so a failure in the second deletes the half-made copy.
+ * first) so a failure in the second deletes the half-made copy. The copy is a regular
+ * event even when the source is a template (see createFromTemplate).
  */
 export async function cloneEvent(db: AppDb, id: number): Promise<number> {
+  return copyEvent(db, id, { template: false });
+}
+
+/** Save an event (its questions, ticket types and texts) as a reusable template: an inactive copy that
+ *  never appears publicly. Returns the template's event id. */
+export async function saveAsTemplate(db: AppDb, id: number): Promise<number> {
+  return copyEvent(db, id, { template: true, source: 'event' });
+}
+
+/** A new regular (inactive) event from a template. Throws 'template_not_found' for anything else. */
+export async function createFromTemplate(db: AppDb, templateId: number): Promise<number> {
+  return copyEvent(db, templateId, { template: false, source: 'template' });
+}
+
+/** Delete a TEMPLATE (never a regular event). True when one was deleted. */
+export async function deleteTemplate(db: AppDb, id: number): Promise<boolean> {
+  const result = await db.prepare(`DELETE FROM reg_events WHERE id = ?1 AND is_template = 1`).bind(id).run();
+  return result.meta.changes > 0;
+}
+
+async function copyEvent(
+  db: AppDb,
+  id: number,
+  mode: { template: boolean; source?: 'event' | 'template' },
+): Promise<number> {
+  const source = await db.prepare(`SELECT is_template FROM reg_events WHERE id = ?1`).bind(id).first<{ is_template: number }>();
+  if (!source) throw new Error(mode.source === 'template' ? 'template_not_found' : 'event_not_found');
+  if (mode.source === 'template' && source.is_template !== 1) throw new Error('template_not_found');
+  if (mode.source === 'event' && source.is_template === 1) throw new Error('event_not_found');
   const created = await db
     .prepare(
       `INSERT INTO reg_events (starts_at, ends_at, location, capacity, price_cents, currency, opens_at, closes_at,
                                active, visible_from, waitlist_enabled, confirmation_prefix, next_confirmation, poster,
-                               max_party_size, allow_self_edit)
+                               max_party_size, allow_self_edit, is_template)
        SELECT starts_at, ends_at, location, capacity, price_cents, currency, opens_at, closes_at,
               0, visible_from, waitlist_enabled, confirmation_prefix, 1, poster,
-              max_party_size, allow_self_edit
+              max_party_size, allow_self_edit, CAST(?2 AS INTEGER)
        FROM reg_events WHERE id = ?1
        RETURNING id`,
     )
-    .bind(id)
+    .bind(id, mode.template ? 1 : 0)
     .first<{ id: number }>();
   if (!created) throw new Error('event_not_found');
   const newId = created.id;
 
   const { results: questions } = await db
-    .prepare(`SELECT id FROM reg_questions WHERE event_id = ?1 ORDER BY sort, id`)
+    .prepare(`SELECT id, condition FROM reg_questions WHERE event_id = ?1 ORDER BY sort, id`)
+    .bind(id)
+    .all<{ id: number; condition: string | null }>();
+  const { results: types } = await db
+    .prepare(`SELECT id FROM reg_ticket_types WHERE event_id = ?1 ORDER BY sort, id`)
     .bind(id)
     .all<{ id: number }>();
   const stmts: AppStatement[] = [
@@ -1499,23 +1940,63 @@ export async function cloneEvent(db: AppDb, id: number): Promise<number> {
       )
       .bind(newId, id),
   ];
-  for (const q of questions) {
+  // Sorts are renumbered 0..n-1 so a condition's target can be found by position in the copy.
+  const positionOf = new Map<number, number>();
+  questions.forEach((q, position) => positionOf.set(q.id, position));
+  questions.forEach((q, position) => {
     stmts.push(
       db
         .prepare(
-          `INSERT INTO reg_questions (event_id, sort, type, required, options)
-           SELECT CAST(?1 AS INTEGER), sort, type, required, options FROM reg_questions WHERE id = ?2`,
+          `INSERT INTO reg_questions (event_id, sort, type, required, options, scope, max_length)
+           SELECT CAST(?1 AS INTEGER), CAST(?3 AS INTEGER), type, required, options, scope, max_length FROM reg_questions WHERE id = ?2`,
         )
-        .bind(newId, q.id),
+        .bind(newId, q.id, position),
       db
         .prepare(
-          `INSERT INTO reg_question_i18n (question_id, locale, label)
-           SELECT (SELECT max(id) FROM reg_questions WHERE event_id = ?1), locale, label
+          `INSERT INTO reg_question_i18n (question_id, locale, label, help, placeholder, option_labels)
+           SELECT (SELECT max(id) FROM reg_questions WHERE event_id = ?1), locale, label, help, placeholder, option_labels
            FROM reg_question_i18n WHERE question_id = ?2`,
         )
         .bind(newId, q.id),
     );
-  }
+  });
+  questions.forEach((q, position) => {
+    const condition = parseCondition(q.condition);
+    const target = condition ? positionOf.get(condition.q) : undefined;
+    if (!condition || target === undefined) return;
+    const operand = condition.op === 'eq' || condition.op === 'neq' || condition.op === 'in' ? JSON.stringify(condition.value) : null;
+    stmts.push(
+      db
+        .prepare(
+          `INSERT INTO reg_questions (id, event_id, type, condition)
+           SELECT s.id, s.event_id, s.type,
+                  '{"q":' || CAST(t.id AS TEXT) || ',"op":' || CAST(?3 AS TEXT) ||
+                  CASE WHEN CAST(?4 AS TEXT) IS NULL THEN '' ELSE ',"value":' || CAST(?4 AS TEXT) END || '}'
+           FROM reg_questions s
+           JOIN reg_questions t ON t.event_id = s.event_id AND t.sort = ?5
+           WHERE s.event_id = ?1 AND s.sort = ?2
+           ON CONFLICT (id) DO UPDATE SET condition = excluded.condition`,
+        )
+        .bind(newId, position, JSON.stringify(condition.op), operand, target),
+    );
+  });
+  types.forEach((t, position) => {
+    stmts.push(
+      db
+        .prepare(
+          `INSERT INTO reg_ticket_types (event_id, sort, price_cents, capacity, active)
+           SELECT CAST(?1 AS INTEGER), CAST(?3 AS INTEGER), price_cents, capacity, active FROM reg_ticket_types WHERE id = ?2`,
+        )
+        .bind(newId, t.id, position),
+      db
+        .prepare(
+          `INSERT INTO reg_ticket_type_i18n (ticket_type_id, locale, label, description)
+           SELECT (SELECT max(id) FROM reg_ticket_types WHERE event_id = ?1), locale, label, description
+           FROM reg_ticket_type_i18n WHERE ticket_type_id = ?2`,
+        )
+        .bind(newId, t.id),
+    );
+  });
   try {
     await db.batch(stmts);
   } catch (error) {
@@ -1582,11 +2063,17 @@ export async function saveQuestions(
 
   // Strip any submitted id that this event does not own (treat it as a new
   // question) so a foreign id can never reach the question_id-keyed i18n upsert.
-  const { results: owned } = await db.prepare(`SELECT id FROM reg_questions WHERE event_id = ?1`).bind(eventId).all<{ id: number }>();
+  const { results: owned } = await db.prepare(`SELECT id, condition FROM reg_questions WHERE event_id = ?1`).bind(eventId).all<{ id: number; condition: string | null }>();
   const ownedIds = new Set(owned.map((r) => r.id));
   const scoped = prepared.map((p) => (p.q.id != null && !ownedIds.has(p.q.id) ? { ...p, q: { ...p.q, id: undefined } } : p));
 
   const survivingIds = scoped.filter((p) => p.q.id != null).map((p) => p.q.id as number);
+  // A question another surviving question's show-if condition points at cannot be deleted.
+  const surviving = new Set(survivingIds);
+  for (const row of owned) {
+    const target = surviving.has(row.id) ? parseCondition(row.condition)?.q : undefined;
+    if (target !== undefined && !surviving.has(target)) throw new Error('question_referenced');
+  }
   // Lock the event row first (see above), then prune the removed questions
   // (surviving ids are UPDATEd below, never deleted, so their reg_answers are preserved).
   const stmts: AppStatement[] = [db.prepare(`UPDATE reg_events SET updated_at = updated_at WHERE id = ?1`).bind(eventId)];
@@ -1641,6 +2128,533 @@ export async function saveQuestions(
   await db.batch(stmts);
 }
 
+// ── Event form builder (questions + ticket types) ────────────────────────────
+
+export interface FormError {
+  /** `questions.<i>.<field>` / `tickets.<i>.<field>` (nested: `labels.<locale>`, `options.<j>.key`, `condition.op` ...) or `questions` / `tickets` / ''. */
+  path: string;
+  code: string;
+}
+
+export interface EventFormQuestionInput {
+  /** The question's id when it already exists (its answers survive); omit for a new question. */
+  id?: number;
+  /** A client-chosen handle other questions' conditions may point at (for a question that has no id yet). */
+  key?: string;
+  type: string;
+  scope?: string;
+  required?: boolean | number;
+  max_length?: number | null;
+  /** Per language. A language that is absent is left untouched; a blank label removes that language. */
+  labels?: Partial<Record<Locale, string>>;
+  help?: Partial<Record<Locale, string | null>>;
+  placeholder?: Partial<Record<Locale, string | null>>;
+  /** Select / checkbox options in order. `key` is stable; omit it for a new option and one is generated. */
+  options?: Array<{ key?: string; labels?: Partial<Record<Locale, string>> }> | null;
+  /** `q` = the target's id, or its `key` handle. */
+  condition?: { q: number | string; op: string; value?: unknown } | null;
+}
+
+export interface EventFormTicketInput {
+  id?: number;
+  price_cents?: number;
+  capacity?: number | null;
+  active?: boolean | number;
+  labels?: Partial<Record<Locale, string>>;
+  descriptions?: Partial<Record<Locale, string | null>>;
+}
+
+/** `questions` / `tickets` undefined = leave that part alone; an array replaces it (absent ids are deleted). */
+export interface EventFormPayload {
+  questions?: EventFormQuestionInput[];
+  tickets?: EventFormTicketInput[];
+}
+
+export type SaveEventFormResult = { ok: true } | { ok: false; errors: FormError[] };
+
+/** Generated option keys: 'o' + 6 random chars; user-visible keys never matter. */
+export const OPTION_KEY_RE = /^[a-z0-9_-]{1,40}$/u;
+export const MAX_FORM_QUESTIONS = 200;
+export const MAX_QUESTION_OPTIONS = 50;
+export const MAX_TICKET_TYPES = 50;
+const MAX_LABEL = 500;
+const MAX_HELP = 2000;
+const MAX_PLACEHOLDER = 200;
+const MAX_OPTION_LABEL = 200;
+const MAX_PRICE_CENTS = 99_999_999;
+
+const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+function newOptionKey(taken: Set<string>): string {
+  for (;;) {
+    const bytes = crypto.getRandomValues(new Uint8Array(6));
+    const key = 'o' + Array.from(bytes, (b) => (b % 36).toString(36)).join('');
+    if (!taken.has(key)) return key;
+  }
+}
+
+interface QuestionDraft {
+  id: number | null;
+  key: string | null;
+  type: RegQuestionType;
+  scope: RegQuestionScope;
+  required: number;
+  max_length: number | null;
+  options: string[] | null;
+  /** Locales touched for this question, each with the four text columns to store (null label = delete the row). */
+  texts: Map<Locale, { label: string; help: string | null; placeholder: string | null; option_labels: Record<string, string> }>;
+  condition: { q: number | string; op: string; value?: unknown } | null;
+}
+
+/** Read a `{ locale: text }` map: supported locales only, trimmed, length-checked. */
+function readTextMap(
+  raw: unknown,
+  path: string,
+  max: number,
+  errors: FormError[],
+): Map<Locale, string> {
+  const out = new Map<Locale, string>();
+  if (raw === undefined || raw === null) return out;
+  if (!isRecord(raw)) {
+    errors.push({ path, code: 'invalid' });
+    return out;
+  }
+  for (const [locale, value] of Object.entries(raw)) {
+    if (!isSupportedLocale(locale)) {
+      errors.push({ path: `${path}.${locale}`, code: 'locale_unsupported' });
+      continue;
+    }
+    if (value === null || value === undefined) {
+      out.set(locale, '');
+      continue;
+    }
+    if (typeof value !== 'string') {
+      errors.push({ path: `${path}.${locale}`, code: 'invalid' });
+      continue;
+    }
+    const text = value.normalize('NFC').trim();
+    if (codePoints(text) > max) errors.push({ path: `${path}.${locale}`, code: 'too_long' });
+    out.set(locale, text);
+  }
+  return out;
+}
+
+/**
+ * Validate and save an event's whole form in one batch: questions (types, scope, required, max length,
+ * per-language label / help / placeholder, options with stable keys and per-language labels, show-if
+ * conditions) and ticket types (price, limit, active, per-language label / description). Everything is
+ * validated first; the problems come back as field paths (`questions.<i>.<field>`, `tickets.<i>.<field>`)
+ * with a code and NOTHING is written. The batch locks the event row first, so concurrent saves and
+ * registrations serialize; questions and ticket types that carry their id are UPDATEd in place (their
+ * answers and attendees survive), absent ones are deleted, new ones inserted - their i18n rows reference
+ * the just-inserted id as (SELECT max(id) ... WHERE event_id = ?), valid on both backends under that lock.
+ *
+ * Rules: the default language's label is required on every question, option and ticket type; a select /
+ * checkbox needs 1-50 options; conditions follow regConditions.validateConditions (earlier question, no
+ * section / terms target, no per-person target from a registration question, option keys exist); an
+ * option key must be new-style ([a-z0-9_-]{1,40}) unless the question already stores it (legacy option
+ * strings stay valid); a condition pointing at a deleted question says 'condition_target_deleted'; a ticket
+ * type that people already hold cannot be deleted (deactivate it); on D1 a ticket price above 0 is refused
+ * ('paid_unavailable', like the event price). `payload` is untrusted JSON.
+ */
+export async function saveEventForm(
+  db: AppDb,
+  eventId: number,
+  payload: unknown,
+  opts: { backend?: DbBackend; defaultLocale?: Locale } = {},
+): Promise<SaveEventFormResult> {
+  const defaultLocale = opts.defaultLocale ?? getRuntimeDefaultLocale();
+  const errors: FormError[] = [];
+  const event = await db.prepare(`SELECT id FROM reg_events WHERE id = ?1`).bind(eventId).first<{ id: number }>();
+  if (!event) return { ok: false, errors: [{ path: '', code: 'event_not_found' }] };
+  if (!isRecord(payload)) return { ok: false, errors: [{ path: '', code: 'invalid' }] };
+
+  // ── Questions
+  let drafts: QuestionDraft[] | null = null;
+  const ownedQuestions = new Map<number, string[] | null>();
+  const ownedScopes = new Map<number, RegQuestionScope>();
+  {
+    const { results } = await db.prepare(`SELECT id, options, scope FROM reg_questions WHERE event_id = ?1`).bind(eventId).all<{ id: number; options: string | null; scope: RegQuestionScope }>();
+    for (const row of results) {
+      ownedQuestions.set(row.id, parseOptions(row.options));
+      ownedScopes.set(row.id, row.scope);
+    }
+  }
+  if (payload.questions !== undefined) {
+    if (!Array.isArray(payload.questions)) return { ok: false, errors: [{ path: 'questions', code: 'invalid' }] };
+    if (payload.questions.length > MAX_FORM_QUESTIONS) return { ok: false, errors: [{ path: 'questions', code: 'too_many' }] };
+    drafts = [];
+    const seenIds = new Set<number>();
+    const seenKeys = new Set<string>();
+    payload.questions.forEach((raw, i) => {
+      const at = (field: string) => `questions.${i}${field ? `.${field}` : ''}`;
+      if (!isRecord(raw)) {
+        errors.push({ path: at(''), code: 'invalid' });
+        drafts!.push(emptyDraft());
+        return;
+      }
+      const draft = emptyDraft();
+      // A foreign or unknown id is a NEW question: it can never reach another event's rows.
+      if (raw.id !== undefined && raw.id !== null) {
+        if (!Number.isSafeInteger(raw.id)) errors.push({ path: at('id'), code: 'invalid' });
+        else if (seenIds.has(raw.id as number)) errors.push({ path: at('id'), code: 'duplicate' });
+        else if (ownedQuestions.has(raw.id as number)) {
+          draft.id = raw.id as number;
+          seenIds.add(draft.id);
+        }
+      }
+      if (raw.key !== undefined && raw.key !== null) {
+        if (typeof raw.key !== 'string' || raw.key === '' || raw.key.length > 64) errors.push({ path: at('key'), code: 'invalid' });
+        else if (seenKeys.has(raw.key)) errors.push({ path: at('key'), code: 'duplicate' });
+        else {
+          draft.key = raw.key;
+          seenKeys.add(raw.key);
+        }
+      }
+      if (!(QUESTION_TYPES as readonly string[]).includes(raw.type as string)) errors.push({ path: at('type'), code: 'unknown_type' });
+      else draft.type = raw.type as RegQuestionType;
+      const scope = raw.scope === undefined || raw.scope === null ? 'registration' : raw.scope;
+      if (scope !== 'registration' && scope !== 'attendee') errors.push({ path: at('scope'), code: 'invalid' });
+      else draft.scope = scope;
+      draft.required = draft.type === 'section' ? 0 : raw.required === true || raw.required === 1 ? 1 : 0;
+
+      if (raw.max_length !== undefined && raw.max_length !== null && (draft.type === 'text' || draft.type === 'textarea')) {
+        const n = raw.max_length;
+        if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 5000) errors.push({ path: at('max_length'), code: 'invalid' });
+        else draft.max_length = n;
+      }
+
+      // Texts: label / help / placeholder per language.
+      const labels = readTextMap(raw.labels, at('labels'), MAX_LABEL, errors);
+      const help = readTextMap(raw.help, at('help'), MAX_HELP, errors);
+      const placeholder = readTextMap(raw.placeholder, at('placeholder'), MAX_PLACEHOLDER, errors);
+      if (!labels.get(defaultLocale)) errors.push({ path: at(`labels.${defaultLocale}`), code: 'required' });
+
+      // Options with stable keys; each carries its own per-language labels.
+      const optionLabels = new Map<Locale, Record<string, string>>();
+      if (draft.type === 'select' || draft.type === 'checkbox') {
+        const rawOptions = raw.options;
+        if (!Array.isArray(rawOptions) || rawOptions.length === 0) errors.push({ path: at('options'), code: 'required' });
+        else if (rawOptions.length > MAX_QUESTION_OPTIONS) errors.push({ path: at('options'), code: 'too_many' });
+        else {
+          const existingKeys = new Set(draft.id !== null ? (ownedQuestions.get(draft.id) ?? []) : []);
+          const keys: string[] = [];
+          const used = new Set<string>();
+          rawOptions.forEach((opt, j) => {
+            const optAt = (field: string) => at(`options.${j}${field ? `.${field}` : ''}`);
+            if (!isRecord(opt)) {
+              errors.push({ path: optAt(''), code: 'invalid' });
+              return;
+            }
+            let key: string;
+            if (opt.key !== undefined && opt.key !== null && opt.key !== '') {
+              if (typeof opt.key !== 'string' || opt.key.length > 200 || (!OPTION_KEY_RE.test(opt.key) && !existingKeys.has(opt.key))) {
+                errors.push({ path: optAt('key'), code: 'invalid' });
+                return;
+              }
+              key = opt.key;
+            } else {
+              key = newOptionKey(used);
+            }
+            if (used.has(key)) {
+              errors.push({ path: optAt('key'), code: 'duplicate' });
+              return;
+            }
+            used.add(key);
+            keys.push(key);
+            const texts = readTextMap(opt.labels, optAt('labels'), MAX_OPTION_LABEL, errors);
+            if (!texts.get(defaultLocale)) errors.push({ path: optAt(`labels.${defaultLocale}`), code: 'required' });
+            for (const [locale, text] of texts) {
+              if (text === '') continue;
+              const map = optionLabels.get(locale) ?? {};
+              map[key] = text;
+              optionLabels.set(locale, map);
+            }
+          });
+          draft.options = keys;
+        }
+      }
+
+      // One row per touched language: its label is the row's anchor (a blank label deletes the row).
+      const touched = new Set<Locale>([...labels.keys(), ...help.keys(), ...placeholder.keys(), ...optionLabels.keys()]);
+      for (const locale of touched) {
+        const label = labels.get(locale) ?? '';
+        // Option labels may exist without a question label in that language (the fallback chain shows the
+        // question's default-language text); help and placeholder still need their own label.
+        if (label === '' && labels.has(locale) === false && (help.get(locale) || placeholder.get(locale))) {
+          errors.push({ path: at(`labels.${locale}`), code: 'required' });
+        }
+        draft.texts.set(locale, {
+          label,
+          help: help.get(locale) || null,
+          placeholder: placeholder.get(locale) || null,
+          option_labels: optionLabels.get(locale) ?? {},
+        });
+      }
+
+      if (raw.condition !== undefined && raw.condition !== null) {
+        const c = raw.condition;
+        if (!isRecord(c) || (typeof c.q !== 'number' && typeof c.q !== 'string') || typeof c.op !== 'string') {
+          errors.push({ path: at('condition'), code: 'invalid' });
+        } else draft.condition = { q: c.q as number | string, op: c.op, ...(c.value !== undefined ? { value: c.value } : {}) };
+      }
+      drafts!.push(draft);
+    });
+
+    // A question that already has answers keeps its scope (its answers live in a different table per scope).
+    const changed = drafts.map((d, i) => ({ d, i })).filter(({ d }) => d.id !== null && ownedScopes.get(d.id) !== d.scope);
+    if (changed.length > 0) {
+      const ids = changed.map(({ d }) => d.id as number);
+      const marks = ids.map((_, k) => `?${k + 1}`).join(', ');
+      const { results: used } = await db
+        .prepare(`SELECT question_id AS id FROM reg_answers WHERE question_id IN (${marks}) UNION SELECT question_id AS id FROM reg_attendee_answers WHERE question_id IN (${marks})`)
+        .bind(...ids)
+        .all<{ id: number }>();
+      const inUse = new Set(used.map((r) => Number(r.id)));
+      for (const { d, i } of changed) if (inUse.has(d.id as number)) errors.push({ path: `questions.${i}.scope`, code: 'scope_in_use' });
+    }
+
+    // Conditions: resolve each target (id or key) to a draft index, then run the shared validator.
+    const indexById = new Map<number, number>();
+    const indexByKey = new Map<string, number>();
+    drafts.forEach((d, i) => {
+      if (d.id !== null) indexById.set(d.id, i);
+      if (d.key !== null) indexByKey.set(d.key, i);
+    });
+    const resolved: DraftConditionQuestion[] = drafts.map((d, i) => {
+      let condition: DraftConditionQuestion['condition'] = null;
+      if (d.condition) {
+        const target = typeof d.condition.q === 'number' ? indexById.get(d.condition.q) : indexByKey.get(d.condition.q);
+        if (target === undefined) {
+          const deleted = typeof d.condition.q === 'number' && ownedQuestions.has(d.condition.q);
+          errors.push({ path: `questions.${i}.condition.q`, code: deleted ? 'condition_target_deleted' : 'condition_target_unknown' });
+        } else condition = { target, op: d.condition.op, ...(d.condition.value !== undefined ? { value: d.condition.value } : {}) };
+      }
+      return { type: d.type, scope: d.scope, options: d.options, condition };
+    });
+    for (const e of validateConditions(resolved)) {
+      const field = e.code === 'condition_op_invalid' ? 'condition.op' : e.code === 'condition_value_invalid' ? 'condition.value' : 'condition.q';
+      errors.push({ path: `questions.${e.index}.${field}`, code: e.code });
+    }
+  }
+
+  // ── Ticket types
+  interface TicketDraft {
+    id: number | null;
+    price_cents: number;
+    capacity: number | null;
+    active: number;
+    texts: Map<Locale, { label: string; description: string | null }>;
+  }
+  let tickets: TicketDraft[] | null = null;
+  if (payload.tickets !== undefined) {
+    if (!Array.isArray(payload.tickets)) return { ok: false, errors: [{ path: 'tickets', code: 'invalid' }] };
+    if (payload.tickets.length > MAX_TICKET_TYPES) return { ok: false, errors: [{ path: 'tickets', code: 'too_many' }] };
+    const { results } = await db.prepare(`SELECT id FROM reg_ticket_types WHERE event_id = ?1`).bind(eventId).all<{ id: number }>();
+    const owned = new Set(results.map((r) => r.id));
+    const seen = new Set<number>();
+    tickets = [];
+    payload.tickets.forEach((raw, i) => {
+      const at = (field: string) => `tickets.${i}${field ? `.${field}` : ''}`;
+      const draft: TicketDraft = { id: null, price_cents: 0, capacity: null, active: 1, texts: new Map() };
+      tickets!.push(draft);
+      if (!isRecord(raw)) {
+        errors.push({ path: at(''), code: 'invalid' });
+        return;
+      }
+      if (raw.id !== undefined && raw.id !== null) {
+        if (!Number.isSafeInteger(raw.id)) errors.push({ path: at('id'), code: 'invalid' });
+        else if (seen.has(raw.id as number)) errors.push({ path: at('id'), code: 'duplicate' });
+        else if (owned.has(raw.id as number)) {
+          draft.id = raw.id as number;
+          seen.add(draft.id);
+        }
+      }
+      const price = raw.price_cents === undefined || raw.price_cents === null ? 0 : raw.price_cents;
+      if (typeof price !== 'number' || !Number.isInteger(price) || price < 0 || price > MAX_PRICE_CENTS) errors.push({ path: at('price_cents'), code: 'invalid' });
+      else if (price > 0 && opts.backend === 'd1') errors.push({ path: at('price_cents'), code: 'paid_unavailable' });
+      else draft.price_cents = price;
+      if (raw.capacity !== undefined && raw.capacity !== null) {
+        const c = raw.capacity;
+        if (typeof c !== 'number' || !Number.isInteger(c) || c < 1 || c > 1_000_000) errors.push({ path: at('capacity'), code: 'invalid' });
+        else draft.capacity = c;
+      }
+      draft.active = raw.active === false || raw.active === 0 ? 0 : 1;
+      const labels = readTextMap(raw.labels, at('labels'), MAX_LABEL, errors);
+      const descriptions = readTextMap(raw.descriptions, at('descriptions'), 500, errors);
+      if (!labels.get(defaultLocale)) errors.push({ path: at(`labels.${defaultLocale}`), code: 'required' });
+      for (const locale of new Set<Locale>([...labels.keys(), ...descriptions.keys()])) {
+        const label = labels.get(locale) ?? '';
+        if (!labels.has(locale) && descriptions.get(locale)) errors.push({ path: at(`labels.${locale}`), code: 'required' });
+        draft.texts.set(locale, { label, description: descriptions.get(locale) || null });
+      }
+    });
+    // A type people already hold cannot disappear (deactivate it instead).
+    const dropped = [...owned].filter((id) => !seen.has(id));
+    if (dropped.length > 0) {
+      const holders = await db
+        .prepare(`SELECT DISTINCT ticket_type_id AS id FROM reg_attendees WHERE ticket_type_id IN (${dropped.map((_, k) => `?${k + 1}`).join(', ')})`)
+        .bind(...dropped)
+        .all<{ id: number }>();
+      if (holders.results.length > 0) errors.push({ path: 'tickets', code: 'delete_in_use' });
+    }
+  }
+
+  if (errors.length > 0) return { ok: false, errors };
+
+  // ── Write: one batch, event row locked first.
+  const stmts: AppStatement[] = [db.prepare(`UPDATE reg_events SET updated_at = updated_at WHERE id = ?1`).bind(eventId)];
+
+  if (drafts) {
+    const survivingIds = drafts.filter((d) => d.id !== null).map((d) => d.id as number);
+    if (survivingIds.length > 0) {
+      stmts.push(db.prepare(`DELETE FROM reg_questions WHERE event_id = ?1 AND id NOT IN (${survivingIds.map((_, k) => `?${k + 2}`).join(', ')})`).bind(eventId, ...survivingIds));
+    } else {
+      stmts.push(db.prepare(`DELETE FROM reg_questions WHERE event_id = ?1`).bind(eventId));
+    }
+    const upsertTexts = (questionId: number | null, d: QuestionDraft) => {
+      for (const [locale, text] of d.texts) {
+        if (!text.label && Object.keys(text.option_labels).length === 0) {
+          if (questionId !== null) stmts.push(db.prepare(`DELETE FROM reg_question_i18n WHERE question_id = ?1 AND locale = ?2`).bind(questionId, locale));
+          continue;
+        }
+        const optionLabels = Object.keys(text.option_labels).length > 0 ? JSON.stringify(text.option_labels) : null;
+        if (questionId !== null) {
+          stmts.push(
+            db
+              .prepare(
+                `INSERT INTO reg_question_i18n (question_id, locale, label, help, placeholder, option_labels) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT (question_id, locale) DO UPDATE SET label = excluded.label, help = excluded.help,
+                   placeholder = excluded.placeholder, option_labels = excluded.option_labels`,
+              )
+              .bind(questionId, locale, text.label, text.help, text.placeholder, optionLabels),
+          );
+        } else {
+          stmts.push(
+            db
+              .prepare(
+                `INSERT INTO reg_question_i18n (question_id, locale, label, help, placeholder, option_labels)
+                 VALUES ((SELECT max(id) FROM reg_questions WHERE event_id = ?1), ?2, ?3, ?4, ?5, ?6)`,
+              )
+              .bind(eventId, locale, text.label, text.help, text.placeholder, optionLabels),
+          );
+        }
+      }
+    };
+    // Survivors first (every final sort is then in place), then new questions in order.
+    drafts.forEach((d, position) => {
+      if (d.id === null) return;
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE reg_questions SET sort = ?2, type = ?3, required = ?4, options = ?5, scope = ?6, max_length = ?7, condition = NULL
+             WHERE id = ?1 AND event_id = ?8`,
+          )
+          .bind(d.id, position, d.type, d.required, d.options ? JSON.stringify(d.options) : null, d.scope, d.max_length, eventId),
+      );
+      upsertTexts(d.id, d);
+    });
+    drafts.forEach((d, position) => {
+      if (d.id !== null) return;
+      stmts.push(
+        db
+          .prepare(`INSERT INTO reg_questions (event_id, sort, type, required, options, scope, max_length) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`)
+          .bind(eventId, position, d.type, d.required, d.options ? JSON.stringify(d.options) : null, d.scope, d.max_length),
+      );
+      upsertTexts(null, d);
+    });
+    // Conditions last, once every question holds its final sort: the target and the question itself are
+    // both found by sort (unique inside the event now). An upsert keyed by id sets the column without a
+    // subquery in SET (the campus scoper only guards WHERE clauses it can see).
+    const indexById = new Map<number, number>();
+    const indexByKey = new Map<string, number>();
+    drafts.forEach((d, i) => {
+      if (d.id !== null) indexById.set(d.id, i);
+      if (d.key !== null) indexByKey.set(d.key, i);
+    });
+    drafts.forEach((d, position) => {
+      if (!d.condition) return;
+      const target = typeof d.condition.q === 'number' ? indexById.get(d.condition.q)! : indexByKey.get(d.condition.q)!;
+      const operand = d.condition.op === 'eq' || d.condition.op === 'neq' || d.condition.op === 'in' ? JSON.stringify(d.condition.value) : null;
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO reg_questions (id, event_id, type, condition)
+             SELECT s.id, s.event_id, s.type,
+                    '{"q":' || CAST(t.id AS TEXT) || ',"op":' || CAST(?3 AS TEXT) ||
+                    CASE WHEN CAST(?4 AS TEXT) IS NULL THEN '' ELSE ',"value":' || CAST(?4 AS TEXT) END || '}'
+             FROM reg_questions s
+             JOIN reg_questions t ON t.event_id = s.event_id AND t.sort = ?5
+             WHERE s.event_id = ?1 AND s.sort = ?2
+             ON CONFLICT (id) DO UPDATE SET condition = excluded.condition`,
+          )
+          .bind(eventId, position, JSON.stringify(d.condition.op), operand, target),
+      );
+    });
+  }
+
+  if (tickets) {
+    const surviving = tickets.filter((t) => t.id !== null).map((t) => t.id as number);
+    const inUse = `AND NOT EXISTS (SELECT 1 FROM reg_attendees a WHERE a.ticket_type_id = reg_ticket_types.id)`;
+    if (surviving.length > 0) {
+      stmts.push(db.prepare(`DELETE FROM reg_ticket_types WHERE event_id = ?1 AND id NOT IN (${surviving.map((_, k) => `?${k + 2}`).join(', ')}) ${inUse}`).bind(eventId, ...surviving));
+    } else {
+      stmts.push(db.prepare(`DELETE FROM reg_ticket_types WHERE event_id = ?1 ${inUse}`).bind(eventId));
+    }
+    const upsertTexts = (typeId: number | null, t: TicketDraft) => {
+      for (const [locale, text] of t.texts) {
+        if (!text.label) {
+          if (typeId !== null) stmts.push(db.prepare(`DELETE FROM reg_ticket_type_i18n WHERE ticket_type_id = ?1 AND locale = ?2`).bind(typeId, locale));
+          continue;
+        }
+        if (typeId !== null) {
+          stmts.push(
+            db
+              .prepare(
+                `INSERT INTO reg_ticket_type_i18n (ticket_type_id, locale, label, description) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (ticket_type_id, locale) DO UPDATE SET label = excluded.label, description = excluded.description`,
+              )
+              .bind(typeId, locale, text.label, text.description),
+          );
+        } else {
+          stmts.push(
+            db
+              .prepare(
+                `INSERT INTO reg_ticket_type_i18n (ticket_type_id, locale, label, description)
+                 VALUES ((SELECT max(id) FROM reg_ticket_types WHERE event_id = ?1), ?2, ?3, ?4)`,
+              )
+              .bind(eventId, locale, text.label, text.description),
+          );
+        }
+      }
+    };
+    tickets.forEach((t, position) => {
+      if (t.id !== null) {
+        stmts.push(
+          db
+            .prepare(`UPDATE reg_ticket_types SET sort = ?2, price_cents = ?3, capacity = ?4, active = ?5 WHERE id = ?1 AND event_id = ?6`)
+            .bind(t.id, position, t.price_cents, t.capacity, t.active, eventId),
+        );
+        upsertTexts(t.id, t);
+      } else {
+        stmts.push(
+          db
+            .prepare(`INSERT INTO reg_ticket_types (event_id, sort, price_cents, capacity, active) VALUES (?1, ?2, ?3, ?4, ?5)`)
+            .bind(eventId, position, t.price_cents, t.capacity, t.active),
+        );
+        upsertTexts(null, t);
+      }
+    });
+  }
+
+  await db.batch(stmts);
+  return { ok: true };
+}
+
+function emptyDraft(): QuestionDraft {
+  return { id: null, key: null, type: 'text', scope: 'registration', required: 0, max_length: null, options: null, texts: new Map(), condition: null };
+}
+
 interface RosterRow {
   id: number;
   name: string;
@@ -1657,57 +2671,101 @@ const ROSTER_SELECT = `SELECT id, name, email, status, amount_cents, confirmatio
        FROM registrations WHERE event_id = ?1
        ORDER BY created_at DESC, id DESC`;
 
-/** The names of the people still on each of an event's registrations (registration id -> names in
- *  form order). Joined in code, not SQL, so the same statement serves D1 and Postgres. */
-async function activePeopleByRegistration(db: AppDb, eventId: number): Promise<Map<number, string[]>> {
+/** One person still on a registration, as the roster shows them: name, ticket type label (admin language; null without
+ *  a type) and their answers to the per-person questions (display text, question order). */
+export interface RosterAttendee {
+  name: string;
+  ticket: string | null;
+  answers: Array<{ questionId: number; label: string; value: string }>;
+}
+
+/** The people still on each of an event's registrations (registration id -> people in form order), with their
+ *  ticket type and per-person answers. Joined in code, not SQL, so the same statements serve D1 and Postgres. */
+async function activeAttendeesByRegistration(db: AppDb, locale: Locale, eventId: number, questions: RegQuestion[]): Promise<Map<number, RosterAttendee[]>> {
   const { results } = await db
     .prepare(
-      `SELECT a.registration_id AS registration_id, a.name AS name
+      `SELECT a.id AS id, a.registration_id AS registration_id, a.name AS name, a.ticket_type_id AS ticket_type_id
        FROM reg_attendees a
        JOIN registrations r ON r.id = a.registration_id
        WHERE r.event_id = ?1 AND a.status = 'active'
        ORDER BY a.registration_id, a.sort, a.id`,
     )
     .bind(eventId)
-    .all<{ registration_id: number; name: string }>();
-  const byReg = new Map<number, string[]>();
-  for (const row of results) (byReg.get(row.registration_id) ?? byReg.set(row.registration_id, []).get(row.registration_id)!).push(row.name);
+    .all<{ id: number; registration_id: number; name: string; ticket_type_id: number | null }>();
+  const { results: stored } = await db
+    .prepare(
+      `SELECT aa.attendee_id AS attendee_id, aa.question_id AS question_id, aa.value AS value
+       FROM reg_attendee_answers aa
+       JOIN reg_attendees a ON a.id = aa.attendee_id
+       JOIN registrations r ON r.id = a.registration_id
+       WHERE r.event_id = ?1`,
+    )
+    .bind(eventId)
+    .all<{ attendee_id: number; question_id: number; value: string }>();
+  const labels = new Map((await listTicketTypes(db, locale, eventId)).map((t) => [t.id, t.label]));
+  const answersOf = new Map<number, Map<number, string>>();
+  for (const row of stored) (answersOf.get(row.attendee_id) ?? answersOf.set(row.attendee_id, new Map()).get(row.attendee_id)!).set(row.question_id, row.value);
+  const personQuestions = questions.filter((q) => q.scope === 'attendee' && q.type !== 'section');
+  const byReg = new Map<number, RosterAttendee[]>();
+  for (const row of results) {
+    const mine = answersOf.get(row.id);
+    const list = byReg.get(row.registration_id) ?? byReg.set(row.registration_id, []).get(row.registration_id)!;
+    list.push({
+      name: row.name,
+      ticket: row.ticket_type_id === null ? null : (labels.get(row.ticket_type_id) ?? null),
+      answers: personQuestions.flatMap((q) => {
+        const raw = mine?.get(q.id);
+        return raw === undefined ? [] : [{ questionId: q.id, label: q.label, value: answerDisplayText(q, raw) }];
+      }),
+    });
+  }
+  return byReg;
+}
+
+/** The registration-level answers of an event's registrations (registration id -> question id -> stored value). */
+async function storedAnswersByRegistration(db: AppDb, eventId: number): Promise<Map<number, Map<number, string>>> {
+  const { results } = await db
+    .prepare(
+      `SELECT a.registration_id AS registration_id, a.question_id AS question_id, a.value AS value
+       FROM reg_answers a
+       JOIN registrations r ON r.id = a.registration_id
+       WHERE r.event_id = ?1`,
+    )
+    .bind(eventId)
+    .all<{ registration_id: number; question_id: number; value: string }>();
+  const byReg = new Map<number, Map<number, string>>();
+  for (const a of results) (byReg.get(a.registration_id) ?? byReg.set(a.registration_id, new Map()).get(a.registration_id)!).set(a.question_id, a.value);
   return byReg;
 }
 
 /** The registration roster for an event, newest first (every status, waitlist
  *  included), each row carrying its confirmation number, party size, phone, the
- *  names of its people and its answers as localized { label, value } pairs
- *  (question sort order). */
+ *  names of its people (`people`), those people with their ticket type and per-person
+ *  answers (`attendees`) and its registration-level answers as localized { label, value }
+ *  pairs (question sort order; option keys shown as their labels in `locale`). */
 export async function listRegistrations(
   db: AppDb,
   locale: Locale,
   eventId: number,
-): Promise<Array<RosterRow & { people: string[]; answers: Array<{ label: string; value: string }> }>> {
+): Promise<Array<RosterRow & { people: string[]; attendees: RosterAttendee[]; answers: Array<{ label: string; value: string }> }>> {
   const { results: regs } = await db.prepare(ROSTER_SELECT).bind(eventId).all<RosterRow>();
-
-  const { select, joins } = i18nJoin('reg_question_i18n', 'q', 'question_id', ['label'], locale);
-  const { results: answers } = await db
-    .prepare(
-      `SELECT a.registration_id AS registration_id, ${select}, a.value AS value
-       FROM reg_answers a
-       JOIN registrations r ON r.id = a.registration_id
-       JOIN reg_questions q ON q.id = a.question_id
-       ${joins}
-       WHERE r.event_id = ?1
-       ORDER BY q.sort, q.id`,
-    )
-    .bind(eventId)
-    .all<{ registration_id: number; label: string | null; value: string }>();
-
-  const byReg = new Map<number, Array<{ label: string; value: string }>>();
-  for (const a of answers) {
-    const list = byReg.get(a.registration_id) ?? [];
-    list.push({ label: a.label ?? '', value: a.value });
-    byReg.set(a.registration_id, list);
-  }
-  const people = await activePeopleByRegistration(db, eventId);
-  return regs.map((r) => ({ ...r, people: people.get(r.id) ?? [], answers: byReg.get(r.id) ?? [] }));
+  const questions = await listQuestions(db, locale, eventId);
+  const stored = await storedAnswersByRegistration(db, eventId);
+  const attendees = await activeAttendeesByRegistration(db, locale, eventId, questions);
+  const registrationQuestions = questions.filter((q) => q.scope === 'registration' && q.type !== 'section');
+  return regs.map((r) => {
+    const mine = stored.get(r.id);
+    const people = attendees.get(r.id) ?? [];
+    return {
+      ...r,
+      people: people.map((p) => p.name),
+      attendees: people,
+      answers: registrationQuestions.flatMap((q) => {
+        const raw = mine?.get(q.id);
+        return raw === undefined ? [] : [{ label: q.label, value: answerDisplayText(q, raw) }];
+      }),
+    };
+  });
 }
 
 /**
@@ -1715,7 +2773,10 @@ export async function listRegistrations(
  * size,Amount,Registered followed by one column per question (localized label,
  * question sort order), rows newest first (every status, waitlist included).
  * People (the names still on the registration, joined with "; ") and Phone follow
- * the question columns, so existing exports keep their column order.
+ * the question columns, so existing exports keep their column order. After them come
+ * "Ticket types" ("Name: Type; ...", only for an event that has ticket types) and one
+ * column per per-person question ("Name: value; ..."). Option keys are written as their
+ * labels in `locale`; sections never get a column.
  * Amount is a plain dollars string - cents are integers, so
  * (amount_cents/100).toFixed(2) is exact. Each field goes through the shared
  * csvCell: spreadsheet formula injection is neutralized (a leading = + - @ / tab /
@@ -1725,31 +2786,27 @@ export async function listRegistrations(
  */
 export async function registrationsCsv(db: AppDb, locale: Locale, eventId: number): Promise<string> {
   const questions = await listQuestions(db, locale, eventId);
+  const registrationQuestions = questions.filter((q) => q.scope === 'registration' && q.type !== 'section');
+  const personQuestions = questions.filter((q) => q.scope === 'attendee' && q.type !== 'section');
   const { results: regs } = await db.prepare(ROSTER_SELECT).bind(eventId).all<RosterRow>();
-  const { results: answers } = await db
-    .prepare(
-      `SELECT a.registration_id AS registration_id, a.question_id AS question_id, a.value AS value
-       FROM reg_answers a
-       JOIN registrations r ON r.id = a.registration_id
-       WHERE r.event_id = ?1`,
-    )
-    .bind(eventId)
-    .all<{ registration_id: number; question_id: number; value: string }>();
-
   // Answers keyed by (registration id -> question id) so each lands in its column
   // even when two questions share a label.
-  const byReg = new Map<number, Map<number, string>>();
-  for (const a of answers) {
-    const m = byReg.get(a.registration_id) ?? new Map<number, string>();
-    m.set(a.question_id, a.value);
-    byReg.set(a.registration_id, m);
-  }
+  const byReg = await storedAnswersByRegistration(db, eventId);
+  const people = await activeAttendeesByRegistration(db, locale, eventId, questions);
+  const questionById = new Map(questions.map((q) => [q.id, q]));
+  const hasTickets = (await listTicketTypes(db, locale, eventId)).length > 0;
 
-  const people = await activePeopleByRegistration(db, eventId);
-  const header = ['Confirmation', 'Name', 'Email', 'Status', 'Party size', 'Amount', 'Registered', ...questions.map((q) => q.label), 'People', 'Phone'];
+  // After People and Phone: "Ticket types" (events that have ticket types) and one column per per-person
+  // question ("Name: value; ..."), so the columns that existed before keep their place.
+  const header = [
+    'Confirmation', 'Name', 'Email', 'Status', 'Party size', 'Amount', 'Registered',
+    ...registrationQuestions.map((q) => q.label), 'People', 'Phone',
+    ...(hasTickets ? ['Ticket types'] : []), ...personQuestions.map((q) => q.label),
+  ];
   const lines = [header.map(csvCell).join(',')];
   for (const r of regs) {
     const m = byReg.get(r.id) ?? new Map<number, string>();
+    const mine = people.get(r.id) ?? [];
     const cells = [
       r.confirmation_no ?? '',
       r.name,
@@ -1758,9 +2815,17 @@ export async function registrationsCsv(db: AppDb, locale: Locale, eventId: numbe
       String(r.party_size),
       (r.amount_cents / 100).toFixed(2),
       r.created_at,
-      ...questions.map((q) => m.get(q.id) ?? ''),
-      (people.get(r.id) ?? []).join('; '),
+      ...registrationQuestions.map((q) => {
+        const raw = m.get(q.id);
+        return raw === undefined ? '' : answerDisplayText(questionById.get(q.id)!, raw);
+      }),
+      mine.map((p) => p.name).join('; '),
       r.phone ?? '',
+      ...(hasTickets ? [mine.filter((p) => p.ticket !== null).map((p) => `${p.name}: ${p.ticket}`).join('; ')] : []),
+      ...personQuestions.map((q) => mine.flatMap((p) => {
+        const hit = p.answers.find((a) => a.questionId === q.id);
+        return hit ? [`${p.name}: ${hit.value}`] : [];
+      }).join('; ')),
     ];
     lines.push(cells.map(csvCell).join(','));
   }

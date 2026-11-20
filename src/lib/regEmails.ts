@@ -108,7 +108,12 @@ function build(summary: RegistrationSummary, variant: Variant, opts: RegEmailOpt
   const { locale } = opts;
   const { event, registration } = summary;
   const title = event.title;
-  const active = summary.attendees.filter((a) => a.status === 'active').map((a) => a.name);
+  // A person on a ticket type is listed with it (and its price when it costs something): "Ada (Adult · $20.00)".
+  const active = summary.attendees.filter((a) => a.status === 'active').map((a) => {
+    if (!a.ticket_label) return a.name;
+    const price = (a.ticket_price_cents ?? 0) > 0 ? ` · ${moneyText(a.ticket_price_cents!, registration.currency, locale)}` : '';
+    return `${a.name} (${a.ticket_label}${price})`;
+  });
   const showDetails = variant !== 'cancelled';
 
   const statusKey = variant === 'cancelled' ? 'cancelled' : registration.status === 'waitlist' ? 'waitlist' : 'confirmed';

@@ -38,6 +38,7 @@ async function enableRegistration(): Promise<void> {
 /** Put the seeded events and their data back to the seed state (worker writes are not rolled back between tests). */
 async function resetRegistrationData(): Promise<void> {
   const run = (sql: string) => env.DB.prepare(sql).run();
+  await run(`DELETE FROM reg_ticket_types WHERE event_id IN (920, 930)`);
   await run(`DELETE FROM reg_answers`);
   await run(`DELETE FROM reg_attendees`);
   await run(`DELETE FROM registrations`);
@@ -154,6 +155,23 @@ describe('Registration on D1: filling an event', () => {
     // A member sees the waitlist place on their own events page.
     const mine = await (await get('/en/my/events', { cookie: await sessionCookie(...MEMBERS[3]) })).text();
     expect(mine).toContain('On the waitlist');
+  });
+
+  it('lists a typed event as full when every active ticket type is at its limit, on /register and /my/events', async () => {
+    await enableRegistration();
+    // Capacity 3, never reached; one limited type that is used up.
+    const type = await env.DB.prepare(`INSERT INTO reg_ticket_types (event_id, price_cents, capacity) VALUES (920, 0, 1) RETURNING id`).first<{ id: number }>();
+    await env.DB.prepare(`INSERT INTO reg_ticket_type_i18n (ticket_type_id, locale, label) VALUES (?1, 'en', 'Adult')`).bind(type!.id).run();
+    const cell = (html: string) => html.slice(html.indexOf('Neighbors Potluck Night') > -1 ? html.indexOf('Neighbors Potluck Night') : 0);
+    expect(cell(await (await get('/en/register')).text())).not.toContain('Join the waitlist');
+    const reg = await env.DB.prepare(`INSERT INTO registrations (event_id, name, email, submission_key, party_size, status) VALUES (920, 'A', 'a@example.com', 'typed-full-1', 1, 'confirmed') RETURNING id`).first<{ id: number }>();
+    await env.DB.prepare(`INSERT INTO reg_attendees (registration_id, name, ticket_type_id) VALUES (?1, 'A', ?2)`).bind(reg!.id, type!.id).run();
+    expect(await (await get('/en/register')).text()).toContain('Join the waitlist');
+    const mine = await (await get('/en/my/events', { cookie: await sessionCookie(...MEMBERS[3]) })).text();
+    expect(mine).toContain('Join the waitlist');
+    await env.DB.prepare(`UPDATE reg_events SET waitlist_enabled = 0 WHERE id = 920`).run();
+    expect(await (await get('/en/register')).text()).toContain('>Full<');
+    await env.DB.prepare(`DELETE FROM reg_ticket_types WHERE event_id = 920`).run();
   });
 
   it('emails each registrant, serves the QR image, and an admin cancel promotes the waitlist and mails both', async () => {
@@ -349,7 +367,10 @@ describe('Registration on D1: a family signs up, reviews, manages and cancels on
     expect(formPage).toContain('name="person_name_3"');
     expect(formPage).not.toContain('name="person_name_4"');
     expect(formPage).toMatch(/name="submission_key" value="[A-Za-z0-9_-]{16,64}"/);
-    expect(formPage).toContain('data-household');
+    expect(formPage).toContain('data-add-person');
+    // Household chips come from the signed-in person's household (Sarah has none; David's has Amy). The old check on the
+    // bare attribute matched a CSS rule that used to be inlined in the page; this one looks for the element itself.
+    expect(await (await get('/en/register/920', { cookie: await sessionCookie(2, 'pastor.david@example.com') })).text()).toContain('<div data-household hidden>');
 
     // Review: nothing is written, the page shows the party and carries every id through.
     const cookie = await sessionCookie(...SARAH);
@@ -569,5 +590,311 @@ describe('Registration on D1: a family signs up, reviews, manages and cancels on
     expect(editor).toContain('name="allow_self_edit"');
     expect(editor).toContain('name="notes_en"');
     expect(editor).toContain('Bring sunscreen.');
+  });
+});
+
+describe('Registration on D1: the form builder and templates', () => {
+  const jsonPost = async (path: string, payload: unknown, cookie: string, origin: string = ORIGIN): Promise<Response> =>
+    SELF.fetch(`${ORIGIN}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin, cookie },
+      body: JSON.stringify(payload),
+      redirect: 'manual',
+    });
+
+  async function newEvent(title: string): Promise<number> {
+    const saved = await post('/admin/registration', new URLSearchParams({ action: 'save', title_en: title, starts_at: '2030-06-01T10:00' }).toString(), { cookie: await ADMIN() });
+    expect(saved.headers.get('location')).toBe('/admin/registration?saved=1');
+    return (await env.DB.prepare(`SELECT id FROM reg_events WHERE id NOT IN (920, 930) ORDER BY id DESC LIMIT 1`).first<number>('id'))!;
+  }
+
+  const PAYLOAD = {
+    questions: [
+      { key: 'kids', type: 'yesno', labels: { en: 'Need childcare?' } },
+      { key: 'allergy', type: 'text', scope: 'attendee', max_length: 40, labels: { en: 'Child allergies' }, condition: { q: 'kids', op: 'eq', value: 'yes' } },
+    ],
+    tickets: [{ price_cents: 0, capacity: 5, active: true, labels: { en: 'Adult' }, descriptions: { en: 'Ages 13 and up' } }],
+  };
+
+  it('mounts the builder island, saves a per-person question with a condition and a ticket type, and re-renders them', async () => {
+    await enableRegistration();
+    const id = await newEvent('Builder Camp');
+    const page = await get(`/admin/registration/${id}`, { cookie: await ADMIN() });
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('Registration form');
+    expect(html).toMatch(/<astro-island[^>]*RegFormBuilder/);
+    expect(html).toContain('Registrations');
+
+    const res = await jsonPost(`/admin/registration/${id}`, PAYLOAD, await ADMIN());
+    expect(res.status).toBe(200);
+    const body = await res.json<{ ok: boolean; questions: Array<{ id: number; scope: string; condition: { q: number; op: string; value: string } | null }>; tickets: Array<{ capacity: number }> }>();
+    expect(body.ok).toBe(true);
+    expect(body.questions.map((q) => q.scope)).toEqual(['registration', 'attendee']);
+    expect(body.questions[1].condition).toEqual({ q: body.questions[0].id, op: 'eq', value: 'yes' });
+    expect(body.tickets[0].capacity).toBe(5);
+
+    const stored = await env.DB.prepare(`SELECT q.scope AS scope, q.max_length AS max_length FROM reg_questions q WHERE q.event_id = ?1 ORDER BY q.sort`).bind(id).all<{ scope: string; max_length: number | null }>();
+    expect(stored.results).toEqual([{ scope: 'registration', max_length: null }, { scope: 'attendee', max_length: 40 }]);
+    expect(await env.DB.prepare(`SELECT count(*) AS n FROM reg_ticket_types WHERE event_id = ?1`).bind(id).first<number>('n')).toBe(1);
+
+    // the admin page now carries the stored form in the island props (serialized into the page HTML)
+    const again = await (await get(`/admin/registration/${id}`, { cookie: await ADMIN() })).text();
+    expect(again).toContain('Child allergies');
+    expect(again).toContain('Ages 13 and up');
+    // the events list says the event price is ignored while a ticket type is active
+    const editor = await (await get(`/admin/registration?edit=${id}`, { cookie: await ADMIN() })).text();
+    expect(editor).toContain('data-testid="price-ignored"');
+  });
+
+  it('returns validation errors by field path and writes nothing', async () => {
+    await enableRegistration();
+    const id = await newEvent('Builder Errors');
+    const res = await jsonPost(`/admin/registration/${id}`, { questions: [{ type: 'select', labels: {} }], tickets: [{ price_cents: 500, labels: { en: 'VIP' } }] }, await ADMIN());
+    expect(res.status).toBe(422);
+    const body = await res.json<{ ok: boolean; errors: Array<{ path: string; code: string }> }>();
+    expect(body.errors.map((e) => `${e.path}:${e.code}`)).toEqual([
+      'questions.0.labels.en:required', 'questions.0.options:required', 'tickets.0.price_cents:paid_unavailable',
+    ]);
+    expect(await env.DB.prepare(`SELECT count(*) AS n FROM reg_questions WHERE event_id = ?1`).bind(id).first<number>('n')).toBe(0);
+  });
+
+  it('refuses a cross-origin save, a signed-out save and a member without the registration area', async () => {
+    await enableRegistration();
+    const id = await newEvent('Builder Guard');
+    expect((await jsonPost(`/admin/registration/${id}`, PAYLOAD, await ADMIN(), 'https://evil.example')).status).toBe(403);
+    const anon = await SELF.fetch(`${ORIGIN}/admin/registration/${id}`, { method: 'POST', headers: { 'content-type': 'application/json', origin: ORIGIN }, body: JSON.stringify(PAYLOAD), redirect: 'manual' });
+    expect([302, 303, 401, 403]).toContain(anon.status);
+    const member = await jsonPost(`/admin/registration/${id}`, PAYLOAD, await sessionCookie(3, 'sarah.johnson@example.com'));
+    expect([302, 303, 403, 404]).toContain(member.status);
+    expect(await env.DB.prepare(`SELECT count(*) AS n FROM reg_questions WHERE event_id = ?1`).bind(id).first<number>('n')).toBe(0);
+  });
+
+  it('saves an event as a template, builds a new event from it, and only ever deletes templates', async () => {
+    await enableRegistration();
+    const id = await newEvent('Template Source');
+    await jsonPost(`/admin/registration/${id}`, PAYLOAD, await ADMIN());
+    const action = async (target: number, op: string) =>
+      post('/admin/registration', new URLSearchParams({ action: 'event', id: String(target), op }).toString(), { cookie: await ADMIN() });
+
+    const saved = await action(id, 'save_template');
+    expect(saved.headers.get('location')).toBe('/admin/registration?template_saved=1#reg-templates');
+    const templateId = (await env.DB.prepare(`SELECT id FROM reg_events WHERE is_template = 1 ORDER BY id DESC LIMIT 1`).first<number>('id'))!;
+
+    // the list shows it under Templates, not among the events, and the template page has no roster
+    const list = await (await get('/admin/registration', { cookie: await ADMIN() })).text();
+    const templatesPart = list.slice(list.indexOf('data-testid="templates-table"'));
+    expect(templatesPart).toContain(`data-template-id="${templateId}"`);
+    expect(list.slice(0, list.indexOf('data-testid="templates-table"'))).not.toContain(`data-event-id="${templateId}"`);
+    const templatePage = await (await get(`/admin/registration/${templateId}`, { cookie: await ADMIN() })).text();
+    expect(templatePage).toMatch(/<astro-island[^>]*RegFormBuilder/);
+    expect(templatePage).not.toContain('Export CSV');
+    expect(await env.DB.prepare(`SELECT count(*) AS n FROM registrations`).first<number>('n')).toBe(0);
+
+    // lifecycle buttons are refused for a template
+    const refused = await action(templateId, 'hide');
+    expect(refused.headers.get('location')).toBe(`/admin/registration?error=invalid&row=${templateId}`);
+
+    // a new regular event comes from it, hidden, with the questions and ticket type
+    const created = await action(templateId, 'from_template');
+    const newId = (await env.DB.prepare(`SELECT id FROM reg_events WHERE is_template = 0 ORDER BY id DESC LIMIT 1`).first<number>('id'))!;
+    expect(created.headers.get('location')).toBe(`/admin/registration?edit=${newId}&from_template=1`);
+    expect(await env.DB.prepare(`SELECT count(*) AS n FROM reg_questions WHERE event_id = ?1`).bind(newId).first<number>('n')).toBe(2);
+    expect(await env.DB.prepare(`SELECT count(*) AS n FROM reg_ticket_types WHERE event_id = ?1`).bind(newId).first<number>('n')).toBe(1);
+
+    // a regular event is never deleted, a template is
+    expect((await action(newId, 'delete_template')).headers.get('location')).toBe(`/admin/registration?error=not_found&row=${newId}`);
+    expect((await action(templateId, 'delete_template')).headers.get('location')).toBe('/admin/registration?template_deleted=1#reg-templates');
+    expect(await env.DB.prepare(`SELECT count(*) AS n FROM reg_events WHERE id IN (?1, ?2)`).bind(newId, templateId).first<number>('n')).toBe(1);
+  });
+});
+
+describe('Registration on D1: ticket types, per-person questions and show-if', () => {
+  const SARAH = MEMBERS[0];
+  const GRACE = MEMBERS[1];
+  const jsonPost = async (path: string, payload: unknown, cookie: string): Promise<Response> =>
+    SELF.fetch(`${ORIGIN}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ORIGIN, cookie },
+      body: JSON.stringify(payload),
+      redirect: 'manual',
+    });
+
+  /** An open event with Adult / Child (limit 1) tickets, a yes/no, three per-person questions (one shown only when the yes/no is Yes) and a terms question. */
+  async function ticketEvent() {
+    const saved = await post('/admin/registration', new URLSearchParams({ action: 'save', title_en: 'Ticket Camp', starts_at: '2030-06-01T10:00' }).toString(), { cookie: await ADMIN() });
+    expect(saved.headers.get('location')).toBe('/admin/registration?saved=1');
+    const id = (await env.DB.prepare(`SELECT id FROM reg_events WHERE id NOT IN (920, 930) ORDER BY id DESC LIMIT 1`).first<number>('id'))!;
+    await env.DB.prepare(`UPDATE reg_events SET active = 1, waitlist_enabled = 1, max_party_size = 4, price_cents = NULL, capacity = NULL, closes_at = NULL WHERE id = ?1`).bind(id).run();
+    const res = await jsonPost(`/admin/registration/${id}`, {
+      questions: [
+        { key: 'care', type: 'yesno', labels: { en: 'Need childcare?' } },
+        { type: 'section', scope: 'attendee', labels: { en: 'About each person' }, help: { en: 'Tell us a little about everyone.' } },
+        { type: 'select', scope: 'attendee', required: true, labels: { en: 'Shirt size' }, help: { en: 'Unisex sizing.' },
+          options: [{ key: 'sm', labels: { en: 'Small' } }, { key: 'md', labels: { en: 'Medium' } }] },
+        { type: 'text', scope: 'attendee', max_length: 40, labels: { en: 'Allergies' }, placeholder: { en: 'e.g. peanuts' }, condition: { q: 'care', op: 'eq', value: 'yes' } },
+        { type: 'terms', required: true, labels: { en: 'Photo release' }, help: { en: 'We may share group photos.' } },
+      ],
+      tickets: [
+        { price_cents: 0, active: true, labels: { en: 'Adult' }, descriptions: { en: 'Ages 13 and up' } },
+        { price_cents: 0, capacity: 1, active: true, labels: { en: 'Child' }, descriptions: { en: 'Ages 3 to 12' } },
+      ],
+    }, await ADMIN());
+    expect(res.status).toBe(200);
+    const q = Object.fromEntries((await env.DB.prepare(`SELECT q.id AS id, i.label AS label FROM reg_questions q JOIN reg_question_i18n i ON i.question_id = q.id AND i.locale = 'en' WHERE q.event_id = ?1`).bind(id).all<{ id: number; label: string }>()).results.map((r) => [r.label, r.id]));
+    const t = Object.fromEntries((await env.DB.prepare(`SELECT t.id AS id, i.label AS label FROM reg_ticket_types t JOIN reg_ticket_type_i18n i ON i.ticket_type_id = t.id AND i.locale = 'en' WHERE t.event_id = ?1`).bind(id).all<{ id: number; label: string }>()).results.map((r) => [r.label, r.id]));
+    return { id, q, adult: t.Adult, child: t.Child };
+  }
+
+  it('shows the form, reviews each person with their type and answers, registers a family, and lists it in the manage view, roster and CSV', async () => {
+    await enableRegistration();
+    const { id, q, adult, child } = await ticketEvent();
+    const cookie = await sessionCookie(...SARAH);
+    const path = `/en/register/${id}`;
+
+    const formPage = await (await get(path, { cookie })).text();
+    expect(formPage).toContain('name="ticket_0"');
+    expect(formPage).toContain('name="ticket_1"');
+    expect(formPage).toContain('name="ticket_3"');
+    expect(formPage).toContain(`name="pq_0_${q['Shirt size']}"`);
+    expect(formPage).toContain(`name="pq_2_${q['Shirt size']}"`);
+    expect(formPage).toContain('Ages 3 to 12');
+    expect(formPage).toContain('1 left');
+    expect(formPage).toContain('About each person');
+    expect(formPage).toContain('Tell us a little about everyone.');
+    expect(formPage).toContain('Unisex sizing.');
+    expect(formPage).toContain('<details class="reg-help">');
+    expect(formPage).toContain('placeholder="e.g. peanuts"');
+    expect(formPage).toContain('maxlength="40"');
+    expect(formPage).toContain('We may share group photos.');
+    expect(formPage).toMatch(/<script type="application\/json" data-reg-conditions>/);
+    // Without the script everything shows (the conditional question is in the page), but only person 1 is natively required.
+    expect(formPage).toContain(`name="pq_0_${q.Allergies}"`);
+    expect(formPage).toMatch(new RegExp(`name="ticket_0" value="${adult}" data-req required`));
+    expect(formPage).toMatch(new RegExp(`name="ticket_1" value="${adult}" data-req(?! required)`));
+
+    const base = hiddenFieldsOf(formPage, path).filter(([n]) => n !== 'step');
+    const fields = (over: Array<[string, string]>): Array<[string, string]> => [
+      ...base, ['step', 'review'], ['phone', '555 0100'], ['person_name_1', 'Mia Johnson'],
+      ['ticket_0', String(adult)], ['ticket_1', String(child)],
+      [`pq_0_${q['Shirt size']}`, 'md'], [`pq_1_${q['Shirt size']}`, 'sm'],
+      [String(q['Need childcare?']), 'yes'], [`pq_0_${q.Allergies}`, 'peanuts'], [`pq_1_${q.Allergies}`, 'dairy'], [String(q['Photo release']), 'on'],
+      ...over,
+    ];
+
+    // A person without a ticket type, and a missing terms box, bounce back with the problem shown at the field.
+    const noTicket = await post(path, formBody(fields([]).filter(([n]) => n !== 'ticket_1')), { cookie });
+    const noTicketHtml = await noTicket.text();
+    expect(noTicketHtml).toContain('Please choose a ticket type.');
+    expect(noTicketHtml).toContain('id="f-ticket-1"');
+    const noTerms = await post(path, formBody(fields([]).filter(([n]) => n !== String(q['Photo release']))), { cookie });
+    expect(await noTerms.text()).toContain('Please tick the box to agree.');
+
+    // Show-if on the server: with childcare = No the Allergies answers are not part of the review.
+    const hidden = await (await post(path, formBody(fields([]).map(([n, v]) => (n === String(q['Need childcare?']) ? [n, 'no'] as [string, string] : [n, v]))), { cookie })).text();
+    expect(hidden).toContain('Check your registration');
+    expect(hidden).not.toContain('<dt>Allergies</dt>');
+
+    // Review: each person with their type and answers (labels, not keys); sections are left out; nothing is written yet.
+    const review = await post(path, formBody(fields([])), { cookie });
+    expect(review.status).toBe(200);
+    const reviewHtml = await review.text();
+    expect(reviewHtml).toContain('Check your registration');
+    expect(reviewHtml).toMatch(/data-review-person[\s\S]*Mia Johnson[\s\S]*data-review-ticket> · Child/);
+    expect(reviewHtml).toContain('data-review-ticket> · Adult');
+    expect(reviewHtml).toContain('Medium');
+    expect(reviewHtml).toContain('Small');
+    expect(reviewHtml).toContain('<dt>Allergies</dt><dd>peanuts</dd>');
+    expect(reviewHtml).toContain('<dt>Allergies</dt><dd>dairy</dd>');
+    expect(reviewHtml).toContain('Accepted');
+    expect(reviewHtml).not.toContain('About each person');
+    expect(await env.DB.prepare(`SELECT count(*) n FROM registrations`).first<number>('n')).toBe(0);
+
+    // Back to edit keeps the ticket picks and answers.
+    const back = await (await post(path, formBody([...hiddenFieldsOf(reviewHtml, '/api/register/submit').filter(([n]) => n !== 'step'), ['step', 'edit']]), { cookie })).text();
+    expect(back).toMatch(new RegExp(`value="${child}" data-req[^>]*checked`));
+    expect(back).toContain('value="peanuts"');
+
+    // Confirm carries every field through the review round trip.
+    const confirmFields = hiddenFieldsOf(reviewHtml, '/api/register/submit').filter(([n]) => n !== 'step');
+    expect(confirmFields.map(([n]) => n)).toEqual(expect.arrayContaining(['ticket_0', 'ticket_1', `pq_0_${q['Shirt size']}`, `pq_1_${q.Allergies}`, String(q['Photo release'])]));
+    const confirmed = await post('/api/register/submit', formBody([...confirmFields, ['step', 'confirm']]), { cookie });
+    expect(confirmed.status).toBe(303);
+    expect(confirmed.headers.get('location')).toMatch(MANAGE_LOCATION);
+    const token = tokenOf(confirmed.headers.get('location'));
+    const registration = (await env.DB.prepare(`SELECT id, status, party_size FROM registrations`).first<{ id: number; status: string; party_size: number }>())!;
+    expect(registration).toMatchObject({ status: 'confirmed', party_size: 2 });
+    expect((await env.DB.prepare(`SELECT value FROM reg_answers WHERE question_id = ?1`).bind(q['Photo release']).first<string>('value'))).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+
+    // The private manage view: type and answers per person; the type is read-only; "Can't come" frees the Child seat.
+    const view = (await (await manage(token, 'view')).json()).view;
+    expect(view.attendees.map((a: { name: string; ticketText: string }) => [a.name, a.ticketText])).toEqual([[expect.any(String), 'Adult'], ['Mia Johnson', 'Child']]);
+    expect(view.attendees[1].answers.map((a: { label: string; value: string }) => `${a.label}=${a.value}`)).toEqual(['Shirt size=Small', 'Allergies=dairy']);
+    const [ada, mia] = view.attendees as Array<{ id: number }>;
+    const edit = await manage(token, 'update', { fields: {
+      name: ['Sarah Johnson'], [`attendee_${ada.id}`]: ['Sarah Johnson'], [`attendee_${mia.id}`]: ['Mia Johnson'],
+      [`pa_${ada.id}`]: ['1'], [`pa_${ada.id}_${q['Shirt size']}`]: ['sm'], [`pa_${mia.id}`]: ['1'], [`pa_${mia.id}_${q['Shirt size']}`]: ['md'],
+      [`pa_${mia.id}_${q.Allergies}`]: ['none'], [`a_${q['Need childcare?']}`]: ['yes'], [`a_${q['Photo release']}`]: ['on'],
+      ticket_0: [String(child)],
+    } });
+    expect(edit.status).toBe(200);
+    const edited = (await edit.json()).view;
+    expect(edited.attendees[1].answers.map((a: { value: string }) => a.value)).toEqual(['Medium', 'none']);
+    expect(edited.attendees.map((a: { ticketText: string }) => a.ticketText)).toEqual(['Adult', 'Child']);
+    // The member's own page shows the same (plain forms, server-rendered).
+    const mine = await (await get(`/en/my/events/${registration.id}`, { cookie })).text();
+    expect(mine).toContain('data-ticket-text>Child</span>');
+    expect(mine).toContain(`name="pa_${mia.id}_${q['Shirt size']}"`);
+    expect(mine).toMatch(/<script type="application\/json" data-reg-conditions>/);
+
+    // The roster shows each person with their type, and the CSV appends the new columns at the END.
+    const roster = await (await get(`/admin/registration/${id}`, { cookie: await ADMIN() })).text();
+    expect(roster).toMatch(/data-ticket> · Child/);
+    expect(roster).toContain('Shirt size: Medium');
+    const csv = (await (await get(`/admin/registration/${id}/export.csv`, { cookie: await ADMIN() })).text()).split('\r\n');
+    expect(csv[0]).toBe('Confirmation,Name,Email,Status,Party size,Amount,Registered,Need childcare?,Photo release,People,Phone,Ticket types,Shirt size,Allergies');
+    expect(csv[1]).toContain('Sarah Johnson: Adult; Mia Johnson: Child,Sarah Johnson: Small; Mia Johnson: Medium,Mia Johnson: none');
+
+    // A second family that needs the one Child seat that is gone joins the waitlist TOGETHER (the event has no overall limit).
+    const graceCookie = await sessionCookie(...GRACE);
+    const graceForm = await (await get(path, { cookie: graceCookie })).text();
+    expect(graceForm).toContain('Sold out. Your group will join the waitlist.');
+    expect(graceForm).not.toMatch(new RegExp(`value="${child}"[^>]*disabled`));
+    const graceBase = hiddenFieldsOf(graceForm, path).filter(([n]) => n !== 'step');
+    const graceFields: Array<[string, string]> = [
+      ...graceBase, ['step', 'review'], ['person_name_1', 'Leo Lin'], ['ticket_0', String(adult)], ['ticket_1', String(child)],
+      [`pq_0_${q['Shirt size']}`, 'sm'], [`pq_1_${q['Shirt size']}`, 'sm'], [String(q['Photo release']), 'on'],
+    ];
+    const graceReview = await (await post(path, formBody(graceFields), { cookie: graceCookie })).text();
+    expect(graceReview).toContain('data-waitlist-party');
+    const graceConfirm = hiddenFieldsOf(graceReview, '/api/register/submit').filter(([n]) => n !== 'step');
+    const waitlisted = await post('/api/register/submit', formBody([...graceConfirm, ['step', 'confirm']]), { cookie: graceCookie });
+    expect(waitlisted.status).toBe(303);
+    expect(await env.DB.prepare(`SELECT status FROM registrations WHERE person_id = ?1`).bind(GRACE[0]).first<string>('status')).toBe('waitlist');
+    // Adults-only registrations are unaffected by the Child limit.
+    const adultsOnly = await post(path, formBody([...graceBase, ['step', 'review'], ['ticket_0', String(adult)], [`pq_0_${q['Shirt size']}`, 'sm'], [String(q['Photo release']), 'on']]), { cookie: await sessionCookie(...MEMBERS[3]) });
+    expect(await adultsOnly.text()).not.toContain('data-waitlist-party');
+  });
+
+  it('marks a sold-out Child card unavailable when the event cannot waitlist', async () => {
+    await enableRegistration();
+    const { id, child, adult, q } = await ticketEvent();
+    await env.DB.prepare(`UPDATE reg_events SET waitlist_enabled = 0 WHERE id = ?1`).bind(id).run();
+    const cookie = await sessionCookie(...SARAH);
+    const path = `/en/register/${id}`;
+    const base = hiddenFieldsOf(await (await get(path, { cookie })).text(), path);
+    const submit = async (c: string, ticket: number) => post('/api/register/submit', formBody([
+      ...base.filter(([n]) => n !== 'step' && n !== 'submission_key' && n !== 'checkoutRequestId'),
+      ['submission_key', crypto.randomUUID().replaceAll('-', '')], ['checkoutRequestId', crypto.randomUUID()], ['ticket_0', String(ticket)], [`pq_0_${q['Shirt size']}`, 'sm'], [String(q['Photo release']), 'on'],
+    ]), { cookie: c });
+    expect((await submit(cookie, child)).status).toBe(303); // takes the only Child seat
+    const form = await (await get(path, { cookie: await sessionCookie(...GRACE) })).text();
+    expect(form).toMatch(new RegExp(`value="${child}"[^>]*disabled data-locked`));
+    expect(form).toContain('Sold out');
+    // A forged POST for the gone seat does not register (the writer refuses, nothing is oversold).
+    const forged = await submit(await sessionCookie(...GRACE), child);
+    expect(forged.headers.get('location')).toContain('error=full');
+    expect(await env.DB.prepare(`SELECT count(*) n FROM registrations WHERE event_id = ?1`).bind(id).first<number>('n')).toBe(1);
+    expect(adult).toBeGreaterThan(0);
   });
 });

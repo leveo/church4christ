@@ -14,8 +14,8 @@ import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { formatDate, utcToDatetimeLocal } from '../../../lib/dates';
 import { formatCents } from '../../../lib/money';
-import { listOpenEvents, listRegistrationsForPerson, type RegEvent } from '../../../lib/regDb';
-import { isEventFull, offersWaitlist } from '../../../lib/regPhase';
+import { listOpenEvents, listRegistrationsForPerson, listTicketTypes, type RegEvent } from '../../../lib/regDb';
+import { seatState, seatsLeft, type SeatState } from '../../../lib/regPublic';
 import { badge, badgeInactive } from '../../../lib/adminUi';
 
 const locale = parseLocale(Astro.params.locale ?? '');
@@ -31,6 +31,13 @@ const db = Astro.locals.db;
 const registrationOn = Astro.locals.modules.has('registration');
 const myRegistrations = registrationOn ? await listRegistrationsForPerson(db, locale, user.id, user.email) : [];
 const openEvents = registrationOn ? await listOpenEvents(db, locale) : [];
+// Full = the event's capacity is reached or every active ticket type is at its limit.
+const seats = new Map<number, SeatState & { left: number | null }>(
+  await Promise.all(openEvents.map(async (e): Promise<[number, SeatState & { left: number | null }]> => {
+    const types = await listTicketTypes(db, locale, e.id, { activeOnly: true });
+    return [e.id, { ...seatState(e, types), left: seatsLeft(e, types) }];
+  })),
+);
 
 const statusChip: Record<'pending' | 'review' | 'confirmed' | 'waitlist', string> = {
   pending: 'bg-warn-soft text-warn',
@@ -46,8 +53,8 @@ const when = (startsAt: string) => {
 };
 const priceLabel = (e: RegEvent) =>
   e.price_cents !== null && e.price_cents > 0 ? formatCents(e.price_cents, e.currency) : t(locale, 'register.free');
-const isFull = (e: RegEvent) => isEventFull(e);
-const spotsLeft = (e: RegEvent) => (e.capacity !== null ? Math.max(0, e.capacity - e.taken_count) : null);
+const isFull = (e: RegEvent) => seats.get(e.id)?.full ?? false;
+const spotsLeft = (e: RegEvent) => seats.get(e.id)?.left ?? null;
 ---
 
 <Member active="events" title={t(locale, 'portal.events.title')} locale={locale} noindex>
@@ -98,7 +105,7 @@ const spotsLeft = (e: RegEvent) => (e.capacity !== null ? Math.max(0, e.capacity
                         {e.title}
                       </a>
                     </h3>
-                    {isFull(e) && <span class={`${badge} ${badgeInactive}`}>{t(locale, offersWaitlist(e) ? 'register.joinWaitlist' : 'register.full')}</span>}
+                    {isFull(e) && <span class={`${badge} ${badgeInactive}`}>{t(locale, seats.get(e.id)?.waitlist ? 'register.joinWaitlist' : 'register.full')}</span>}
                   </div>
                   <p class="mt-2 text-sm text-ink-muted">{when(e.starts_at)}</p>
                   {e.location && <p class="text-sm text-ink-muted">{e.location}</p>}

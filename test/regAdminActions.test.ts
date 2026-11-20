@@ -116,3 +116,38 @@ describe('applyEventAction', () => {
     expect(await applyEventAction(env.DB, form({ id: '999999', op: 'duplicate' }))).toEqual({ ok: false, error: 'not_found', id: 999999 });
   });
 });
+
+describe('template actions', () => {
+  const op = (id: number, name: string) => applyEventAction(env.DB, form({ id: String(id), op: name }));
+
+  it('saves an event as a template, creates a new event from it, and deletes only templates', async () => {
+    const id = await newEvent();
+    const saved = await op(id, 'save_template');
+    expect(saved).toMatchObject({ ok: true, notice: 'template_saved' });
+    if (!saved.ok) return;
+    expect((await getEventAdmin(env.DB, saved.id))?.is_template).toBe(1);
+
+    const created = await op(saved.id, 'from_template');
+    expect(created).toMatchObject({ ok: true, notice: 'template_created' });
+    if (!created.ok) return;
+    expect(await getEventAdmin(env.DB, created.id)).toMatchObject({ is_template: 0, active: 0 });
+
+    // a regular event is never deleted, even by id; a template is
+    expect(await op(created.id, 'delete_template')).toEqual({ ok: false, error: 'not_found', id: created.id });
+    expect(await getEventAdmin(env.DB, created.id)).not.toBeNull();
+    expect(await op(saved.id, 'delete_template')).toEqual({ ok: true, notice: 'template_deleted', id: saved.id });
+    expect(await getEventAdmin(env.DB, saved.id)).toBeNull();
+  });
+
+  it('refuses the wrong source kind and every lifecycle button on a template', async () => {
+    const id = await newEvent();
+    expect(await op(id, 'from_template')).toEqual({ ok: false, error: 'not_found', id });
+    const saved = await op(id, 'save_template');
+    if (!saved.ok) throw new Error('expected ok');
+    expect(await op(saved.id, 'save_template')).toEqual({ ok: false, error: 'not_found', id: saved.id });
+    for (const name of ['open_now', 'close_now', 'hide', 'show']) {
+      expect(await op(saved.id, name), name).toEqual({ ok: false, error: 'invalid', id: saved.id });
+    }
+    expect(await getEventAdmin(env.DB, saved.id)).toMatchObject({ active: 0, opens_at: null });
+  });
+});

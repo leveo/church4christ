@@ -22,11 +22,13 @@ import {
 } from './stripeCheckoutRequests';
 import { classifyRegistrationCheckoutFailure } from './registrationCheckoutFailure';
 import {
-  generateManageToken, listQuestions, readRegistrationInsert, registrationInsertStatements, seatsTakenSql, validateAnswers,
+  checkAnswer, generateManageToken, listQuestions, listTicketTypes, MAX_ANSWER_LENGTH, priceTicketSelection, readRegistrationInsert,
+  registrationInsertStatements, seatsTakenSql,
   type CreatedRegistration, type RegEvent, type RegQuestion, type RegStatus,
 } from './regDb';
+import { visibleQuestionIds, type ConditionQuestion } from './regConditions';
 import { sha256Utf8 } from './stripeWebhookInbox';
-import { newCheckoutRequestId, parseCheckoutRequestId } from './stripeCheckoutRequests';
+import { checkoutParamsTotal, newCheckoutRequestId, parseCheckoutRequestId } from './stripeCheckoutRequests';
 
 export type IdentityBusinessContinuationEnv = IdentityAuthEnv & IdentitySourceKeyEnv & StripeEnv;
 export type ContinuationLocale = SupportedLocale;
@@ -62,12 +64,17 @@ export type NormalizedRegistrationContinuationInput = Readonly<{
   locale: ContinuationLocale;
   answers: ReadonlyArray<readonly [number, string]>;
   /** Present only when the guest registered a party; it is part of the payload digest. */
-  party?: Readonly<{ phone: string | null; attendees: ReadonlyArray<Readonly<{ name: string }>> }>;
+  party?: Readonly<{ phone: string | null; attendees: ReadonlyArray<Readonly<{ name: string; ticketTypeId?: number; answers?: ReadonlyArray<readonly [number, string]> }>> }>;
 }>;
 
 /** The guest's party as stored in identity_registration_continuations.party_json. A guest
- *  has no household, so attendees carry names only (never a person id). */
-export type RegistrationContinuationParty = { phone: string | null; attendees: Array<{ name: string }> };
+ *  has no household, so attendees carry names only (never a person id); the ticket type and the
+ *  per-person answers ride here too (the column is already part of the immutable payload) and
+ *  appear only when used, so a plain party digests as it always did. */
+export type RegistrationContinuationParty = {
+  phone: string | null;
+  attendees: Array<{ name: string; ticketTypeId?: number; answers?: Array<[number, string]> }>;
+};
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -153,7 +160,21 @@ export async function normalizeRegistrationContinuationInput(input: {
     if (phone !== null && phone.length > 40) throw new Error('identity_continuation_party_invalid');
     party = Object.freeze({
       phone,
-      attendees: Object.freeze(input.party.attendees.map((attendee) => Object.freeze({ name: text(attendee?.name, 'identity_continuation_party_invalid') }))),
+      attendees: Object.freeze(input.party.attendees.map((attendee) => {
+        const name = text(attendee?.name, 'identity_continuation_party_invalid');
+        const ticketTypeId = attendee?.ticketTypeId;
+        if (ticketTypeId !== undefined && !validId(ticketTypeId)) throw new Error('identity_continuation_party_invalid');
+        const personAnswers = (attendee?.answers ?? []).map(([questionId, answer]) => {
+          if (!validId(questionId)) throw new Error('identity_continuation_answers_invalid');
+          return [questionId, text(answer, 'identity_continuation_answers_invalid', 2000)] as const;
+        }).sort(([left], [right]) => left - right);
+        if (personAnswers.some((answer, index) => index > 0 && personAnswers[index - 1][0] === answer[0])) throw new Error('identity_continuation_answers_invalid');
+        return Object.freeze({
+          name,
+          ...(ticketTypeId !== undefined ? { ticketTypeId } : {}),
+          ...(personAnswers.length > 0 ? { answers: Object.freeze(personAnswers) } : {}),
+        });
+      })),
     });
   }
   return Object.freeze({ eventId: input.eventId, name, email, amountCents: input.amountCents, currency,
@@ -169,7 +190,12 @@ function canonicalRegistrationAnswers(answers: ReadonlyArray<readonly [number, s
     .sort(([left], [right]) => left - right);
 }
 
-function revalidateRegistrationAnswers(questions: RegQuestion[], persisted: ReadonlyArray<readonly [number, string]>): Array<[number, string]> {
+const toConditionQuestion = (question: RegQuestion): ConditionQuestion => ({
+  id: question.id, type: question.type, scope: question.scope, options: question.options, condition: question.condition,
+});
+
+/** Persisted answer pairs back into the raw form shape the validator reads (a checkbox is a JSON array). */
+function persistedForm(questions: RegQuestion[], persisted: ReadonlyArray<readonly [number, string]>): Record<string, string | string[]> {
   const questionsById = new Map(questions.map((question) => [question.id, question] as const));
   const form: Record<string, string | string[]> = {};
   for (const [questionId, answer] of persisted) {
@@ -184,15 +210,65 @@ function revalidateRegistrationAnswers(questions: RegQuestion[], persisted: Read
       || values.some((value) => typeof value !== 'string')) throw new Error('identity_continuation_answers_invalid');
     form[String(questionId)] = values as string[];
   }
-  return canonicalRegistrationAnswers(validateAnswers(questions, form));
+  return form;
+}
+
+/** Re-run the submission rules over persisted answers (conditions applied, hidden questions dropped). The
+ *  registration-level answers decide which per-person questions are shown. */
+function revalidateScopeAnswers(
+  questions: RegQuestion[],
+  scope: RegQuestion['scope'],
+  persisted: ReadonlyArray<readonly [number, string]>,
+  registrationPersisted: ReadonlyArray<readonly [number, string]> = [],
+): Array<[number, string]> {
+  const form = persistedForm(questions, persisted);
+  const registrationForm = scope === 'registration' ? form : persistedForm(questions, registrationPersisted);
+  const conditionQuestions = questions.map(toConditionQuestion);
+  const shown = scope === 'registration'
+    ? visibleQuestionIds(conditionQuestions, registrationForm)
+    : visibleQuestionIds(conditionQuestions, registrationForm, form);
+  const out: Array<[number, string]> = [];
+  for (const question of questions) {
+    if (question.scope !== scope || question.type === 'section' || !shown.has(question.id)) continue;
+    const checked = checkAnswer(question, form[String(question.id)], { trusted: true });
+    if ('code' in checked) throw new Error('identity_continuation_answers_invalid');
+    if (checked.value !== null) {
+      if (Array.from(checked.value).length > MAX_ANSWER_LENGTH) throw new Error('identity_continuation_answers_invalid');
+      out.push([question.id, checked.value]);
+    }
+  }
+  return canonicalRegistrationAnswers(out);
+}
+
+function revalidateRegistrationAnswers(questions: RegQuestion[], persisted: ReadonlyArray<readonly [number, string]>): Array<[number, string]> {
+  return revalidateScopeAnswers(questions, 'registration', persisted);
+}
+
+/** Every guest attendee's per-person answers must survive the same rules; returns false when any is altered. */
+function personAnswersStable(
+  questions: RegQuestion[],
+  party: RegistrationContinuationParty | NormalizedRegistrationContinuationInput['party'] | undefined,
+  registrationAnswers: ReadonlyArray<readonly [number, string]>,
+): boolean {
+  // No party means one person with no per-person answers (their required questions must then be absent/hidden).
+  for (const attendee of party?.attendees ?? [{ answers: [] as Array<readonly [number, string]> }]) {
+    const persisted = attendee.answers ?? [];
+    const checked = revalidateScopeAnswers(questions, 'attendee', persisted, registrationAnswers);
+    if (JSON.stringify(checked) !== JSON.stringify(canonicalRegistrationAnswers(persisted))) return false;
+  }
+  return true;
 }
 
 async function registrationQuestionDigest(questions: RegQuestion[]): Promise<string> {
+  // The builder's attributes appear only when set, so a question that never used them digests as before.
   const definitions = questions.map((question) => ({
     id: question.id,
     type: question.type,
     required: question.required === 1 ? 1 : 0,
     options: question.options === null ? null : [...question.options].sort(),
+    ...(question.scope !== 'registration' ? { scope: question.scope } : {}),
+    ...(question.condition ? { condition: question.condition } : {}),
+    ...(question.max_length !== null ? { max_length: question.max_length } : {}),
   })).sort((left, right) => left.id - right.id);
   return sha256Utf8(JSON.stringify(definitions));
 }
@@ -403,14 +479,18 @@ export async function beginRegistrationContinuation(db: AppDb, env: IdentityBusi
 }): Promise<{ status: 'verification_required'; intentId: string; operationId: string; delivery: { to: string; publicId: string; code: string; expiresAt: string } } | { status: 'pending'; intentId: string; operationId: string }> {
   if (!validId(input.campusId) || !validIntentId(input.intentId)) throw new Error('identity_continuation_invalid');
   if (input.event.active !== 1 || (input.event.closes_at ?? input.event.starts_at) <= nowUtc(input.now)) throw new Error('identity_continuation_event_closed');
+  // With active ticket types the amount is the sum of the guests' type prices (priceTicketSelection throws
+  // ticket_type_required / ticket_type_invalid); otherwise it is the event price, exactly as before.
+  const typedAmount = await priceTicketSelection(db, input.event.id, input.party?.attendees ?? [{ ticketTypeId: null }]);
   const normalized = await normalizeRegistrationContinuationInput({ eventId: input.event.id, name: input.name, email: input.email,
-    amountCents: input.event.price_cents && input.event.price_cents > 0 ? input.event.price_cents : 0, currency: input.event.currency,
+    amountCents: typedAmount ?? (input.event.price_cents && input.event.price_cents > 0 ? input.event.price_cents : 0), currency: input.event.currency,
     locale: input.locale, answers: input.answers, party: input.party });
   if (normalized.party && normalized.party.attendees.length > (input.event.max_party_size ?? 1)) {
     throw new Error('identity_continuation_party_invalid');
   }
   const questions = await listQuestions(db, normalized.locale, normalized.eventId);
-  if (JSON.stringify(revalidateRegistrationAnswers(questions, [...normalized.answers])) !== JSON.stringify(normalized.answers)) {
+  if (JSON.stringify(revalidateRegistrationAnswers(questions, [...normalized.answers])) !== JSON.stringify(normalized.answers)
+    || !personAnswersStable(questions, normalized.party, normalized.answers)) {
     throw new Error('identity_continuation_answers_invalid');
   }
   const questionDigest = await registrationQuestionDigest(questions);
@@ -677,7 +757,7 @@ export async function continuePaidRegistrationCheckout(
       registrationId: resolution.registrationId,
       sessionId: session.id,
       sessionUrl: session.url,
-      amountCents: price.unit_amount * resolution.requestJson.line_items[0].quantity,
+      amountCents: checkoutParamsTotal(resolution.requestJson),
       currency: price.currency,
     });
     if (attached) return { kind: 'redirect', registrationId: resolution.registrationId, checkoutUrl: session.url };
@@ -760,14 +840,15 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
   }
   const event = await db.prepare(`SELECT e.id,COALESCE(el.title,en.title,'') title,e.price_cents,e.currency,e.active,e.closes_at,e.starts_at,e.max_party_size
     FROM reg_events e LEFT JOIN reg_event_i18n el ON el.event_id=e.id AND el.locale=?2
-    LEFT JOIN reg_event_i18n en ON en.event_id=e.id AND en.locale='en' WHERE e.id=?1`)
+    LEFT JOIN reg_event_i18n en ON en.event_id=e.id AND en.locale='en' WHERE e.id=?1 AND e.is_template=0`)
     .bind(child.event_id, child.locale).first<Pick<RegEvent, 'id' | 'title' | 'price_cents' | 'currency' | 'active' | 'closes_at' | 'starts_at' | 'max_party_size'>>();
   const release = () => db.prepare(`UPDATE identity_registration_continuations SET state='ready',claim_token_hash=NULL,claim_expires_at=NULL,updated_at=datetime('now') WHERE intent_id=?1 AND state='creating' AND claim_token_hash=?2`).bind(input.intentId, claim.claimHash!);
   if (!event || event.active !== 1 || (event.closes_at ?? event.starts_at) <= nowUtc(input.now)
-    || (event.price_cents && event.price_cents > 0 ? event.price_cents : 0) !== child.amount_cents || event.currency.toLowerCase() !== child.currency) {
+    || event.currency.toLowerCase() !== child.currency) {
     await release().run();
     return { status: 'invalid' };
   }
+  let questionsForParty: RegQuestion[] = [];
   try {
     const questions = await listQuestions(db, child.locale, child.event_id);
     if (await registrationQuestionDigest(questions) !== child.question_digest) {
@@ -777,15 +858,29 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
     if (JSON.stringify(checked) !== JSON.stringify(canonicalRegistrationAnswers(answers))) {
       await release().run(); return { status: 'invalid' };
     }
+    questionsForParty = questions;
   } catch { await release().run(); return { status: 'invalid' }; }
   let party: RegistrationContinuationParty | undefined;
   if (child.party_json !== null) {
     try {
       const parsed = JSON.parse(child.party_json) as RegistrationContinuationParty;
-      const attendees = parsed.attendees.map((attendee) => ({ name: text(attendee.name, 'identity_continuation_party_invalid') }));
+      const attendees = parsed.attendees.map((attendee) => ({
+        name: text(attendee.name, 'identity_continuation_party_invalid'),
+        ...(attendee.ticketTypeId !== undefined ? { ticketTypeId: Number(attendee.ticketTypeId) } : {}),
+        ...(attendee.answers && attendee.answers.length > 0 ? { answers: attendee.answers } : {}),
+      }));
       if (attendees.length < 1 || attendees.length > event.max_party_size) throw new Error('identity_continuation_party_invalid');
       party = { phone: typeof parsed.phone === 'string' && parsed.phone !== '' ? parsed.phone : null, attendees };
+      if (!personAnswersStable(questionsForParty, party, answers)) throw new Error('identity_continuation_answers_invalid');
     } catch { await release().run(); return { status: 'invalid' }; }
+  }
+  // The amount was fixed at begin; it must still be what the event (or its ticket types) charges.
+  let typedAmount: number | null;
+  try { typedAmount = await priceTicketSelection(db, child.event_id, party?.attendees ?? [{ ticketTypeId: null }]); }
+  catch { await release().run(); return { status: 'invalid' }; }
+  if ((typedAmount ?? (event.price_cents && event.price_cents > 0 ? event.price_cents : 0)) !== child.amount_cents) {
+    await release().run();
+    return { status: 'invalid' };
   }
   const owner = await db.prepare('SELECT display_name,email FROM people WHERE id=?1 AND active=1 AND deleted_at IS NULL').bind(auth.personId).first<{ display_name: string; email: string }>();
   if (!owner) { await release().run(); return { status: 'invalid' }; }
@@ -807,7 +902,11 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
           amountCents: 0, currency: child.currency, submissionKey: `continuation:${input.intentId}`,
           allowWaitlist: true, answers, guard: { now: nowUtc(input.now), currency: child.currency },
           // The guest's party: attendee 1 is the new account (person_id inherited), the rest are names only.
-          ...(party ? { attendees: party.attendees.map((attendee, index) => ({ name: attendee.name, personId: index === 0 ? undefined : null })) } : {}),
+          ...(party ? { attendees: party.attendees.map((attendee, index) => ({
+            name: attendee.name, personId: index === 0 ? undefined : null,
+            ...(attendee.ticketTypeId !== undefined ? { ticketTypeId: attendee.ticketTypeId } : {}),
+            ...(attendee.answers ? { answers: attendee.answers } : {}),
+          })) } : {}),
           locale: child.locale, phone: party?.phone ?? null, manageTokenHash: manage.hash,
         }),
         db.prepare(`UPDATE identity_registration_continuations SET state='attached',registration_id=?1,claim_token_hash=NULL,claim_expires_at=NULL,updated_at=datetime('now') WHERE intent_id=?2 AND state='creating' AND claim_token_hash=?3`).bind(registrationId, input.intentId, claim.claimHash!),
@@ -832,9 +931,17 @@ export async function completeRegistrationContinuation(db: AppDb, env: IdentityB
   if (!child.checkout_request_id) return { status: 'invalid' };
   let resolution: CheckoutRequestResolution;
   try {
+    // A ticket-typed event bills one line per type at the prices the database holds now.
+    const tickets = typedAmount === null ? undefined
+      : (await listTicketTypes(db, child.locale, child.event_id, { activeOnly: true })).map((type) => ({ ticketTypeId: type.id, unitAmountCents: type.price_cents, label: type.label }));
     resolution = await resolveRegistrationCheckoutRequest(db, { requestId: child.checkout_request_id, eventId: child.event_id, personId: auth.personId,
       name: owner.display_name, email: owner.email, amountCents: child.amount_cents, currency: child.currency,
-      answers, ...(party ? { party: { phone: party.phone, attendees: party.attendees.map((attendee, index) => ({ name: attendee.name, personId: index === 0 ? auth.personId : null })) } } : {}),
+      answers, ...(party ? { party: { phone: party.phone, attendees: party.attendees.map((attendee, index) => ({
+        name: attendee.name, personId: index === 0 ? auth.personId : null,
+        ...(attendee.ticketTypeId !== undefined ? { ticketTypeId: attendee.ticketTypeId } : {}),
+        ...(attendee.answers ? { answers: attendee.answers } : {}),
+      })) } } : {}),
+      ...(tickets ? { tickets } : {}),
       eventTitle: event.title, locale: child.locale, appOrigin: input.appOrigin });
   } catch {
     await db.prepare(`UPDATE identity_registration_continuations SET state='ready',claim_token_hash=NULL,claim_expires_at=NULL,updated_at=datetime('now') WHERE intent_id=?1 AND state='creating' AND claim_token_hash=?2`).bind(input.intentId, claim.claimHash!).run();

@@ -20,6 +20,8 @@ import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, uploadKey, registerMedia } from '
 import { tin, lab, card, errorText, btn, rowBtn, badge, badgeActive, badgeInactive, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import type { Locale } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
+import { listAllEvents } from '../../../lib/regDb';
+import { formatDate, utcToDatetimeLocal } from '../../../lib/dates';
 import { extraLocaleTexts, loadExtraI18n, localeValues } from '../../../lib/i18nExtras';
 
 const user = Astro.locals.user;
@@ -96,6 +98,19 @@ if (Astro.request.method === 'POST') {
 }
 
 const rows = await listEvents(db);
+// Optional link picker: the registration module's non-template events (only when that module is on).
+let regEvents: { id: number; label: string }[] = [];
+if (Astro.locals.modules.has('registration')) {
+  try {
+    regEvents = (await listAllEvents(db, lang)).map((e) => ({
+      id: e.id,
+      label: `${e.title || `#${e.id}`} · ${formatDate(utcToDatetimeLocal(e.starts_at).slice(0, 10), lang)}`,
+    }));
+  } catch (err) {
+    console.error('admin events: registration events load failed', err);
+  }
+}
+const regDefaultLocale = Astro.locals.locales.default;
 const saved = Astro.url.searchParams.get('saved') === '1';
 const deleted = Astro.url.searchParams.get('deleted') === '1';
 
@@ -229,6 +244,18 @@ const h2 = 'font-display text-heading-sm font-bold';
         <input name="url" value={v.url} class={tin} />
         {errors.url && <span class={errorText}>{t(lang, errors.url)}</span>}
       </label>
+      {
+        regEvents.length > 0 && (
+          <label class="block">
+            <span class={lab}>{t(lang, 'admin.events.registrationLink')}</span>
+            <select class={tin} data-reg-link data-locale={regDefaultLocale}>
+              <option value="">{t(lang, 'admin.events.registrationLinkNone')}</option>
+              {regEvents.map((e) => <option value={String(e.id)}>{e.label}</option>)}
+            </select>
+            <span class="text-xs text-ink-subtle">{t(lang, 'admin.events.registrationLinkHint')}</span>
+          </label>
+        )
+      }
       <div class="grid gap-4 sm:grid-cols-3">
         <label class="block">
           <span class={lab}>{t(lang, 'admin.events.startsAt')}</span>
@@ -277,3 +304,13 @@ const h2 = 'font-display text-heading-sm font-bold';
   </details>
   </GatheringSurface>
 </Admin>
+
+<script>
+  // Fill the card's link with the chosen event's registration page. The link field only takes an
+  // absolute http(s) URL, and card links are not localized, so it points at the default language.
+  const picker = document.querySelector('select[data-reg-link]') as HTMLSelectElement | null;
+  picker?.addEventListener('change', () => {
+    const url = picker.form?.querySelector('input[name="url"]') as HTMLInputElement | null | undefined;
+    if (url && picker.value) url.value = `${location.origin}/${picker.dataset.locale}/register/${picker.value}`;
+  });
+</script>

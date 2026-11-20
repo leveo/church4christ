@@ -145,6 +145,12 @@ describe.skipIf(!hasPg)('regDb (Postgres)', () => {
       required: 0,
       options: null,
       label: '',
+      scope: 'registration',
+      condition: null,
+      max_length: null,
+      help: null,
+      placeholder: null,
+      option_labels: {},
       ...over,
     });
     const text = q({ id: 1, type: 'text', required: 1 });
