@@ -340,8 +340,10 @@ export async function sweepUnsentConfirmations(env: RegNotifyEnv, db: AppDb, now
   }
 }
 
-/** The reminder sweep's batch: at most this many registrations per run. */
-export const REMINDER_SWEEP_LIMIT = 100;
+/** The reminder sweep's batch: at most this many registrations per run. Kept small because the daily run also
+ *  carries the confirmation sweep and the serving/planning reminders, all inside the Workers Free plan's 1,000
+ *  calls to Cloudflare services per invocation (~6 per reminder). Remaining reminders go out the next day. */
+export const REMINDER_SWEEP_LIMIT = 40;
 
 /**
  * The daily reminder pass (REMINDER cron). For every confirmed registration of an event whose reminder window

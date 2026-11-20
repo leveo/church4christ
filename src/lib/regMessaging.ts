@@ -20,8 +20,10 @@ import {
 
 /** The request that queued a bulk email drains this many rows before it returns. */
 export const DRAIN_ON_REQUEST = 20;
-/** The hourly cron drains at most this many rows per run. */
-export const CRON_DRAIN_LIMIT = 100;
+/** The hourly cron drains at most this many rows per run. Each row costs ~6 calls to Cloudflare services (D1
+ *  queries + the email send), and the Workers Free plan allows 1,000 such calls per invocation, shared with the
+ *  other passes in the same hourly run; a large send simply finishes over more runs. */
+export const CRON_DRAIN_LIMIT = 60;
 
 export interface BulkEmailInput {
   eventId: number;

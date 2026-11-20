@@ -323,7 +323,7 @@ export function defineRegMessagingCases(label: string, getDb: () => AppDb, backe
 
       it(`drains at most the limit per call: ${DRAIN_ON_REQUEST} on the request, ${CRON_DRAIN_LIMIT} per cron run`, async () => {
         expect(DRAIN_ON_REQUEST).toBe(20);
-        expect(CRON_DRAIN_LIMIT).toBe(100);
+        expect(CRON_DRAIN_LIMIT).toBe(60);
         const eventId = await newEvent();
         const created = await register(eventId);
         const total = CRON_DRAIN_LIMIT + 5;
@@ -333,7 +333,7 @@ export function defineRegMessagingCases(label: string, getDb: () => AppDb, backe
         }
         await getDb().batch(stmts);
         expect(await drainOutbox(env, getDb(), { limit: DRAIN_ON_REQUEST, eventId })).toMatchObject({ claimed: 20, sent: 20 });
-        expect(await sweepOutbox(env, getDb())).toMatchObject({ claimed: 85, sent: 85 });
+        expect(await sweepOutbox(env, getDb())).toMatchObject({ claimed: total - DRAIN_ON_REQUEST, sent: total - DRAIN_ON_REQUEST });
         expect(await sweepOutbox(env, getDb())).toMatchObject({ claimed: 0 });
         expect(await outboxCounts(getDb(), eventId)).toMatchObject({ queued: 0, sent: total });
       });
