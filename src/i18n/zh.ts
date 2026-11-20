@@ -3273,6 +3273,7 @@ export default {
   'register.block.seatsLeft': '剩余名额：{count}',
   'register.block.fullWaitlist': '已满——加入候补名单',
   'register.block.closed': '报名已截止',
+  'register.block.details': '查看详情',
   'admin.events.registrationLink': '链接到报名活动',
   'admin.events.registrationLinkNone': '不链接',
   'admin.events.registrationLinkHint': '用该活动的报名页面（默认语言）填入上方链接。',

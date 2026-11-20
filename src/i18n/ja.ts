@@ -3126,6 +3126,7 @@ const dict: Partial<Record<keyof typeof en, string>> = {
   "register.block.seatsLeft": "残席：{count}",
   "register.block.fullWaitlist": "満席：キャンセル待ちに登録",
   "register.block.closed": "登録は終了しました",
+  "register.block.details": "詳細を見る",
   "admin.events.registrationLink": "登録イベントにリンク",
   "admin.events.registrationLinkNone": "リンクなし",
   "admin.events.registrationLinkHint": "上のリンクに、既定の言語の登録ページを入力します。",

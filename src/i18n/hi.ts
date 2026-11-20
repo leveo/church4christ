@@ -3128,6 +3128,7 @@ const dict: Partial<Record<keyof typeof en, string>> = {
   'register.block.seatsLeft': 'शेष सीटें: {count}',
   'register.block.fullWaitlist': 'पूर्ण – प्रतीक्षा सूची में जुड़ें',
   'register.block.closed': 'पंजीकरण बंद है',
+  'register.block.details': 'विवरण देखें',
   'admin.events.registrationLink': 'पंजीकरण कार्यक्रम से जोड़ें',
   'admin.events.registrationLinkNone': 'जुड़ा नहीं',
   'admin.events.registrationLinkHint': 'ऊपर के लिंक में डिफ़ॉल्ट भाषा में पंजीकरण पृष्ठ भर देता है।',

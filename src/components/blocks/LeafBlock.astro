@@ -22,6 +22,7 @@ if (node.type === 'registration' && node.props.eventId !== null && Astro.locals.
   try {
     registrationHtml = await loadRegistrationCard(Astro.locals.db, locale, node.props, {
       cta: t(locale, 'register.block.cta'),
+      details: t(locale, 'register.block.details'),
       opensOn: (date) => t(locale, 'register.opensOn', { date }),
       seatsLeft: (count) => t(locale, 'register.block.seatsLeft', { count }),
       full: t(locale, 'register.full'),

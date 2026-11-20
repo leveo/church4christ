@@ -3278,6 +3278,7 @@ export default {
   'register.block.seatsLeft': 'Seats left: {count}',
   'register.block.fullWaitlist': 'Full — join the waitlist',
   'register.block.closed': 'Registration closed',
+  'register.block.details': 'View details',
   'admin.events.registrationLink': 'Link to a registration event',
   'admin.events.registrationLinkNone': 'Not linked',
   'admin.events.registrationLinkHint': 'Fills the link above with the registration page, in the default language.',

@@ -3126,6 +3126,7 @@ const dict: Partial<Record<keyof typeof en, string>> = {
   'register.block.seatsLeft': '남은 자리: {count}',
   'register.block.fullWaitlist': '마감: 대기자 명단 등록',
   'register.block.closed': '신청이 마감되었습니다',
+  'register.block.details': '자세히 보기',
   'admin.events.registrationLink': '신청 행사에 연결',
   'admin.events.registrationLinkNone': '연결 안 함',
   'admin.events.registrationLinkHint': '위 링크를 기본 언어의 신청 페이지 주소로 채웁니다.',

@@ -31,6 +31,8 @@ export interface RegCardView {
 /** The card's copy, already localized. */
 export interface RegCardCopy {
   cta: string;
+  /** Button text while registration has not opened yet (Preview). */
+  details: string;
   opensOn: (date: string) => string;
   seatsLeft: (count: number) => string;
   full: string;
@@ -79,7 +81,8 @@ export function registrationCardHtml(view: RegCardView, copy: RegCardCopy, butto
     : view.state === 'closed' ? copy.closed
     : '';
   const tone = view.state === 'open' || view.state === 'preview' ? 'text-primary' : 'text-ink-muted';
-  const label = buttonLabel || copy.cta;
+  // Before registration opens the button only leads to the details, so it never says "Register".
+  const label = view.state === 'preview' ? copy.details : buttonLabel || copy.cta;
   const link = buttonRender({ label: { en: '', zh: '' }, href: '', variant: view.state === 'closed' || view.state === 'full' ? 'secondary' : 'primary', align: 'left' }).linkClass;
   return `<article class="registration-block overflow-hidden rounded-lg border border-border bg-surface-raised" data-reg-state="${view.state}">`
     + (view.poster ? `<img src="${esc(view.poster)}" alt="" loading="lazy" class="aspect-video w-full object-cover">` : '')

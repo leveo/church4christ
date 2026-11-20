@@ -98,6 +98,7 @@ describe('seatState (the shared full rule)', () => {
 
 const copy: RegCardCopy = {
   cta: 'Register',
+  details: 'View details',
   opensOn: (date) => `Registration opens ${date}`,
   seatsLeft: (count) => `Seats left: ${count}`,
   full: 'Full',
@@ -140,6 +141,9 @@ describe('registration card states', () => {
     expect(out).toContain('data-reg-state="preview"');
     expect(out).toContain('Registration opens September 1, 2031 09:00');
     expect(out).not.toContain('Seats left');
+    // The button leads to the details, never "Register", even with a custom label.
+    expect(html(ev({ phase: 'preview', opens_at: '2031-09-01 14:00:00' }), [], true, 'Save my spot')).toContain('>View details</a>');
+    expect(out).not.toContain('>Register</a>');
   });
 
   it('full with a waitlist, full without one (also by per-type limits)', () => {
