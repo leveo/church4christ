@@ -52,7 +52,9 @@
         "planning.rs.min",
         "register.no",
         "admin.regBuilder.no",
-        "register.review.total"
+        "register.review.total",
+        "admin.reg.lx.kind.hotel",
+        "admin.reg.lx.color"
       ],
       "values": []
     },
@@ -91,7 +93,8 @@
         "my.giving.total",
         "planning.rs.item",
         "planning.rs.min",
-        "register.review.total"
+        "register.review.total",
+        "admin.reg.lx.kind.hotel"
       ],
       "values": []
     },
@@ -192,7 +195,12 @@
         "admin.regBuilder.option.unnamed",
         "admin.regBuilder.questions",
         "admin.regBuilder.type.date",
-        "register.review.total"
+        "register.review.total",
+        "admin.reg.lx.tab.tables",
+        "admin.reg.lx.table",
+        "admin.reg.lx.tableWord",
+        "register.manage.table",
+        "reg.email.assign.table"
       ],
       "values": []
     },
@@ -277,7 +285,11 @@
         "admin.regBuilder.option.labelIn",
         "admin.regBuilder.ticket.limit",
         "admin.regBuilder.ticket.name",
-        "admin.regBuilder.type.select"
+        "admin.regBuilder.type.select",
+        "admin.reg.lx.venueName",
+        "admin.reg.lx.kind.hotel",
+        "admin.reg.lx.person",
+        "admin.reg.lx.tableNamePrefix"
       ],
       "values": []
     },
@@ -296,7 +308,8 @@
         "admin.pages.colSlug",
         "admin.pages.slug",
         "admin.settings.logoImage",
-        "common.menu"
+        "common.menu",
+        "admin.reg.lx.kind.hotel"
       ],
       "values": []
     },
@@ -364,7 +377,8 @@
         "register.email",
         "signup.emailLabel",
         "staff.email",
-        "register.review.total"
+        "register.review.total",
+        "admin.reg.lx.kind.hotel"
       ],
       "values": []
     },

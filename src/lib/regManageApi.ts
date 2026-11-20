@@ -10,6 +10,8 @@ import { formatCents } from './money';
 import { t } from './i18n';
 import { registrationICalendar } from './ical';
 import { decodeChoices, listQuestions } from './regDb';
+import type { AttendeeAssignments } from './regLogistics';
+import { roomWithVenue } from './regLogisticsView';
 import { registrationCampusSlug, registrationQrUrl } from './regEmails';
 import {
   cancelAttendee,
@@ -31,6 +33,20 @@ function whenText(startsAt: string, endsAt: string | null, locale: Locale): stri
   return `${formatDateWithWeekday(date, locale)} ${range}`;
 }
 
+/** Room / table / group as the registrant reads them ("not assigned yet" for an area with no placement yet). */
+function assignmentText(a: AttendeeAssignments, locale: Locale): Array<{ label: string; value: string }> {
+  const none = t(locale, 'register.manage.notAssigned');
+  const out: Array<{ label: string; value: string }> = [];
+  if (a.room !== undefined) out.push({ label: t(locale, 'register.manage.room'), value: a.room ? roomWithVenue(a.room.label, a.room.venue) : none });
+  if (a.table !== undefined) out.push({ label: t(locale, 'register.manage.table'), value: a.table ? a.table.label : none });
+  if (a.group !== undefined) out.push({ label: t(locale, 'register.manage.group'), value: a.group ? a.group.name : none });
+  return out;
+}
+
+/** Whether to show event logistics: the event-logistics module is on (logisticsModuleEnabled). The event's own
+ *  "show registrants" switch is checked by registrationSummary. */
+export interface ViewOptions { logistics?: boolean }
+
 /** The display-ready view of one registration in `locale`, or null when it does not exist. */
 export async function buildRegistrationView(
   db: AppDb,
@@ -38,8 +54,9 @@ export async function buildRegistrationView(
   locale: Locale,
   now: string = toUtcSql(),
   summary?: RegistrationSummary | null,
+  opts: ViewOptions = {},
 ): Promise<RegistrationView | null> {
-  const s = summary ?? (await registrationSummary(db, registrationId, locale, now));
+  const s = summary ?? (await registrationSummary(db, registrationId, locale, now, opts));
   if (!s) return null;
   const { event, registration: reg } = s;
 
@@ -119,6 +136,7 @@ export async function buildRegistrationView(
         : null,
       answers: a.answers.map(readable),
       ...(s.canEdit ? { values: personValues.get(a.id) ?? {} } : {}),
+      ...(a.assignments && a.status === 'active' ? { assignments: assignmentText(a.assignments, locale) } : {}),
     })),
     // Answers show for the people who gave them; the labels are localized by the summary.
     answers: s.answers.map(readable),
@@ -159,11 +177,13 @@ export async function performManageAction(
   request: ManageAction,
   notify: NotifyRelease,
   now: string = toUtcSql(),
+  opts: ViewOptions = {},
 ): Promise<ManageOutcome> {
   const current = await registrationSummary(db, ref.id, locale, now);
   if (!current) return { kind: 'not_found' };
+  const viewNow = () => buildRegistrationView(db, ref.id, locale, now, undefined, opts);
   const reload = async (notice: 'saved' | 'cancelled' | null): Promise<ManageOutcome> => {
-    const view = await buildRegistrationView(db, ref.id, locale, now);
+    const view = await viewNow();
     return view ? { kind: 'view', view, notice } : { kind: 'not_found' };
   };
 
@@ -191,7 +211,7 @@ export async function performManageAction(
     const result = await updateRegistrationSelf(db, ref.id, editFromBag(request.fields), now);
     if (!result.ok) {
       const notAllowed = result.errors.some((e) => e.path === '' && (e.code === 'not_allowed' || e.code === 'not_found'));
-      const view = await buildRegistrationView(db, ref.id, locale, now);
+      const view = await viewNow();
       if (notAllowed) return { kind: 'not_allowed', view };
       return view ? { kind: 'invalid', errors: result.errors, view } : { kind: 'not_found' };
     }
@@ -200,9 +220,9 @@ export async function performManageAction(
 
   if (request.action === 'cancel_attendee') {
     const person = current.attendees.find((a) => a.id === request.attendeeId && a.status === 'active');
-    if (!person) return { kind: 'not_allowed', view: await buildRegistrationView(db, ref.id, locale, now) };
+    if (!person) return { kind: 'not_allowed', view: await viewNow() };
     const result = await cancelAttendee(db, ref.id, person.id, now);
-    if (!result.ok) return { kind: 'not_allowed', view: await buildRegistrationView(db, ref.id, locale, now) };
+    if (!result.ok) return { kind: 'not_allowed', view: await viewNow() };
     await notify({
       cancelledId: ref.id,
       ...(result.registrationCancelled ? {} : { attendeeName: person.name }),
@@ -212,7 +232,7 @@ export async function performManageAction(
   }
 
   const result = await cancelRegistrationSelf(db, ref.id, now);
-  if (!result.ok) return { kind: 'not_allowed', view: await buildRegistrationView(db, ref.id, locale, now) };
+  if (!result.ok) return { kind: 'not_allowed', view: await viewNow() };
   await notify({ cancelledId: ref.id, promoted: result.promoted });
   return reload('cancelled');
 }

@@ -87,6 +87,10 @@
     "planning": {
       "label": "Perancangan Kebaktian",
       "description": "Rancang lembaran aturan acara, latihan, kesediaan dan kalendar untuk kebaktian dan acara."
+    },
+    "event-logistics": {
+      "label": "Logistik acara",
+      "description": "Atur penginapan, tempat duduk dan kumpulan kecil bagi orang yang mendaftar untuk sesuatu acara."
     }
   },
   "presets": {

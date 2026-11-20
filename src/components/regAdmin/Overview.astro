@@ -1,13 +1,15 @@
 ---
 // The event page's overview: counts by status, seats left, waitlist, people awaiting a decision, door count,
-// people by ticket type, revenue (events that collect money) and the tallies of every choice question.
+// people by ticket type, revenue (events that collect money) and the tallies of every choice question; with the
+// event-logistics module on, housing / seating / group progress for the areas switched on for the event.
 import type { EventOverview } from '../../lib/regAdmin';
+import type { LogisticsOverview } from '../../lib/regLogistics';
 import { formatCents } from '../../lib/money';
 import { t } from '../../lib/i18n';
 import type { Locale } from '../../lib/locales';
 
-interface Props { overview: EventOverview; lang: Locale; eventId: number }
-const { overview: o, lang, eventId } = Astro.props;
+interface Props { overview: EventOverview; lang: Locale; eventId: number; logistics?: LogisticsOverview | null }
+const { overview: o, lang, eventId, logistics: lx = null } = Astro.props;
 const base = `/admin/registration/${eventId}`;
 const statuses = ['confirmed', 'review', 'waitlist', 'pending', 'declined', 'cancelled'] as const;
 const hasMoney = o.revenue.collectedCents > 0 || o.revenue.refundedCents > 0;
@@ -65,6 +67,26 @@ const h3 = 'text-xs font-semibold uppercase tracking-caps text-ink-subtle';
       </div>
     )}
   </div>
+
+  {lx && (lx.housing.enabled || lx.seating.enabled || lx.groups.enabled) && (
+    <div class="mt-4 gathering-panel" data-testid="overview-logistics">
+      <h3 class={h3}>{t(lang, 'admin.reg.lx.overview')}</h3>
+      <ul class="mt-2 grid gap-2 text-sm sm:grid-cols-3">
+        {lx.housing.enabled && (
+          <li data-lx-progress="housing"><a class="font-semibold hover:underline" href={`${base}?tab=housing#logistics`}>{t(lang, 'admin.reg.lx.tab.housing')}</a>
+            <span class="block text-ink-muted">{t(lang, 'admin.reg.lx.ovHousing', { placed: lx.housing.assigned, people: lx.people, rooms: lx.housing.confirmedRooms, beds: lx.housing.beds })}</span></li>
+        )}
+        {lx.seating.enabled && (
+          <li data-lx-progress="tables"><a class="font-semibold hover:underline" href={`${base}?tab=tables#logistics`}>{t(lang, 'admin.reg.lx.tab.tables')}</a>
+            <span class="block text-ink-muted">{t(lang, 'admin.reg.lx.ovTables', { placed: lx.seating.seated, people: lx.people, tables: lx.seating.tables, seats: lx.seating.seats })}</span></li>
+        )}
+        {lx.groups.enabled && (
+          <li data-lx-progress="groups"><a class="font-semibold hover:underline" href={`${base}?tab=groups#logistics`}>{t(lang, 'admin.reg.lx.tab.groups')}</a>
+            <span class="block text-ink-muted">{t(lang, 'admin.reg.lx.ovGroups', { placed: lx.groups.placed, people: lx.people, groups: lx.groups.groups })}</span></li>
+        )}
+      </ul>
+    </div>
+  )}
 
   {o.tallies.length > 0 && (
     <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3" data-testid="overview-tallies">

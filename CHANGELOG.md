@@ -86,8 +86,46 @@ than published to npm.
   be recorded. Registration admins can give any member a **Viewer**, **Check-in desk** or
   **Registrar** role on one event; the role is checked before the page runs and again for every
   action. See [docs/features/registration.md](docs/features/registration.md).
+- Registration event logistics, an optional module (`event-logistics`, off by default, needs
+  Registration, works on D1 and Postgres). Each event turns on any of **Housing (rooms)**,
+  **Tables (seating)** and **Small groups**, which add tabs to the event page. Housing has places
+  to stay (hotel, dorm or cabin, campsite, other), room types and rooms added by range
+  (`101-120, A1-A6`); rooms start not ready and must be marked ready before anyone is placed.
+  Dorms and campsites default to fixed beds (a full room refuses), hotels and other places to
+  flexible beds (going over asks first); each place can change it. Rooms can be for anyone, a
+  single gender (by a per-person question chosen in the event settings) or one party only;
+  breaking the rule asks first. People are put in rooms with the rest of their party by default,
+  moved, swapped, or taken out, and moving or removing someone already checked in asks for a
+  reason kept in the history. Tables are added in bulk and seated by hand or by **Auto-seat**:
+  a preview that keeps parties together and fills tables evenly, keeps existing seats or starts
+  over, and can spread out people with one tag and give tables with one tag a host with another;
+  applying refuses if anything changed since the preview. Small groups have an optional size
+  limit and a leader, and can be filled from the answer to a per-person choice question (one
+  group per answer, reusing a group already named after it). Staff tags label people by hand or
+  by answer. Prints: room list, door signs, table list, table cards and group list, with names
+  only. Only confirmed and in-review people can be placed (waitlisted people once checked in;
+  never people awaiting payment). Cancelling a person or registration, or declining a sign-up,
+  frees their room, seat and group; moving to the waitlist keeps them. The check-in desk shows
+  each person's room and table, and registrants see their room, table and group on the manage
+  page, My events and the reminder email when the event's **Show registrants** switch is on.
+  New copy in German, Spanish, French, Portuguese, Japanese, Korean, Vietnamese, Indonesian,
+  Malay and Hindi is AI-assisted; community review welcome. See
+  [docs/features/event-logistics.md](docs/features/event-logistics.md).
 
 ### Changed
+
+- Operator impact for Registration event logistics (see [Upgrading](docs/upgrade.md#registration-event-logistics)):
+  - D1: apply `migrations/0054_registration_logistics.sql`. Postgres: apply
+    `migrations-supabase/0046_registration_logistics.sql`. Both add defaulted columns to
+    `reg_events` and ten new tables, with no backfill. The setup doctor now expects the new
+    tables.
+  - The module stays off after upgrading (the migration writes `module.event-logistics = 0` on a
+    database with data) until an administrator enables it in **Settings → Modules**; then each
+    event turns on its own parts. No preset includes it.
+  - No new secrets, bindings, cron triggers, or dependencies.
+  - People with a role on one event also reach that event's five logistics prints
+    (`room-list`, `door-signs`, `table-list`, `table-cards`, `group-list`) with the view role.
+  - Identity merge: who placed a person is kept as history; no new merge conflict.
 
 - Operator impact for Registration back office (see [Upgrading](docs/upgrade.md#registration-back-office)):
   - D1: apply `migrations/0053_registration_back_office.sql`. Postgres: apply

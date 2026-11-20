@@ -92,6 +92,8 @@ export interface RegistrationView {
     ticketText?: string | null;
     answers?: Array<{ label: string; value: string }>;
     values?: Record<string, string[]>;
+    /** Event logistics the event shows registrants: room / table / group as display text (already localized). */
+    assignments?: Array<{ label: string; value: string }>;
   }>;
   answers: Array<{ label: string; value: string }>;
   /** Present for the edit form (only when canEdit): the once-per-registration questions, sections included. */
@@ -373,7 +375,10 @@ export function renderRegistrationView(view: RegistrationView, o: RenderOptions)
         const given = a.answers && a.answers.length > 0
           ? `<dl class="reg-facts reg-person-answers">${a.answers.map((x) => `<div><dt>${esc(x.label)}</dt><dd>${esc(x.value)}</dd></div>`).join('')}</dl>`
           : '';
-        return `<li class="reg-person"><span class="reg-person-who"><span>${esc(a.name)}</span>${ticket}</span>${button}${given}</li>`;
+        const placed = a.assignments && a.assignments.length > 0
+          ? `<dl class="reg-facts reg-person-answers" data-assignments>${a.assignments.map((x) => `<div><dt>${esc(x.label)}</dt><dd>${esc(x.value)}</dd></div>`).join('')}</dl>`
+          : '';
+        return `<li class="reg-person"><span class="reg-person-who"><span>${esc(a.name)}</span>${ticket}</span>${button}${placed}${given}</li>`;
       })
       .join('')}</ul></section>`,
   );

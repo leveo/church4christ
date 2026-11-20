@@ -13,6 +13,8 @@ import { claimReminder, outboxCounts } from '../../src/lib/regOutbox';
 import { clearModuleCache } from '../../src/lib/modules';
 import { setSetting } from '../../src/lib/settings';
 import { recordOfflineRefund, refundRegistration } from '../../src/lib/regRefunds';
+import { saveLogisticsSettings } from '../../src/lib/regLogistics';
+import { addRooms, assignRoom, createVenue, setRoomsConfirmed } from '../../src/lib/regHousing';
 import { mail } from './regMail';
 import { ts } from './regCoreCases';
 
@@ -199,6 +201,36 @@ export function defineRegMessagingCases(label: string, getDb: () => AppDb, backe
         mail.sent.length = 0;
         await sweepReminders(env, getDb());
         expect(mailTo(created.email)).toHaveLength(0);
+      });
+
+      it('carries each person\'s room only with the event-logistics module on and the event showing it', async () => {
+        const eventId = await soon();
+        const created = await register(eventId);
+        await saveLogisticsSettings(getDb(), eventId, { housing: true, showAssignments: true });
+        const venue = await createVenue(getDb(), eventId, { name: 'Pine Lodge', kind: 'hotel' });
+        const rooms = venue.ok ? await addRooms(getDb(), eventId, { venueId: venue.id, labels: '12', bedsOverride: 2 }) : null;
+        const roomId = rooms && rooms.ok ? rooms.created[0].id : 0;
+        await setRoomsConfirmed(getDb(), eventId, { roomIds: [roomId], confirmed: true });
+        const attendee = await getDb().prepare(`SELECT id FROM reg_attendees WHERE registration_id = ?1`).bind(created.id).first<{ id: number }>();
+        expect(await assignRoom(getDb(), eventId, { attendeeId: attendee!.id, roomId }, { actor: null })).toMatchObject({ ok: true });
+        const before = await getDb().prepare(`SELECT value FROM settings WHERE key = 'module.event-logistics'`).first<{ value: string }>();
+        try {
+          // The module off: the reminder goes out without the room.
+          await setSetting(getDb(), 'module.event-logistics', '0');
+          clearModuleCache();
+          await sweepReminders(env, getDb());
+          expect(mailTo(created.email)[0].html).not.toContain('12 (Pine Lodge)');
+          await getDb().prepare(`UPDATE registrations SET reminder_sent_at = NULL WHERE id = ?1`).bind(created.id).run();
+          mail.sent.length = 0;
+          await setSetting(getDb(), 'module.event-logistics', '1');
+          clearModuleCache();
+          await sweepReminders(env, getDb());
+          expect(mailTo(created.email)[0].html).toContain('12 (Pine Lodge)');
+        } finally {
+          if (before) await setSetting(getDb(), 'module.event-logistics', before.value);
+          else await getDb().prepare(`DELETE FROM settings WHERE key = 'module.event-logistics'`).run();
+          clearModuleCache();
+        }
       });
 
       it('a failed send releases the claim and rolls the rotation back; the next run sends it', async () => {

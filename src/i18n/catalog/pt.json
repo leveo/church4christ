@@ -87,6 +87,10 @@
     "planning": {
       "label": "Planejamento de cultos",
       "description": "Planeje roteiros, ensaios, disponibilidade e calendários para cultos e eventos."
+    },
+    "event-logistics": {
+      "label": "Logística de eventos",
+      "description": "Distribua hospedagem, mesas e pequenos grupos para as pessoas inscritas em um evento."
     }
   },
   "presets": {

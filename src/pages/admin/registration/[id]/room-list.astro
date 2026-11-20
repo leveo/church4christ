@@ -1,0 +1,64 @@
+---
+// Printable room list for one event (event logistics, housing): every venue, then each room with its occupants
+// (names only), the room leader marked. Gated like the badges ('view' on this event) plus the module and the
+// event's housing switch (404 otherwise); see regLogisticsPrint.ts.
+import PrintSheet from '../../../../layouts/PrintSheet.astro';
+import { logisticsPrintGate } from '../../../../lib/regLogisticsPrint';
+import { listHousing } from '../../../../lib/regHousing';
+import { roomPolicyKey } from '../../../../lib/regLogisticsView';
+import { t } from '../../../../lib/i18n';
+
+const gate = await logisticsPrintGate(Astro.locals, Astro.params.id, 'housing');
+if (gate instanceof Response) return gate;
+const { eventId, lang, eventTitle, names } = gate;
+const venues = await listHousing(Astro.locals.db, eventId);
+const nameOf = (id: number) => names.get(id) ?? '';
+const total = venues.reduce((sum, v) => sum + v.rooms.reduce((n, r) => n + r.occupants.length, 0), 0);
+---
+
+<PrintSheet title={`${t(lang, 'admin.reg.lx.print.roomList')} · ${eventTitle}`} lang={lang}>
+  <div class="print-toolbar">
+    <a href={`/admin/registration/${eventId}?tab=housing#logistics`}>{t(lang, 'admin.reg.backToEvent')}</a>
+    <button type="button" class="print-primary" data-print>{t(lang, 'admin.reg.print')}</button>
+  </div>
+  <main class="sheet" data-testid="room-list">
+    <h1 class="sheet-title">{eventTitle}</h1>
+    <p class="sheet-meta">{t(lang, 'admin.reg.lx.print.roomList')} · {t(lang, 'admin.reg.lx.print.peopleHoused', { n: total })}</p>
+    {venues.map((v) => (
+      <section class="lx-print-venue" data-venue={v.id}>
+        <h2 class="lx-print-h2">{v.name}</h2>
+        <table class="sheet-table">
+          <thead><tr><th>{t(lang, 'admin.reg.lx.room')}</th><th>{t(lang, 'admin.reg.lx.floor')}</th><th>{t(lang, 'admin.reg.lx.print.who')}</th><th class="lx-num">{t(lang, 'admin.reg.lx.beds')}</th></tr></thead>
+          <tbody>
+            {v.rooms.map((r) => (
+              <tr data-room={r.id}>
+                <td class="sheet-name">{r.label}{r.policy !== 'any' && <span class="lx-print-note"> · {t(lang, roomPolicyKey(r.policy))}</span>}</td>
+                <td>{r.floor ?? ''}</td>
+                <td>{r.occupants.map((id) => `${nameOf(id)}${r.leaderAttendeeId === id ? ` (${t(lang, 'admin.reg.lx.leader')})` : ''}`).join(', ')}</td>
+                <td class="lx-num">{r.occupants.length} / {r.beds}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    ))}
+  </main>
+  <script is:inline>
+    document.querySelector('[data-print]')?.addEventListener('click', function () { window.print(); });
+  </script>
+</PrintSheet>
+
+<style is:global>
+  .sheet { max-width: 60rem; margin: 0 auto; padding: 1.5rem; }
+  .sheet-title { font-family: var(--font-display); font-size: 1.5rem; font-weight: 700; }
+  .sheet-meta { margin: .25rem 0 1rem; color: var(--color-ink-muted); font-size: .875rem; }
+  .lx-print-venue { margin-top: 1.25rem; break-inside: auto; }
+  .lx-print-h2 { font-family: var(--font-display); font-size: 1.125rem; font-weight: 700; margin-bottom: .25rem; }
+  .lx-print-note { color: var(--color-ink-muted); font-size: .75rem; font-weight: 400; }
+  .sheet-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+  .sheet-table th { text-align: left; padding: .4rem .5rem; border-bottom: 2px solid var(--color-ink); font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; }
+  .sheet-table td { padding: .35rem .5rem; border-bottom: 1px solid var(--color-border-strong); vertical-align: top; }
+  .sheet-table tr { break-inside: avoid; }
+  .sheet-name { font-weight: 600; white-space: nowrap; }
+  .lx-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+</style>

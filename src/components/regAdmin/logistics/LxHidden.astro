@@ -1,0 +1,8 @@
+---
+// The hidden fields every logistics form posts: the action, the tab to come back to, and the board's filters.
+interface Props { action: string; back: string; tab: string }
+const { action, back, tab } = Astro.props;
+---
+<input type="hidden" name="action" value={action} />
+<input type="hidden" name="tab" value={tab} />
+<input type="hidden" name="back" value={back} />

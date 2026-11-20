@@ -32,8 +32,8 @@ const member = (over: Partial<SessionUser> = {}): SessionUser => ({
 
 describe('Learning capability shell', () => {
   it('is the twenty-first portable capability in Website + Community and Full Church only', () => {
-    expect(CAPABILITY_KEYS).toHaveLength(22);
-    expect(CAPABILITY_KEYS.at(-2)).toBe('learning');
+    expect(CAPABILITY_KEYS).toHaveLength(23);
+    expect(CAPABILITY_KEYS.at(-3)).toBe('learning');
     expect(MODULE_KEYS).toEqual(CAPABILITY_KEYS);
     expect(rawCatalog.capabilities.learning).toMatchObject({
       order: 21,
@@ -186,7 +186,7 @@ describe('Learning capability shell', () => {
     }
   });
 
-  it('writes all 22 module settings and selects Learning in both applicable setup presets', () => {
+  it('writes all 23 module settings and selects Learning in both applicable setup presets', () => {
     const base = {
       mode: 'local',
       siteSlug: 'learning-church',
@@ -198,7 +198,7 @@ describe('Learning capability shell', () => {
     };
     const community = buildSetupPlan({ ...base, preset: 'website-community' }, rawCatalog);
     const full = buildSetupPlan({ ...base, preset: 'full-church' }, rawCatalog);
-    expect(Object.keys(community.moduleSettings)).toHaveLength(22);
+    expect(Object.keys(community.moduleSettings)).toHaveLength(23);
     expect(community.backend).toBe('d1');
     expect(community.modules).toHaveLength(18);
     expect(community.moduleSettings['module.learning']).toBe('1');

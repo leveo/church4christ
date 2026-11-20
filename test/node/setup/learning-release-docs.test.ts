@@ -194,7 +194,7 @@ describe('v1.1.0 Learning release contract', () => {
     const d1Capable = capabilitiesCatalog.order.filter(
       (key) => capabilitiesCatalog.capabilities[key]?.requiresBackend !== 'supabase',
     );
-    expect(d1Capable).toHaveLength(21);
+    expect(d1Capable).toHaveLength(22);
     expect(cloudflareSetup).toContain(`default for ${d1Capable.length} modules`);
   });
 

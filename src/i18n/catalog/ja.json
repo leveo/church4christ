@@ -87,6 +87,10 @@
     "planning": {
       "label": "礼拝の計画",
       "description": "礼拝やイベントの進行表、リハーサル、奉仕可能日、カレンダーを計画します。"
+    },
+    "event-logistics": {
+      "label": "イベントの手配",
+      "description": "イベントに申し込んだ人の宿泊、座席、小グループを割り当てます。"
     }
   },
   "presets": {

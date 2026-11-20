@@ -2,7 +2,8 @@
 // The check-in desk for one registration event, built phone-first for volunteers at the door. Search by name,
 // confirmation number, email or phone (a scanned QR code holds the confirmation number), then check people in,
 // undo, check out, or check a whole party in. Shows only what the door needs: names, ticket types, the
-// confirmation number and the status; never emails, phones or answers.
+// confirmation number and the status (and, with the event-logistics module on, each person's room and table);
+// never emails, phones or answers.
 //
 // Access: the route class is `regEventStaff`; the middleware already required the 'checkin' capability for
 // this event (desk, registrar, or registration admins). This page checks it again before any read, and every
@@ -16,6 +17,8 @@ import { deskCounts, deskVersion, findForDesk } from '../../../../lib/regCheckin
 import { performDeskAction } from '../../../../lib/regDesk';
 import { t } from '../../../../lib/i18n';
 import type { Locale } from '../../../../lib/locales';
+import { logisticsModuleEnabled } from '../../../../lib/modules';
+import { roomWithVenue } from '../../../../lib/regLogisticsView';
 
 export const prerender = false;
 
@@ -65,7 +68,7 @@ if (Astro.request.method === 'POST') {
 
 const q = (Astro.url.searchParams.get('q') ?? '').slice(0, 120);
 const [search, counts, version] = await Promise.all([
-  q ? findForDesk(db, eventId, q, lang) : Promise.resolve({ exact: false, parties: [] }),
+  q ? findForDesk(db, eventId, q, lang, { logistics: logisticsModuleEnabled(Astro.locals.modules) }) : Promise.resolve({ exact: false, parties: [] }),
   deskCounts(db, eventId),
   deskVersion(db, eventId),
 ]);
@@ -148,6 +151,13 @@ const copy = {
                         {person.checkedIn && <span class="desk-here"> · {t(lang, 'admin.reg.desk.here')}</span>}
                         {!person.checkedIn && person.checkedOutAt && <span> · {t(lang, 'admin.reg.desk.left')}</span>}
                       </p>
+                      {(person.room !== undefined || person.table !== undefined) && (
+                        <p class="text-sm text-ink-muted" data-desk-logistics>
+                          {person.room !== undefined && <span data-desk-room>{t(lang, 'admin.reg.lx.room')}: {person.room ? roomWithVenue(person.room.label, person.room.venue) : t(lang, 'admin.reg.lx.notAssigned')}</span>}
+                          {person.room !== undefined && person.table !== undefined && <span> · </span>}
+                          {person.table !== undefined && <span data-desk-table>{t(lang, 'admin.reg.lx.table')}: {person.table ? person.table.label : t(lang, 'admin.reg.lx.notAssigned')}</span>}
+                        </p>
+                      )}
                     </div>
                     <div class="flex flex-wrap gap-2">
                       {!person.checkedIn && (

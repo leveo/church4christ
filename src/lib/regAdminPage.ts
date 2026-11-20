@@ -33,6 +33,8 @@ import { notifyAfterRelease, sendConfirmation, sendDecision, type RegNotifyEnv }
 import { bulkAudience } from './regOutbox';
 import { recordOfflineRefund, refundRegistration } from './regRefunds';
 import { addEventAdmin, removeEventAdmin } from './prayerDb';
+import { LOGISTICS_ACTIONS, runLogisticsAction, type LogisticsScope } from './regLogisticsPage';
+import type { SeatingPlan } from './regSeatPlanner';
 
 export type RegActionEnv = RegNotifyEnv & StripeEnv & DbEnv;
 
@@ -44,6 +46,8 @@ export interface RegActionContext {
   eventId: number;
   /** Event admins (the prayer-approval console) exist only under the member portal module. */
   portal: boolean;
+  /** The event-logistics module is on for this campus (logisticsModuleEnabled); its actions answer 404 otherwise. */
+  logistics?: boolean;
   defaultLocale: Locale;
   /** Injected in tests so a Stripe call never leaves the process. */
   fetcher?: typeof fetch;
@@ -52,7 +56,7 @@ export interface RegActionContext {
 // ── The action table ─────────────────────────────────────────────────────────
 
 export type ActionNeed = 'view' | 'manage' | 'edit' | 'refund';
-export interface ActionSpec { need: ActionNeed; target: 'registration' | 'event' }
+export interface ActionSpec { need: ActionNeed; target: 'registration' | 'event'; logistics?: LogisticsScope }
 
 /** Every POST the event page accepts. The security tests walk this table, so a new action cannot skip a gate. */
 export const REG_ADMIN_ACTIONS: Readonly<Record<string, ActionSpec>> = {
@@ -74,6 +78,8 @@ export const REG_ADMIN_ACTIONS: Readonly<Record<string, ActionSpec>> = {
   revoke_role: { need: 'edit', target: 'event' },
   addEventAdmin: { need: 'edit', target: 'event' },
   removeEventAdmin: { need: 'edit', target: 'event' },
+  // Event logistics (housing, tables, groups, tags): regLogisticsPage.ts runs them after the same gate.
+  ...LOGISTICS_ACTIONS,
 };
 
 export type ActionOutcome =
@@ -83,8 +89,13 @@ export type ActionOutcome =
   | { kind: 'ok'; notice: string; reg?: number; extra?: Record<string, string> }
   /** The registration changed under the person ("someone else changed this"). */
   | { kind: 'conflict'; reg: number | null }
-  /** Over a limit: show the reason and a "do it anyway" form that replays `fields` with confirm=1. */
-  | { kind: 'confirm'; reason: string; fields: Array<[string, string]>; reg: number | null }
+  /** Over a limit: show the reason (every reason in `reasons` when several apply) and a "do it anyway" form that
+   *  replays `fields` with confirm=1. */
+  | { kind: 'confirm'; reason: string; reasons?: string[]; fields: Array<[string, string]>; reg: number | null }
+  /** A staff reason is needed (moving someone who is checked in): replay `fields` with a `reason` the person types. */
+  | { kind: 'reason'; fields: Array<[string, string]> }
+  /** Auto-seat preview: the plan, the data stamp it was made from, and the option fields to apply it with. */
+  | { kind: 'seat_preview'; stamp: string; plan: SeatingPlan; fields: Array<[string, string]> }
   /** Bulk email preview: how many would get it, and the form fields to send it. */
   | { kind: 'preview'; count: number; fields: Array<[string, string]> }
   | { kind: 'invalid'; code: string; errors: Array<{ path: string; code: string }>; reg: number | null }
@@ -200,6 +211,8 @@ export async function runRegAdminAction(ctx: RegActionContext, fd: FormData): Pr
   if (need === 'edit' && !canEditEvent(user)) return { kind: 'denied', status: 403 };
   if (need === 'refund' && !canRefund(user)) return { kind: 'denied', status: 403 };
   if (!spec) return { kind: 'bad_request' };
+  // Logistics: the module, the event and its area switch, then the data layer (which owns the cross-event check).
+  if (spec.logistics) return runLogisticsAction({ db, eventId, actor: user.id, logistics: ctx.logistics === true }, fd, action);
 
   // 2. The event comes from the target row, never from the client.
   let rid: number | null = null;
@@ -444,7 +457,8 @@ export async function listAllRosterPeople(db: AppDb, eventId: number, opts: Rost
 export function safeBack(raw: string): string {
   const source = new URLSearchParams(raw.replace(/^\?/, ''));
   const keep = new URLSearchParams();
-  for (const key of ['q', 'status', 'type', 'in', 'ans', 'sort', 'p', 'view']) {
+  // The roster's keys, and a logistics board's tab and filters (lq, ltag, ltype, lans).
+  for (const key of ['q', 'status', 'type', 'in', 'ans', 'sort', 'p', 'view', 'tab', 'lq', 'ltag', 'ltype', 'lans']) {
     const value = source.get(key);
     if (value !== null && value.length <= 200) keep.set(key, value);
   }

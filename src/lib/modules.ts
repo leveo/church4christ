@@ -147,6 +147,13 @@ export function moduleForPath(path: string): ModuleKey | null {
   return best;
 }
 
+/** Event logistics (housing, seating, small groups) lives on the registration event page and hard-depends on
+ *  Registration: it is on only when BOTH modules are. The catalog's `dependsOn` is enforced by setup, not by the
+ *  runtime settings, so every logistics surface asks this instead of `modules.has('event-logistics')`. */
+export function logisticsModuleEnabled(modules: ReadonlySet<string>): boolean {
+  return modules.has('registration') && modules.has('event-logistics');
+}
+
 /** Shared gate for the global finance operations surface and role assignment. */
 export function paymentOperationsEnabled(modules: ReadonlySet<string>): boolean {
   return modules.has('giving') || modules.has('registration');

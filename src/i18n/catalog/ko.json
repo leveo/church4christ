@@ -87,6 +87,10 @@
     "planning": {
       "label": "예배 계획",
       "description": "예배와 행사의 순서지, 리허설, 가능 시간, 캘린더를 계획해요."
+    },
+    "event-logistics": {
+      "label": "행사 배정",
+      "description": "행사에 등록한 사람들의 숙소, 좌석, 소그룹을 배정합니다."
     }
   },
   "presets": {

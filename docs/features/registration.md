@@ -45,6 +45,8 @@ It replaces the paper sign-up sheet, the separate payment link, and the spreadsh
   events, refund all or part of a card payment from the same page.
 - **Access for one event only.** Give a volunteer a role on one event, such as the check-in
   desk, without opening the rest of the admin area.
+- **Rooms, tables, and small groups (optional).** With the Event Logistics module on, plan
+  housing, seating, and small groups on the event page. See [Event logistics](event-logistics.md).
 
 Rosters hold names and emails, so the admin pages and exports are open only to staff and to
 people you give a role on that event.
@@ -492,7 +494,9 @@ The desk is made for a phone at the door.
   point the camera at the QR code in the person's confirmation email. The code holds the
   confirmation number. If the camera is not available, search by name instead.
 - The result shows the group: each person's name and ticket type, the confirmation number,
-  and the status. It never shows emails, phone numbers, or answers.
+  and the status. It never shows emails, phone numbers, or answers. With
+  [Event logistics](event-logistics.md#at-the-door) on, it also shows each person's room and
+  table.
 - Press **Check in** for one person, or **Check in everyone** for the whole group. **Undo**
   takes a check-in back, as if the person never came. **Check out** records that a person
   left. They can be checked in again later.
@@ -558,9 +562,9 @@ press **Save**. Press **Remove** to take it away.
 
 | Role | Can do |
 |---|---|
-| **Viewer** | See the overview, roster, detail panel, and duplicates. Download the CSV files and print badges and the sign-in sheet. Cannot change anything or use the check-in desk. |
+| **Viewer** | See the overview, roster, detail panel, and duplicates. Download the CSV files and print badges and the sign-in sheet. With [Event logistics](event-logistics.md) on, also see the Housing, Tables, and Groups tabs and use their prints. Cannot change anything or use the check-in desk. |
 | **Check-in desk** | Use the check-in desk for this event. Cannot see the roster. |
-| **Registrar** | Everything for this event: edits, approval, adding registrations, emails, the check-in desk, exports, and printing. Not the event settings, the form builder, access, or refunds. |
+| **Registrar** | Everything for this event: edits, approval, adding registrations, emails, the check-in desk, exports, and printing, and rooms, tables, and groups when [Event logistics](event-logistics.md) is on. Not the event settings, the form builder, access, or refunds. |
 
 ![The Access to this event panel](../images/registration/backoffice-access.png)
 
@@ -598,6 +602,15 @@ merged away into another person in the identity merge tool. The tool reports it 
 
 Event admins are separate from the roles in **Access to this event**. An event admin approves
 prayer requests for the event. It does not open the event's roster or check-in desk.
+
+### Rooms, tables, and small groups
+
+For retreats, camps, and banquets, the optional **Event Logistics** module adds **Housing**,
+**Tables**, and **Groups** tabs to the event page. Your team can put people in rooms, seat them
+at tables (with an Auto-seat preview), sort them into small groups, tag them, print room lists,
+door signs, table cards, and group lists, and choose whether registrants see their placements.
+It is off until a super admin turns it on in **Settings → Modules**, and then each event turns on
+only the parts it needs. See [Event logistics](event-logistics.md).
 
 ## Setting it up
 
@@ -714,6 +727,11 @@ before switching modes.
   Pages: `src/pages/admin/registration/[id].astro` with `src/components/regAdmin/`, plus
   `[id]/checkin.astro`, `[id]/badges.astro`, `[id]/sign-in-sheet.astro`,
   `[id]/export.csv.ts`, and `[id]/export-people.csv.ts`.
+- **Event logistics (Phase 5):** D1 `migrations/0054_registration_logistics.sql` and Postgres
+  `migrations-supabase/0046_registration_logistics.sql` add the optional `event-logistics`
+  module's per-event switches and the room, table, group, and tag tables. Its writes, cancel
+  release, files, and tests are described in
+  [Event logistics](event-logistics.md#for-developers).
 - **Key modules:** `src/lib/regDb.ts` (reads, the shared locked registration writer that
   enforces capacity, waitlist, confirmation numbers, roster and CSV, `cloneEvent`,
   `setEventLifecycle`), `src/lib/regPhase.ts` (pure `eventPhase`, `isEventFull`,
@@ -727,8 +745,8 @@ before switching modes.
   `registration` area) are registrars on every event. Per-event roles live in `reg_event_access`
   and are capabilities, not a ladder: `viewer` = view, `desk` = checkin, `registrar` = view,
   checkin, and manage. `REG_EVENT_STAFF_PATHS` in `src/lib/routePolicy.ts` is the one table of
-  per-event pages (`/admin/registration/<id>` and its exports, badges, and sign-in sheet need
-  view; `/checkin` needs checkin). Those paths are the `regEventStaff` route class, and
+  per-event pages (`/admin/registration/<id>` and its exports, badges, sign-in sheet, and the
+  five event-logistics prints need view; `/checkin` needs checkin). Those paths are the `regEventStaff` route class, and
   `src/middleware.ts` runs `requireRegRole` for the event in the URL before the page (fail
   closed; a path the table does not know is refused). Pages and every action check again, and
   each action derives the event from the registration or attendee it targets. Event settings,

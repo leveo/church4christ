@@ -27,7 +27,8 @@ export function intLit(value: number): number {
   return value;
 }
 
-/** `detail` is serialized as JSON; callers never put tokens, links or free text in it. */
+/** `detail` is serialized as JSON; callers never put tokens or links in it. Staff-typed text appears only where the
+ *  history shows it on purpose (a bulk email subject; a logistics move reason, room / table / group labels). */
 export type ActivityDetail = Record<string, unknown> | null;
 
 /** The activity row for registration `registrationId`, selected from the registration so the event and campus

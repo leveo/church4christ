@@ -10,6 +10,10 @@ import ManualAdd from '../../../components/regAdmin/ManualAdd.astro';
 import BulkEmail from '../../../components/regAdmin/BulkEmail.astro';
 import Duplicates from '../../../components/regAdmin/Duplicates.astro';
 import AccessPanel from '../../../components/regAdmin/AccessPanel.astro';
+import LogisticsNav from '../../../components/regAdmin/logistics/LogisticsNav.astro';
+import HousingTab from '../../../components/regAdmin/logistics/HousingTab.astro';
+import TablesTab from '../../../components/regAdmin/logistics/TablesTab.astro';
+import GroupsTab from '../../../components/regAdmin/logistics/GroupsTab.astro';
 import en from '../../../i18n/en';
 
 // One event's back office. The route class is `regEventStaff` (a per-event role holder reaches it without area
@@ -21,6 +25,8 @@ import en from '../../../i18n/en';
 //   refund  refunds                                                                    (payment operations + manage)
 // A person holding only 'view' is never sent the builder, the access panel or any form. The event of a registration
 // opened with ?reg= is derived from the row and must be this page's event (a read leak otherwise).
+// With the event-logistics module on, ?tab=housing|tables|groups shows that board instead of the roster, for the
+// areas switched on for this event; its forms post here too and every action checks 'manage' (regLogisticsPage.ts).
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
 import { getEventAdmin, listQuestions, listQuestionsAdmin, listTicketTypes, listTicketTypesAdmin } from '../../../lib/regDb';
@@ -34,6 +40,9 @@ import { env } from 'cloudflare:workers';
 import { listEventAdmins, listPeopleWithAccount } from '../../../lib/prayerDb';
 import { tin, lab, card, btn, btnSecondary, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import { SUPPORTED_LOCALES, localeMeta, type Locale } from '../../../lib/locales';
+import { logisticsModuleEnabled } from '../../../lib/modules';
+import { assignmentsForAttendees, getLogisticsSettings, logisticsOverview } from '../../../lib/regLogistics';
+import { LOGISTICS_TABS, isLogisticsTab, loadLogisticsBoard, type LogisticsTab } from '../../../lib/regLogisticsPage';
 
 const user = Astro.locals.user;
 if (!user) return new Response(null, { status: 403 });
@@ -54,6 +63,10 @@ const canRefundNow = canManage && canRefund(user);
 const event = await getEventAdmin(db, eventId);
 if (!event) return new Response(null, { status: 404 });
 const defaultLocale = Astro.locals.locales.default;
+// Event logistics: on for this campus, a real event, and the tabs of the areas switched on for it.
+const logisticsOn = logisticsModuleEnabled(Astro.locals.modules) && event.is_template !== 1;
+const lxSettings = logisticsOn ? await getLogisticsSettings(db, eventId) : null;
+const lxTabs = lxSettings ? (Object.keys(LOGISTICS_TABS) as LogisticsTab[]).filter((tab) => lxSettings[LOGISTICS_TABS[tab]]) : [];
 
 // ── POST ─────────────────────────────────────────────────────────────────────
 let outcome: ActionOutcome | null = null;
@@ -72,7 +85,7 @@ if (Astro.request.method === 'POST') {
   } catch {
     return new Response(null, { status: 400 });
   }
-  outcome = await runRegAdminAction({ db, env: env as never, user, eventId, portal: hasPortal, defaultLocale }, fd);
+  outcome = await runRegAdminAction({ db, env: env as never, user, eventId, portal: hasPortal, defaultLocale, logistics: logisticsOn }, fd);
   if (outcome.kind === 'denied') return new Response(null, { status: outcome.status });
   if (outcome.kind === 'bad_request') return new Response(null, { status: 400 });
   const back = safeBack(String(fd.get('back') ?? ''));
@@ -82,13 +95,13 @@ if (Astro.request.method === 'POST') {
     return Astro.redirect(`/admin/registration/${eventId}?${p.toString()}${hash}`, 303);
   };
   if (outcome.kind === 'ok') {
-    const hash = outcome.notice.startsWith('role_') ? '#access' : outcome.reg ? '#reg-drawer' : outcome.notice === 'bulk_queued' ? '#email' : '';
+    const hash = outcome.notice.startsWith('role_') ? '#access' : outcome.reg ? '#reg-drawer' : outcome.notice === 'bulk_queued' ? '#email' : outcome.notice.startsWith('lx_') ? '#logistics' : '';
     return go({ reg: outcome.reg, notice: outcome.notice, ...(outcome.extra ?? {}) }, hash);
   }
   if (outcome.kind === 'conflict') return go({ reg: outcome.reg, notice: 'conflict' }, outcome.reg ? '#reg-drawer' : '');
   for (const [k, v] of fd.entries()) if (typeof v === 'string') echo[k] = v;
   echoStatuses = fd.getAll('audience_status').filter((v): v is string => typeof v === 'string');
-  if (outcome.kind === 'confirm') Astro.response.status = 409;
+  if (outcome.kind === 'confirm' || outcome.kind === 'reason') Astro.response.status = 409;
   else if (outcome.kind === 'invalid' || outcome.kind === 'failed') Astro.response.status = 422;
 }
 
@@ -104,7 +117,10 @@ if (regId !== null && isTemplate) regId = null;
 if (regId !== null && (await eventOfRegistration(db, regId)) !== eventId) return new Response(null, { status: 404 });
 
 const tabParam = Astro.url.searchParams.get('tab') ?? '';
-const [overview, roster, questions, tickets, detail, duplicates, counts] = isTemplate
+// A logistics tab reads only its own board (none of the roster's data).
+const lxTab: LogisticsTab | null = isLogisticsTab(tabParam) && lxTabs.includes(tabParam) ? tabParam : null;
+const board = lxTab ? await loadLogisticsBoard(db, eventId, lxTab, lang, Astro.url.searchParams) : null;
+const [overview, roster, questions, tickets, detail, duplicates, counts] = isTemplate || lxTab
   ? [null, null, [], [], null, [], null]
   : await Promise.all([
       eventOverview(db, eventId, lang),
@@ -116,15 +132,20 @@ const [overview, roster, questions, tickets, detail, duplicates, counts] = isTem
       canManage ? outboxCounts(db, eventId) : Promise.resolve(null),
     ]);
 
-// Admin-only (registration area) data: the builder, per-event roles and event admins. Never loaded for a viewer or registrar.
-const builderQuestions = canEdit ? await listQuestionsAdmin(db, eventId) : [];
-const builderTickets = canEdit ? await listTicketTypesAdmin(db, eventId) : [];
+const lxOverview = !lxTab && lxTabs.length > 0 && overview ? await logisticsOverview(db, eventId) : null;
+const lxAssignments = !lxTab && lxTabs.length > 0 && detail ? await assignmentsForAttendees(db, eventId, detail.summary.attendees.map((a) => a.id)) : null;
+
+// Admin-only (registration area) data: the builder, per-event roles and event admins. Never loaded for a viewer or
+// registrar, nor on a logistics tab (the builder and access panels show with the registrations view).
+const showAdminPanels = canEdit && !lxTab;
+const builderQuestions = showAdminPanels ? await listQuestionsAdmin(db, eventId) : [];
+const builderTickets = showAdminPanels ? await listTicketTypesAdmin(db, eventId) : [];
 const peopleSearch = (Astro.url.searchParams.get('people') ?? '').trim().slice(0, 100);
-const accessRoles = canEdit && !isTemplate ? await listEventRoles(db, eventId) : [];
-const accessCandidates = canEdit && !isTemplate && peopleSearch !== '' ? await searchPeopleForAccess(db, peopleSearch) : [];
+const accessRoles = showAdminPanels && !isTemplate ? await listEventRoles(db, eventId) : [];
+const accessCandidates = showAdminPanels && !isTemplate && peopleSearch !== '' ? await searchPeopleForAccess(db, peopleSearch) : [];
 let eventAdmins: Awaited<ReturnType<typeof listEventAdmins>> = [];
 let adminCandidates: Awaited<ReturnType<typeof listPeopleWithAccount>> = [];
-if (canEdit && hasPortal && !isTemplate) {
+if (showAdminPanels && hasPortal && !isTemplate) {
   [eventAdmins, adminCandidates] = await Promise.all([listEventAdmins(db, eventId), listPeopleWithAccount(db)]);
 }
 
@@ -142,6 +163,8 @@ const h2 = 'font-display text-heading-sm font-bold';
 
 // Banners: a notice from a finished action, or the refusal of the last one.
 const notice = noticeKey(Astro.url.searchParams.get('notice'));
+// Logistics notices carry their counts in n= and m=.
+const noticeVars = { n: Number(Astro.url.searchParams.get('n')) || 0, m: Number(Astro.url.searchParams.get('m')) || 0 };
 const bulkQueued = Astro.url.searchParams.get('queued');
 const bulkSent = Astro.url.searchParams.get('sent');
 const legacyCancelled = Astro.url.searchParams.get('cancelled') === '1';
@@ -167,7 +190,7 @@ const openSection = (name: string) => tabParam === name || (outcome !== null && 
   {legacyCancelled && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.reg.cancelled')}</p>}
   {notice && (
     <p class={`mt-4 ${Astro.url.searchParams.get('notice') === 'conflict' ? noticeErr : noticeOk}`} role="status" data-testid="notice" data-notice={Astro.url.searchParams.get('notice')}>
-      {t(lang, notice)}{Astro.url.searchParams.get('notice') === 'bulk_queued' && bulkQueued ? ` ${t(lang, 'admin.reg.bo.bulkQueuedDetail', { queued: Number(bulkQueued) || 0, sent: Number(bulkSent) || 0 })}` : ''}
+      {t(lang, notice, noticeVars)}{Astro.url.searchParams.get('notice') === 'bulk_queued' && bulkQueued ? ` ${t(lang, 'admin.reg.bo.bulkQueuedDetail', { queued: Number(bulkQueued) || 0, sent: Number(bulkSent) || 0 })}` : ''}
     </p>
   )}
   {outcome?.kind === 'failed' && <p class={`mt-4 ${noticeErr}`} role="alert" data-testid="refusal" data-code={outcome.code}>{t(lang, failureKey(outcome.code))}</p>}
@@ -179,7 +202,7 @@ const openSection = (name: string) => tabParam === name || (outcome !== null && 
       </ul>
     </div>
   )}
-  {outcome?.kind === 'confirm' && (
+  {outcome?.kind === 'confirm' && !outcome.reasons && (
     <form method="post" class={`mt-4 ${noticeErr} flex flex-wrap items-center gap-3`} role="alert" data-testid="needs-confirm" data-reason={outcome.reason}>
       <p class="min-w-0 flex-1 text-sm">{t(lang, reasonKey(outcome.reason))}</p>
       {outcome.fields.map(([k, v]) => <input type="hidden" name={k} value={v} />)}
@@ -187,8 +210,26 @@ const openSection = (name: string) => tabParam === name || (outcome !== null && 
       <button type="submit" class={btn}>{t(lang, 'admin.reg.bo.doItAnyway')}</button>
     </form>
   )}
+  {outcome?.kind === 'confirm' && outcome.reasons && (
+    <form method="post" class={`mt-4 ${noticeErr} space-y-3`} role="alert" data-testid="needs-confirm" data-reason={outcome.reason} data-reasons={outcome.reasons.join(' ')}>
+      <ul class="list-disc space-y-1 pl-5 text-sm">{outcome.reasons.map((r) => <li data-confirm-reason={r}>{t(lang, reasonKey(r))}</li>)}</ul>
+      {outcome.fields.map(([k, v]) => <input type="hidden" name={k} value={v} />)}
+      <div class="flex flex-wrap items-center gap-3">
+        <label class="flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" name="confirm" value="1" required /> {t(lang, 'admin.reg.lx.confirmCheckbox')}</label>
+        <button type="submit" class={btn}>{t(lang, 'admin.reg.bo.doItAnyway')}</button>
+      </div>
+    </form>
+  )}
+  {outcome?.kind === 'reason' && (
+    <form method="post" class={`mt-4 ${noticeErr} space-y-3`} role="alert" data-testid="needs-reason">
+      <p class="text-sm">{t(lang, 'admin.reg.lx.reasonNeeded')}</p>
+      {outcome.fields.map(([k, v]) => <input type="hidden" name={k} value={v} />)}
+      <label class="block"><span class="mb-1 block text-sm font-semibold">{t(lang, 'admin.reg.lx.reason')}</span><input name="reason" required maxlength="200" class={tin} /></label>
+      <button type="submit" class={btn}>{t(lang, 'admin.reg.lx.continue')}</button>
+    </form>
+  )}
 
-  {!isTemplate && overview && roster && (
+  {!isTemplate && (overview || board) && (
     <>
     <div class="gathering-section-heading">
       <div class="gathering-actions"><DateBadge date={event.starts_at} locale={lang} /><p class="text-xs text-ink-muted">{event.location ?? ''}</p></div>
@@ -201,7 +242,16 @@ const openSection = (name: string) => tabParam === name || (outcome !== null && 
       </div>
     </div>
 
-    <Overview overview={overview} lang={lang} eventId={eventId} />
+    {lxTabs.length > 0 && <LogisticsNav eventId={eventId} lang={lang} available={lxTabs} active={lxTab} />}
+    {board && lxTab === 'housing' && <HousingTab board={board} lang={lang} eventId={eventId} canManage={canManage} />}
+    {board && lxTab === 'tables' && <TablesTab board={board} lang={lang} eventId={eventId} canManage={canManage} preview={outcome?.kind === 'seat_preview' ? outcome : null} />}
+    {board && lxTab === 'groups' && <GroupsTab board={board} lang={lang} eventId={eventId} canManage={canManage} />}
+    </>
+  )}
+
+  {!isTemplate && overview && roster && (
+    <>
+    <Overview overview={overview} lang={lang} eventId={eventId} logistics={lxOverview} />
 
     {detail && (
       <Drawer
@@ -216,6 +266,7 @@ const openSection = (name: string) => tabParam === name || (outcome !== null && 
         canRefund={canRefundNow}
         isPg={isPg}
         requiresApproval={event.requires_approval === 1}
+        assignments={lxAssignments}
       />
     )}
     {regId !== null && !detail && <p class={`mt-6 ${noticeErr}`}>{t(lang, 'register.manage.notAllowed')}</p>}
@@ -232,7 +283,7 @@ const openSection = (name: string) => tabParam === name || (outcome !== null && 
     </>
   )}
 
-  {canEdit && (
+  {showAdminPanels && (
     <section class={isTemplate ? 'mt-6' : 'mt-10'} aria-labelledby="reg-form-heading" data-testid="form-builder">
       <h2 id="reg-form-heading" class={h2}>{t(lang, 'admin.regBuilder.title')}</h2>
       <p class="mt-1 max-w-2xl text-sm text-ink-muted">{t(lang, isTemplate ? 'admin.reg.templateBuilderIntro' : 'admin.regBuilder.intro')}</p>
@@ -248,10 +299,10 @@ const openSection = (name: string) => tabParam === name || (outcome !== null && 
     </section>
   )}
 
-  {canEdit && !isTemplate && <AccessPanel roles={accessRoles} candidates={accessCandidates} lang={lang} search={peopleSearch} eventId={eventId} />}
+  {showAdminPanels && !isTemplate && <AccessPanel roles={accessRoles} candidates={accessCandidates} lang={lang} search={peopleSearch} eventId={eventId} />}
 
   {
-    canEdit && hasPortal && !isTemplate && (
+    showAdminPanels && hasPortal && !isTemplate && (
       <section class={`mt-10 ${card} max-w-2xl`}>
         <h2 class="font-semibold">{t(lang, 'admin.reg.eventAdmins.title')}</h2>
         <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.reg.eventAdmins.hint')}</p>
@@ -297,6 +348,6 @@ const openSection = (name: string) => tabParam === name || (outcome !== null && 
       </section>
     )
   }
-  {canEdit && !hasPortal && !isTemplate && <p class="mt-10 max-w-2xl text-sm text-ink-muted">{t(lang, 'admin.reg.eventAdmins.portalOff')}</p>}
+  {showAdminPanels && !hasPortal && !isTemplate && <p class="mt-10 max-w-2xl text-sm text-ink-muted">{t(lang, 'admin.reg.eventAdmins.portalOff')}</p>}
   </GatheringSurface>
 </Admin>

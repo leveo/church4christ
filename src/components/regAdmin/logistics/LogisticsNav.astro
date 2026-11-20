@@ -1,0 +1,19 @@
+---
+// The event page's tabs when the event-logistics module is on: the registrations view, then Housing, Tables and
+// Groups for the areas switched on for this event. Plain links (?tab=), so they work without JavaScript.
+import type { LogisticsTab } from '../../../lib/regLogisticsPage';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+
+interface Props { eventId: number; lang: Locale; available: LogisticsTab[]; active: LogisticsTab | null }
+const { eventId, lang, available, active } = Astro.props;
+const base = `/admin/registration/${eventId}`;
+const tabClass = (on: boolean) =>
+  `inline-flex min-h-11 items-center border-b-2 px-3 text-sm font-semibold ${on ? 'border-primary text-ink' : 'border-transparent text-ink-muted hover:text-ink'}`;
+---
+<nav class="mt-6 flex flex-wrap gap-1 border-b border-border" aria-label={t(lang, 'admin.reg.lx.tabsLabel')} data-testid="logistics-tabs">
+  <a href={base} class={tabClass(active === null)} aria-current={active === null ? 'page' : undefined}>{t(lang, 'admin.reg.lx.tabRegistrations')}</a>
+  {available.map((tab) => (
+    <a href={`${base}?tab=${tab}#logistics`} class={tabClass(active === tab)} aria-current={active === tab ? 'page' : undefined} data-tab={tab}>{t(lang, `admin.reg.lx.tab.${tab}`)}</a>
+  ))}
+</nav>

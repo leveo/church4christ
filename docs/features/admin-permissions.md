@@ -78,7 +78,8 @@ For a single event there is a smaller option that is not part of this checklist:
 event's page, a registration admin can give any member a role on just that event, as a
 **Viewer**, a **Check-in desk** volunteer, or a **Registrar**. The person does not need to be
 an admin and gets nothing else in the admin area. They reach only that event's page (with its
-exports, badges, and sign-in sheet) or its check-in desk, by a direct link. See
+exports, badges, sign-in sheet, and, when [Event logistics](event-logistics.md) is on, its room,
+table, and group prints) or its check-in desk, by a direct link. See
 [Registration](registration.md#access-to-one-event). Refunds still need the **Payment
 operations** grant.
 

@@ -1,0 +1,103 @@
+---
+// The "not placed yet" list of a logistics board: filters (name, tag, ticket type, an answer; their own query keys)
+// and one row per eligible person not yet in a room / at a table / in a group. For staff who may change things,
+// each row is a radio of the board's assign form (`formId`), so choosing a person and a target is two plain,
+// keyboard-reachable controls; a viewer gets the list only.
+import type { LogisticsBoard, LogisticsTab } from '../../../lib/regLogisticsPage';
+import { choiceQuestions, questionOptions } from '../../../lib/regLogisticsPage';
+import { tin, lab, btnSecondary } from '../../../lib/adminUi';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+import LxTagChips from './LxTagChips.astro';
+
+interface Props { board: LogisticsBoard; tab: LogisticsTab; lang: Locale; eventId: number; formId: string | null }
+const { board, tab, lang, eventId, formId } = Astro.props;
+const { state } = board;
+const tagMap = new Map(board.tags.map((tag) => [tag.id, tag]));
+const typeLabel = new Map(board.types.map((ty) => [ty.id, ty.label]));
+const questions = choiceQuestions(board.questions);
+const filtered = state.q !== '' || state.tag !== null || state.type !== null || state.qid !== null;
+const yes = t(lang, 'register.yes');
+const no = t(lang, 'register.no');
+---
+<section class="gathering-panel" aria-labelledby={`lx-waiting-${tab}`} data-testid="lx-waiting">
+  <h3 id={`lx-waiting-${tab}`} class="font-semibold">{t(lang, `admin.reg.lx.waiting.${tab}`)} <span class="text-sm font-normal text-ink-muted tabular-nums">({filtered ? `${board.waiting.length} / ${board.waitingTotal}` : board.waitingTotal})</span></h3>
+
+  <form method="get" class="mt-3 grid gap-2" role="search" data-testid="lx-filters">
+    <input type="hidden" name="tab" value={tab} />
+    <label class="block"><span class="sr-only">{t(lang, 'admin.reg.lx.search')}</span>
+      <input type="search" name="lq" value={state.q} placeholder={t(lang, 'admin.reg.lx.search')} class={tin} />
+    </label>
+    <div class="grid grid-cols-2 gap-2">
+      {board.tags.length > 0 && (
+        <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.tag')}</span>
+          <select name="ltag" class={tin}>
+            <option value="">{t(lang, 'admin.reg.lx.any')}</option>
+            {board.tags.map((tag) => <option value={tag.id} selected={state.tag === tag.id}>{tag.label}</option>)}
+          </select>
+        </label>
+      )}
+      {board.types.length > 0 && (
+        <label class="block"><span class={lab}>{t(lang, 'admin.reg.ticketType')}</span>
+          <select name="ltype" class={tin}>
+            <option value="">{t(lang, 'admin.reg.lx.any')}</option>
+            {board.types.map((ty) => <option value={ty.id} selected={state.type === ty.id}>{ty.label}</option>)}
+          </select>
+        </label>
+      )}
+    </div>
+    {questions.length > 0 && (
+      <label class="block"><span class={lab}>{t(lang, 'admin.reg.bo.answer')}</span>
+        <select name="lans" class={tin}>
+          <option value="">{t(lang, 'admin.reg.bo.answerAny')}</option>
+          {questions.map((q) => (
+            <optgroup label={q.label}>
+              {questionOptions(q, yes, no).map(([key, label]) => <option value={`${q.id}:${key}`} selected={state.qid === q.id && state.opt === key}>{label}</option>)}
+            </optgroup>
+          ))}
+        </select>
+      </label>
+    )}
+    <div class="flex flex-wrap gap-2">
+      <button type="submit" class={btnSecondary}>{t(lang, 'admin.reg.filter')}</button>
+      {filtered && <a href={`/admin/registration/${eventId}?tab=${tab}#logistics`} class={btnSecondary}>{t(lang, 'admin.reg.lx.clearFilters')}</a>}
+    </div>
+  </form>
+
+  {board.waiting.length === 0 ? (
+    <p class="mt-3 text-sm text-ink-muted" data-testid="lx-waiting-empty">{t(lang, filtered ? 'admin.reg.lx.noMatch' : 'admin.reg.lx.allPlaced')}</p>
+  ) : (
+    <fieldset class="mt-3">
+      <legend class="sr-only">{t(lang, 'admin.reg.lx.choosePerson')}</legend>
+      <ul class="max-h-[32rem] divide-y divide-border overflow-y-auto rounded-md border border-border">
+        {board.waiting.map((p) => {
+          const more = board.partyLeft.get(p.attendeeId) ?? 0;
+          const details = [
+            p.registrationName !== p.name ? t(lang, 'admin.reg.lx.partyOf', { name: p.registrationName }) : '',
+            p.ticketTypeId !== null ? (typeLabel.get(p.ticketTypeId) ?? '') : '',
+            more > 0 ? t(lang, 'admin.reg.lx.partyLeft', { n: more }) : '',
+          ].filter(Boolean);
+          const body = (
+            <>
+              <span class="font-medium">{p.name}</span>
+              {details.length > 0 && <span class="block text-xs text-ink-muted" data-party-left={more > 0 ? more : undefined}>{details.join(' · ')}</span>}
+              {p.tags.length > 0 && <span class="mt-1 flex flex-wrap gap-1"><LxTagChips ids={p.tags} tags={tagMap} /></span>}
+            </>
+          );
+          return (
+            <li data-person={p.attendeeId}>
+              {formId ? (
+                <label class="flex min-h-11 cursor-pointer items-start gap-3 px-3 py-2 text-sm hover:bg-surface-sunken">
+                  <input type="radio" name="attendee_id" value={p.attendeeId} form={formId} required class="mt-1" />
+                  <span class="min-w-0">{body}</span>
+                </label>
+              ) : (
+                <div class="px-3 py-2 text-sm">{body}</div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </fieldset>
+  )}
+</section>

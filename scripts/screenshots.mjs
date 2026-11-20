@@ -454,6 +454,18 @@ const LEGACY_CAPTURE_ROWS = [
   { path: '/admin/registration/931/badges', out: 'docs/images/registration/backoffice-badges.png', admin: true, backend: 'd1', expectedText: 'Youth Summer Camp', waitForSelector: '[data-badge]' },
   { path: '/admin/registration/931?people=sarah', out: 'docs/images/registration/backoffice-access.png', admin: true, backend: 'd1', anchorSelector: '#access', anchorMargin: 16, expectedText: 'Access to this event' },
   { path: '/admin/registration?edit=931', out: 'docs/images/registration/backoffice-settings.png', admin: true, backend: 'd1', anchorSelector: '[data-testid="back-office-settings"]', anchorMargin: 120, expectedText: 'Requires approval' },
+  // Event logistics (Phase 5). These rows need the optional event-logistics module on and a retreat on a throwaway
+  // persist dir, built by posting to the real endpoints: event 940 "Fall Family Retreat" with per-person Gender and
+  // Discussion language questions, fourteen families added by hand, Pine Lodge (dorm, bunk rooms 101-106 and
+  // single-gender 201-202) and Cedar Hall (hotel, A1-A6, A5-A6 not ready), a few parties housed, three tags, five
+  // tables and groups filled from the language question. The tables row previews auto-seat with a host rule.
+  { path: '/admin/registration/940?tab=housing', out: 'docs/images/registration/logistics-housing.png', admin: true, backend: 'd1', anchorSelector: '[data-testid="lx-waiting"]', anchorMargin: 24, expectedText: 'Pine Lodge' },
+  { path: '/admin/registration/940?tab=housing', out: 'docs/images/registration/logistics-housing-mobile.png', admin: true, backend: 'd1', viewport: MOBILE_VIEWPORT, anchorSelector: '[data-venue-board]', anchorMargin: 8, expectedText: 'Pine Lodge' },
+  { path: '/admin/registration/940?tab=tables', out: 'docs/images/registration/logistics-tables.png', admin: true, backend: 'd1', anchorSelector: '[data-testid="lx-seat-preview"]', anchorMargin: 16, expectedText: 'Apply this seating',
+    interact: [{ fill: { 'select[name="host_for"]': '1', 'select[name="host_tag"]': '3' } }, { submit: '[data-testid="lx-autoseat"] form' }, { wait: '[data-testid="lx-seat-preview"]' }] },
+  { path: '/admin/registration/940?tab=groups', out: 'docs/images/registration/logistics-groups.png', admin: true, backend: 'd1', anchorSelector: '[data-group]', anchorMargin: 120, expectedText: 'Meets on the porch after breakfast.' },
+  { path: '/admin/registration/940/door-signs', out: 'docs/images/registration/logistics-door-signs.png', admin: true, backend: 'd1', expectedText: 'Ana Lopez', waitForSelector: '[data-sign]' },
+  { path: '/admin/registration?edit=940', out: 'docs/images/registration/logistics-settings.png', admin: true, backend: 'd1', anchorSelector: '[data-testid="logistics-settings"]', anchorMargin: 120, expectedText: 'Question used for single-gender rooms' },
   { path: '/admin/registration', out: 'docs/images/registration/admin-templates.png', admin: true, backend: 'd1', anchorSelector: '#reg-templates', anchorMargin: 24, expectedText: 'Save as template' },
   // Page-builder registration block (Phase 3). Needs a page with the block on a throwaway database: save a page
   // (slug "gatherings") through the builder's JSON POST with three registration blocks in columns (events 920, 930,

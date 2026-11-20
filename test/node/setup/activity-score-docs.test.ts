@@ -47,7 +47,7 @@ describe('activity score documentation', () => {
     expect(release).toMatch(/files\s+.*0001.* through\s+.*0016/i);
     expect(changelog).toContain('0016_activity_score.sql');
     expect(readme).toMatch(/Activity score[^\n]*docs\/features\/activity-score\.md/i);
-    expect(modules).toMatch(/The 22 modules/);
+    expect(modules).toMatch(/The 23 modules/);
     expect(modules).toMatch(/Website \+ Community[^\n]*(?:\n[^\n]*)?18/);
     expect(readme).toMatch(/Full Church[^\n]*(?:\n[^\n]*)?21/);
   });

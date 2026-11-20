@@ -89,7 +89,7 @@ lossless switching guarantee.
 ## One database by default, a second one only if you need it
 
 Many churches can use **Cloudflare D1** — locally it needs no external account, and it runs
-all 21 D1-compatible modules. **Giving** and *paid* **Registration** require
+all 22 D1-compatible modules. **Giving** and *paid* **Registration** require
 Postgres, so selecting Giving chooses Supabase. Stripe integration
 (online Giving and paid Registration) starts in test mode; live payments are an explicit
 opt-in after a go-live checklist. The offline/manual giving ledger and free Registration

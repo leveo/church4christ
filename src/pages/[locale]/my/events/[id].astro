@@ -15,6 +15,7 @@ import { buildRegistrationView, performManageAction } from '../../../../lib/regM
 import { notifyAfterRelease, type RegNotifyEnv } from '../../../../lib/regNotify';
 import { bagFirst, bagFromFormData } from '../../../../lib/regPublic';
 import { renderRegistrationView, VIEW_LABEL_KEYS, type ViewError } from '../../../../lib/regViewHtml';
+import { logisticsModuleEnabled } from '../../../../lib/modules';
 
 const locale = parseLocale(Astro.params.locale ?? '');
 const id = Number(Astro.params.id);
@@ -30,6 +31,8 @@ if (!ref) {
   return Astro.rewrite('/404');
 }
 const here = localePath(locale, `/my/events/${id}`);
+// Room / table / group show only with the event-logistics module on (and the event's own switch).
+const viewOpts = { logistics: logisticsModuleEnabled(Astro.locals.modules) };
 
 let errors: ViewError[] = [];
 let typed: Record<string, string[]> | undefined;
@@ -52,7 +55,7 @@ if (Astro.request.method === 'POST') {
     : action === 'ics' ? ({ action: 'ics', host: Astro.url.host } as const)
     : null;
   if (request) {
-    const outcome = await performManageAction(db, ref, locale, request, notify);
+    const outcome = await performManageAction(db, ref, locale, request, notify, undefined, viewOpts);
     if (outcome.kind === 'ics') {
       return new Response(outcome.content, {
         headers: {
@@ -75,7 +78,7 @@ if (Astro.request.method === 'POST') {
     }
   }
 }
-view ??= await buildRegistrationView(db, id, locale);
+view ??= await buildRegistrationView(db, id, locale, undefined, undefined, viewOpts);
 if (!view) {
   Astro.response.status = 404;
   return Astro.rewrite('/404');

@@ -28,7 +28,7 @@ ones you do not need and click **Save modules** — the change takes effect imme
 
 ![The Modules panel in Settings](../images/admin/settings-modules.png)
 
-**The 22 modules:**
+**The 23 modules:**
 
 <!-- capabilities:start -->
 | Key | English | 中文 | Required database |
@@ -55,6 +55,7 @@ ones you do not need and click **Save modules** — the change takes effect imme
 | `registration` | Registration | 活动报名 | Either |
 | `learning` | Learning | 学习 | Either |
 | `planning` | Service Planning | 服事流程 | Either |
+| `event-logistics` | Event Logistics | 活动后勤 | Either |
 <!-- capabilities:end -->
 
 The `learning` module depends on `people`, works on either database, and is enabled by the
@@ -63,6 +64,12 @@ Learning. Enabling the checkbox only opens the feature boundary: an operator mus
 the credential key ring, authorize Google Classroom or Canvas, map courses, and verify sync.
 For the `learning` provider/privacy boundary and screenshots, see **[Learning](learning.md)** and
 the [deployment runbook](../deploy.md#learning-module-and-shared-credential-key-ring).
+
+The `event-logistics` module adds rooms, tables, and small groups to Registration events. It
+depends on `registration`, works on either database, and is off by default: no preset includes
+it, and upgraded sites keep it off until an admin ticks it. It works only while Registration is
+on too.
+Each event then turns on the parts it needs. See **[Event logistics](event-logistics.md)**.
 
 **Giving needs the Supabase database, and so does paid Registration.** Giving runs
 only on the optional **Supabase** backend (see
@@ -103,8 +110,8 @@ never get a link to a page that no longer exists:
   **Children off** and Attendance hides its check-in link editor, while historical aggregate
   reports and CSV remain readable. See [Service attendance](service-attendance.md).
 
-The Full Church preset enables 21 modules (every module except Service Planning, which you
-switch on separately in **Settings → Modules**); Website enables 8; Website + Community
+The Full Church preset enables 21 modules (every module except Service Planning and Event
+Logistics, which you switch on separately in **Settings → Modules**); Website enables 8; Website + Community
 enables 18 of the 19 modules that are compatible with D1 (Member Portal is selected separately). Custom setup can select individual
 modules.
 

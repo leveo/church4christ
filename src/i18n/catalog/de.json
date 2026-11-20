@@ -87,6 +87,10 @@
     "planning": {
       "label": "Gottesdienstplanung",
       "description": "Ablaufpläne, Proben, Verfügbarkeit und Kalender für Gottesdienste und Veranstaltungen planen."
+    },
+    "event-logistics": {
+      "label": "Veranstaltungslogistik",
+      "description": "Unterkunft, Sitzplätze und Kleingruppen für die Angemeldeten einer Veranstaltung einteilen."
     }
   },
   "presets": {

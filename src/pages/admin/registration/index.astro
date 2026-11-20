@@ -23,6 +23,10 @@ import { hasAreaAccess } from '../../../lib/adminAreas';
 import { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES } from '../../../lib/upload';
 import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
 import { mediaPath } from '../../../lib/mediaRef';
+import { logisticsModuleEnabled } from '../../../lib/modules';
+import { getLogisticsSettings, saveLogisticsSettings } from '../../../lib/regLogistics';
+import { logisticsSettingsFromForm, personChoiceQuestions } from '../../../lib/regLogisticsPage';
+import { listQuestions } from '../../../lib/regDb';
 
 const user = Astro.locals.user;
 if (!user || !(user.isEditor || hasAreaAccess(user, 'registration'))) return new Response(null, { status: 403 });
@@ -34,6 +38,8 @@ let fd: FormData | null = null;
 let failedId: string | null = null; // id whose form failed ('' = the create form)
 let badRequest = false; // unparseable POST body -> generic localized banner, not a 500
 const isD1 = Astro.locals.dbBackend === 'd1';
+// The Logistics section (housing, tables, groups) shows only with the event-logistics module on.
+const logisticsOn = logisticsModuleEnabled(Astro.locals.modules);
 
 if (Astro.request.method === 'POST') {
   // Reject a clearly oversized poster before buffering it (the form then re-renders blank).
@@ -81,8 +87,11 @@ if (Astro.request.method === 'POST') {
       }
       if (!errors.poster) {
         const result = await saveEventFromForm(db, Astro.locals.dbBackend, fd, { id, ...(poster !== undefined ? { poster } : {}) });
-        if (result.ok) return Astro.redirect('/admin/registration?saved=1', 303);
-        errors = result.errors;
+        // The logistics switches of an existing event, only when its section was on the form.
+        const lxInput = logisticsOn && id !== null ? logisticsSettingsFromForm(fd) : null;
+        const lxSaved = result.ok && lxInput ? await saveLogisticsSettings(db, id!, lxInput) : null;
+        if (result.ok && (!lxSaved || lxSaved.ok)) return Astro.redirect('/admin/registration?saved=1', 303);
+        errors = result.ok ? { gender_question_id: 'admin.reg.lx.e.genderQuestion' } : result.errors;
       }
       failedId = id === null ? '' : String(id);
     }
@@ -167,6 +176,17 @@ const posterSrc = mediaPath(v.poster);
 // and the form says why. The writer enforces the same rule.
 const pricedTickets = editingRow ? await eventHasPricedTicket(db, editingRow.id) : false;
 const approvalBlocked = (editingRow?.price_cents ?? 0) > 0 || pricedTickets;
+
+// Logistics settings of the event being edited (saved values, or what was posted when the save bounced).
+const lxStored = logisticsOn && editingRow ? await getLogisticsSettings(db, editingRow.id) : null;
+const lxGenderQuestions = lxStored && editingRow ? personChoiceQuestions(await listQuestions(db, lang, editingRow.id), false) : [];
+const lxPosted = echoing && fd ? logisticsSettingsFromForm(fd) : null;
+const lx = lxStored
+  ? {
+      housing: lxPosted?.housing ?? lxStored.housing, seating: lxPosted?.seating ?? lxStored.seating, groups: lxPosted?.groups ?? lxStored.groups,
+      show: lxPosted?.showAssignments ?? lxStored.showAssignments, gender: lxPosted ? lxPosted.genderQuestionId : lxStored.genderQuestionId,
+    }
+  : null;
 
 const hasErrors = Object.keys(errors).length > 0;
 const heading = t(lang, 'admin.reg.title');
@@ -430,6 +450,31 @@ const actionBtn =
           {errors.reminder_days && <span class={errorText}>{t(lang, errors.reminder_days)}</span>}
         </label>
       </div>
+      {lx && (
+        <fieldset class="space-y-2 rounded-lg border border-border p-4" data-testid="logistics-settings">
+          <legend class="px-1 text-sm font-semibold">{t(lang, 'admin.reg.lx.settings')}</legend>
+          <input type="hidden" name="logistics_section" value="1" />
+          <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.lx.settingsHint')}</p>
+          <div class="grid gap-x-4 sm:grid-cols-2">
+            {([['housing_enabled', lx.housing, 'admin.reg.lx.settingHousing'], ['seating_enabled', lx.seating, 'admin.reg.lx.settingTables'], ['groups_enabled', lx.groups, 'admin.reg.lx.settingGroups'], ['show_assignments', lx.show, 'admin.reg.lx.settingShow']] as const).map(([name, on, key]) => (
+              <label class="flex min-h-11 items-center gap-2 text-sm">
+                <input type="hidden" name={name} value="0" />
+                <input type="checkbox" name={name} value="1" checked={on} data-testid={name} /> {t(lang, key)}
+              </label>
+            ))}
+          </div>
+          <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.lx.settingShowHint')}</p>
+          <label class="block sm:max-w-sm">
+            <span class={lab}>{t(lang, 'admin.reg.lx.genderQuestion')}</span>
+            <select name="gender_question_id" class={tin} data-testid="gender-question">
+              <option value="">{t(lang, 'admin.reg.lx.genderQuestionNone')}</option>
+              {lxGenderQuestions.map((q) => <option value={q.id} selected={lx.gender === q.id}>{q.label}</option>)}
+            </select>
+            <span class="text-xs text-ink-subtle">{t(lang, lxGenderQuestions.length > 0 ? 'admin.reg.lx.genderQuestionHint' : 'admin.reg.lx.genderQuestionEmpty')}</span>
+            {errors.gender_question_id && <span class={errorText}>{t(lang, errors.gender_question_id)}</span>}
+          </label>
+        </fieldset>
+      )}
       <div><LocaleFields name="notes" label={t(lang, 'admin.reg.notes')} values={noteValues} lang={lang} multiline rows={3} /></div>
       <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.notesHint')}</p>
       <div class="block">

@@ -136,6 +136,11 @@ const ADMIN_CONSOLE = [
 //   /admin/registration/<id>/export-people.csv  view  roster CSV (one row per person)
 //   /admin/registration/<id>/badges          view     printable badges
 //   /admin/registration/<id>/sign-in-sheet   view     printable sign-in sheet
+//   /admin/registration/<id>/room-list       view     event logistics prints (each also needs the module and the
+//   /admin/registration/<id>/door-signs      view       event's area switch, else 404: regLogisticsPrint.ts)
+//   /admin/registration/<id>/table-list      view
+//   /admin/registration/<id>/table-cards     view
+//   /admin/registration/<id>/group-list      view
 // Extend this table, never the class, when a new per-event page is added.
 const REG_EVENT_STAFF_PATHS: ReadonlyArray<{ re: RegExp; need: 'view' | 'checkin' }> = [
   { re: /^\/admin\/registration\/(\d+)$/, need: 'view' },
@@ -144,6 +149,11 @@ const REG_EVENT_STAFF_PATHS: ReadonlyArray<{ re: RegExp; need: 'view' | 'checkin
   { re: /^\/admin\/registration\/(\d+)\/export-people\.csv$/, need: 'view' },
   { re: /^\/admin\/registration\/(\d+)\/badges$/, need: 'view' },
   { re: /^\/admin\/registration\/(\d+)\/sign-in-sheet$/, need: 'view' },
+  { re: /^\/admin\/registration\/(\d+)\/room-list$/, need: 'view' },
+  { re: /^\/admin\/registration\/(\d+)\/door-signs$/, need: 'view' },
+  { re: /^\/admin\/registration\/(\d+)\/table-list$/, need: 'view' },
+  { re: /^\/admin\/registration\/(\d+)\/table-cards$/, need: 'view' },
+  { re: /^\/admin\/registration\/(\d+)\/group-list$/, need: 'view' },
 ];
 
 /** The event and capability a per-event registration page needs (locale-stripped, one trailing slash tolerated), or null. */

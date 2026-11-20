@@ -21,7 +21,8 @@
     "giving": { "label": "Donaciones", "description": "Registra donaciones y, opcionalmente, acepta pagos con Stripe." },
     "registration": { "label": "Inscripciones", "description": "Gestiona inscripciones a eventos gratuitas o de pago." },
     "learning": { "label": "Aprendizaje", "description": "Continúa los cursos del ministerio más allá del horario de clase." },
-    "planning": { "label": "Planificación de cultos", "description": "Planifica guiones, ensayos, disponibilidad y calendarios de cultos y eventos." }
+    "planning": { "label": "Planificación de cultos", "description": "Planifica guiones, ensayos, disponibilidad y calendarios de cultos y eventos." },
+    "event-logistics": { "label": "Logística de eventos", "description": "Asigna alojamiento, mesas y grupos pequeños a las personas inscritas en un evento." }
   },
   "presets": {
     "website": { "label": "Sitio web", "description": "Un sitio web público enfocado y herramientas de publicación." },
