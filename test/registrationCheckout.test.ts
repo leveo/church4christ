@@ -574,3 +574,54 @@ describe('registration submit: a party, validation and household links', () => {
     }));
   });
 });
+
+describe('registration submit: ticket types, per-person questions and terms', () => {
+  const user = { id: 9, displayName: 'Ada Lovelace', email: 'ada@example.com' };
+  const base = { sort: 0, required: 0, options: null, label: '', condition: null, max_length: null, help: null, placeholder: null, option_labels: {} };
+  const questions = [
+    { ...base, id: 1, type: 'yesno', scope: 'registration', label: 'Need childcare?' },
+    { ...base, id: 2, type: 'select', scope: 'attendee', options: ['vegan', 'plain'], required: 1, label: 'Meal' },
+    { ...base, id: 3, type: 'text', scope: 'attendee', condition: { q: 2, op: 'eq', value: 'vegan' }, label: 'Notes' },
+    { ...base, id: 4, type: 'terms', scope: 'registration', required: 1, label: 'Photo release' },
+  ];
+  const ticketTypes = [
+    { id: 7, sort: 0, price_cents: 0, capacity: null, active: 1, label: 'Adult', description: null, taken: 0, seats_left: null },
+    { id: 8, sort: 1, price_cents: 0, capacity: 1, active: 1, label: 'Child', description: null, taken: 0, seats_left: 1 },
+  ];
+  const typedDeps = () => deps({
+    getOpenEvent: vi.fn(async () => ({ ...event(null), max_party_size: 3 })),
+    listQuestions: vi.fn(async () => questions),
+    listTicketTypes: vi.fn(async () => ticketTypes),
+    createRegistration: vi.fn(async () => ({ id: 60, status: 'confirmed' as const, confirmationNo: 'R26-0060', manageToken: 'M'.repeat(43) })),
+    sendConfirmation: vi.fn(async () => true),
+  });
+  const run = (dependencies: ReturnType<typeof deps>, data: FormData) =>
+    createRegistrationSubmitHandler(dependencies as never)(context(data, user));
+  const good = { ticket_0: '7', pq_0_2: 'vegan', pq_0_3: 'no nuts', '4': 'on' };
+
+  it('writes each person\'s ticket type and answers, drops a hidden answer, and stores terms as plain acceptance', async () => {
+    const dependencies = typedDeps();
+    const response = await run(dependencies, form({ ...good, person_name_1: 'Mia', ticket_1: '8', pq_1_2: 'plain', pq_1_3: 'hidden by Meal = plain', '1': 'yes' }));
+    expect(response.status).toBe(303);
+    const written = (dependencies.createRegistration.mock.calls as unknown as Array<[unknown, { attendees: unknown[]; answers: Array<[number, string]> }]>)[0][1];
+    expect(written.attendees).toEqual([
+      { name: 'Ada Lovelace', personId: 9, ticketTypeId: 7, answers: [[2, 'vegan'], [3, 'no nuts']] },
+      { name: 'Mia', personId: null, ticketTypeId: 8, answers: [[2, 'plain']] },
+    ]);
+    expect(written.answers).toEqual([[1, 'yes'], [4, '@accepted']]);
+  });
+
+  it('bounces a form where a person has no ticket type, a client-sent terms timestamp, or a type from elsewhere (307, nothing written)', async () => {
+    for (const bad of [
+      { ...good, ticket_0: '' },
+      { ...good, person_name_1: 'Mia', pq_1_2: 'plain' },
+      { ...good, '4': '2026-01-01 10:00:00' },
+      { ...good, ticket_0: '999' },
+    ]) {
+      const dependencies = typedDeps();
+      const response = await run(dependencies, form(bad));
+      expect(response.status).toBe(307);
+      expect(dependencies.createRegistration).not.toHaveBeenCalled();
+    }
+  });
+});

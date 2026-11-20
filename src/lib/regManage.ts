@@ -13,7 +13,9 @@ import { toUtcSql } from './dates';
 import { getRuntimeDefaultLocale } from './locales';
 import { getLiveHouseholdForPerson } from './householdDb';
 import {
+  answerDisplayText,
   cancelRegistrationPromoting,
+  decodeChoices,
   checkAnswer,
   CONTROL_RE,
   EMAIL_RE,
@@ -24,7 +26,6 @@ import {
   MAX_ANSWER_LENGTH,
   MAX_EMAIL_LENGTH,
   MAX_PHONE_LENGTH,
-  optionLabel,
   PHONE_RE,
   promoteWaitlist,
   storedAnswerSql,
@@ -460,7 +461,7 @@ export async function registrationSummary(
     for (const q of definitions) {
       if (q.scope !== scope || q.type === 'section') continue;
       const raw = byQuestion.get(q.id);
-      if (raw !== undefined) out.push({ question_id: q.id, label: q.label, value: answerDisplay(q, raw) });
+      if (raw !== undefined) out.push({ question_id: q.id, label: q.label, value: answerDisplayText(q, raw) });
     }
     return out;
   };
@@ -504,23 +505,6 @@ export async function registrationSummary(
     answers: display(stored.results, 'registration'),
     ...selfServiceFlags(event, row.status),
   };
-}
-
-function decodeChoices(raw: string): string[] {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.every((v) => typeof v === 'string')) return parsed;
-  } catch {
-    // fall through: show the stored text
-  }
-  return [raw];
-}
-
-/** The display text of one stored answer: option labels for select / checkbox (a key without a label shows as itself). */
-function answerDisplay(question: RegQuestion, raw: string): string {
-  if (question.type === 'checkbox') return decodeChoices(raw).map((key) => optionLabel(question, key)).join(', ');
-  if (question.type === 'select') return optionLabel(question, raw);
-  return raw;
 }
 
 // ── Self-service writes ─────────────────────────────────────────────────────

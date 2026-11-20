@@ -21,12 +21,14 @@ import {
   listPublicEvents,
   listQuestions,
   listQuestionsAdmin,
+  listRegistrations,
   listRegistrationsForPerson,
   listTemplatesAdmin,
   listTicketTypes,
   listTicketTypesAdmin,
   promoteWaitlist,
   registrationPricing,
+  registrationsCsv,
   saveAsTemplate,
   saveEvent,
   saveEventForm,
@@ -837,6 +839,63 @@ export function defineRegBuilderCases(label: string, getDb: () => AppDb, backend
         expect(bad).toEqual({ ok: false, errors: [{ path: `attendees.0.q.${by('Unwell?').id}`, code: 'bad_answer' }] });
         // an attendee that is not on this registration is refused
         expect(await updateRegistrationSelf(getDb(), r.id, { attendees: [{ id: 99999999, answers: {} }] })).toEqual({ ok: false, errors: [{ path: 'attendees.0.id', code: 'not_found' }] });
+      });
+    });
+
+    // ── Roster and CSV ─────────────────────────────────────────────────────────
+    describe('roster and CSV with ticket types and per-person answers', () => {
+      const stamp = (line: string) => line.replace(/,\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},/, ',TS,');
+      const setup = async () => {
+        const id = await newEvent({ confirmation_prefix: 'RC' });
+        await mustSave(id, {
+          questions: [
+            { type: 'select', labels: { en: 'Diet', zh: '饮食' }, options: [{ key: 'veg', labels: { en: 'Vegetarian', zh: '素食' } }, { key: 'meat', labels: { en: 'Anything' } }] },
+            { type: 'section', labels: { en: 'About each person' } },
+            { type: 'text', scope: 'attendee', labels: { en: 'Nickname' } },
+            { type: 'select', scope: 'attendee', labels: { en: 'Shirt' }, options: [{ key: 's', labels: { en: 'Small', zh: '小' } }, { key: 'l', labels: { en: 'Large' } }] },
+            { type: 'checkbox', labels: { en: 'Allergies' }, options: [{ key: 'nuts', labels: { en: 'Nuts' } }, { key: 'dairy', labels: { en: 'Dairy' } }] },
+          ],
+          tickets: [{ ...adults }, { ...kids }],
+        });
+        const qs = await listQuestions(getDb(), 'en', id);
+        const q = (label: string) => qs.find((x) => x.label === label)!;
+        const [adult, child] = await ticketIds(id);
+        return { id, q, adult, child };
+      };
+
+      it('shows each person with their ticket type and answers, and option keys as labels in the admin language', async () => {
+        const { id, q, adult, child } = await setup();
+        await register(id, [
+          { name: 'Ada', ticketTypeId: adult, answers: [[q('Nickname').id, 'AL'], [q('Shirt').id, 's']] },
+          { name: 'Mia', ticketTypeId: child, answers: [[q('Shirt').id, 'l']] },
+        ], { answers: [[q('Diet').id, 'veg'], [q('Allergies').id, JSON.stringify(['nuts', 'dairy'])]] });
+        const [row] = await listRegistrations(getDb(), 'zh', id);
+        expect(row.answers).toEqual([{ label: '饮食', value: '素食' }, { label: 'Allergies', value: 'Nuts, Dairy' }]);
+        expect(row.people).toEqual(['Ada', 'Mia']);
+        expect(row.attendees.map((a) => [a.name, a.ticket, a.answers.map((x) => `${x.label}=${x.value}`)])).toEqual([
+          ['Ada', '成人', ['Nickname=AL', 'Shirt=小']],
+          ['Mia', '儿童', ['Shirt=Large']],
+        ]);
+      });
+
+      it('appends Ticket types and one column per per-person question AFTER Phone, leaving the earlier columns alone', async () => {
+        const { id, q, adult, child } = await setup();
+        await register(id, [
+          { name: 'Ada', ticketTypeId: adult, answers: [[q('Nickname').id, 'AL'], [q('Shirt').id, 's']] },
+          { name: 'Mia', ticketTypeId: child, answers: [[q('Shirt').id, 'l']] },
+        ], { phone: '555 0100', answers: [[q('Diet').id, 'veg'], [q('Allergies').id, JSON.stringify(['nuts'])]] });
+        const lines = (await registrationsCsv(getDb(), 'en', id)).split('\r\n');
+        expect(lines[0]).toBe('Confirmation,Name,Email,Status,Party size,Amount,Registered,Diet,Allergies,People,Phone,Ticket types,Nickname,Shirt');
+        expect(stamp(lines[1])).toBe('RC-0001,Ada,ada@example.com,confirmed,2,0.00,TS,Vegetarian,Nuts,Ada; Mia,555 0100,Ada: Adult; Mia: Child,Ada: AL,Ada: Small; Mia: Large');
+      });
+
+      it('writes a person who gave no answer as nothing, and keeps the plain layout for an event with no ticket types or per-person questions', async () => {
+        const { id, adult } = await setup();
+        await register(id, [{ name: 'Ada', ticketTypeId: adult }]);
+        expect(stamp((await registrationsCsv(getDb(), 'en', id)).split('\r\n')[1])).toBe('RC-0001,Ada,ada@example.com,confirmed,1,0.00,TS,,,Ada,,Ada: Adult,,');
+        const plain = await newEvent();
+        await mustSave(plain, { questions: [{ type: 'text', labels: { en: 'Note' } }] });
+        expect((await registrationsCsv(getDb(), 'en', plain)).split('\r\n')[0]).toBe('Confirmation,Name,Email,Status,Party size,Amount,Registered,Note,People,Phone');
       });
     });
   });

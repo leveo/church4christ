@@ -5,8 +5,12 @@ import DateBadge from '../../../components/gatherings/DateBadge.astro';
 import { DESIGN_IMAGES } from '../../../lib/designAssets';
 
 // Public event registration page: event details + a form built dynamically from
-// the event's questions (text→input, textarea→textarea, select→select,
-// checkbox→checkbox group, yesno→two radios). A signed-in member's name/email are
+// the event's questions (text, long text, choice, checkboxes, yes/no, number, date,
+// email, phone, terms and section headings). Questions are asked once per registration
+// or once per person (inside each person's block, with a ticket type picker when the
+// event has ticket types); show-if conditions hide questions live through the shared
+// evaluator, and without JavaScript everything shows while the server ignores the
+// answers of hidden questions. A signed-in member's name/email are
 // prefilled read-only (the submit endpoint uses their session identity anyway); an
 // anonymous visitor fills both. By phase: preview shows the details and the opening
 // time (no form); open shows the form (a full free event with a waitlist says "Join
@@ -22,12 +26,14 @@ import Base from '../../../layouts/Base.astro';
 import { localePath, parseLocale } from '../../../lib/locales';
 import { t } from '../../../lib/i18n';
 import { formatDate, utcToDatetimeLocal } from '../../../lib/dates';
-import { getPublicEvent, listQuestions } from '../../../lib/regDb';
+import { answerDisplayText, getPublicEvent, listQuestions, listTicketTypes, registrationPricing } from '../../../lib/regDb';
 import { getLiveHouseholdForPerson } from '../../../lib/householdDb';
 import { restrictAttendeePersons, validateSubmission, type SubmissionError } from '../../../lib/regManage';
 import {
   bagFirst,
   bagFromFormData,
+  personAnswerField,
+  ticketField,
   echoIntentId,
   echoSubmissionKey,
   fieldIdForPath,
@@ -38,9 +44,8 @@ import {
   type FieldBag,
   type PartyFit,
 } from '../../../lib/regPublic';
-import { renderQuestionField, submissionErrorKey, type ViewQuestion } from '../../../lib/regViewHtml';
+import { jsonForScript, renderQuestionField, renderTicketPicker, submissionErrorKey, toConditionQuestions, toViewQuestion, type TicketChoice } from '../../../lib/regViewHtml';
 import { formatCents } from '../../../lib/money';
-import { offersWaitlist } from '../../../lib/regPhase';
 import { mediaPath } from '../../../lib/mediaRef';
 import { btn, btnSecondary, lab, tin, noticeErr, errorText, badge, badgeInactive } from '../../../lib/adminUi';
 import {
@@ -60,16 +65,20 @@ const eventId = Number(Astro.params.id);
 const event =
   Number.isInteger(eventId) && eventId > 0 ? await getPublicEvent(Astro.locals.db, locale, eventId) : null;
 const questions = event?.phase === 'open' ? await listQuestions(Astro.locals.db, locale, eventId) : [];
+// An event with active ticket types has every person pick one, and its price is the sum of their types'.
+const ticketTypes = event?.phase === 'open' ? await listTicketTypes(Astro.locals.db, locale, eventId, { activeOnly: true }) : [];
+const typed = ticketTypes.length > 0;
+const questionTypes = new Map(questions.map((q) => [q.id, q.type as string]));
 
 const user = Astro.locals.user;
 const errParam = Astro.url.searchParams.get('error');
-const paid = !!event && event.price_cents !== null && event.price_cents > 0;
+const paid = !!event && (typed ? ticketTypes.some((tt) => tt.price_cents > 0) : event.price_cents !== null && event.price_cents > 0);
 const requestedCheckoutId = errParam === 'waiting' ? Astro.url.searchParams.get('checkoutRequestId') : null;
 const ownsWaitingSeat = Number.isSafeInteger(eventId)
   && eventId > 0
   && isCheckoutRequestId(requestedCheckoutId)
   && await ownsRecoverableRegistrationCheckoutRequest(Astro.locals.db, requestedCheckoutId, eventId);
-const { checkoutRequestId: renderedCheckoutId, isFull } = registrationCheckoutRenderPolicy({
+const { checkoutRequestId: renderedCheckoutId, isFull: eventFull } = registrationCheckoutRenderPolicy({
   paid,
   capacity: event?.capacity ?? null,
   takenCount: event?.taken_count ?? 0,
@@ -87,7 +96,9 @@ const errorKey =
         : errParam === 'invalid' || errParam === 'waiting'
           ? 'register.error.invalid'
           : null;
-const waitlistOffered = !!event && isFull && offersWaitlist(event);
+// Every ticket type sold out is as full as a full event (a person cannot pick anything else).
+const isFull = eventFull || (!ownsWaitingSeat && typed && ticketTypes.every((tt) => tt.seats_left === 0));
+const waitlistOffered = !!event && isFull && !paid && event.waitlist_enabled === 1;
 const posterSrc = mediaPath(event?.poster);
 
 // ── Form state: first render, a review round trip, or a bounced submit ──────
@@ -108,59 +119,100 @@ const identityIntentId = echoIntentId(bagFirst(bag, 'identityIntentId'));
 const val = (name: string): string => bagFirst(bag, name);
 
 let errors: SubmissionError[] = [];
+type ReviewAnswer = { label: string; value: string };
 let review: {
-  people: Array<{ name: string }>;
-  answers: Array<{ label: string; value: string }>;
+  people: Array<{ name: string; ticket: string | null; answers: ReviewAnswer[] }>;
+  answers: ReviewAnswer[];
   fit: PartyFit;
+  paid: boolean;
+  total: string;
 } | null = null;
+// An answer as the review shows it: option labels, yes/no and "Accepted" in the page language, never a raw key.
+const reviewValue = (q: (typeof questions)[number], raw: string): string =>
+  q.type === 'yesno' ? t(locale, raw === 'yes' ? 'register.yes' : 'register.no')
+    : q.type === 'terms' ? t(locale, 'register.review.accepted')
+    : answerDisplayText(q, raw);
+const reviewAnswers = (pairs: Array<[number, string]>): ReviewAnswer[] => {
+  const given = new Map(pairs);
+  return questions.flatMap((q) => (given.has(q.id) ? [{ label: q.label, value: reviewValue(q, given.get(q.id)!) }] : []));
+};
 if (posted && event && postedStep !== 'edit') {
   const checked = validateSubmission(
     event,
     questions,
     submissionFromBag(bag, questions, maxParty, user ? { name: user.displayName, email: user.email } : undefined),
+    { ticketTypes },
   );
   if (!checked.ok) {
     errors = checked.errors;
   } else {
     const people = user ? await restrictAttendeePersons(Astro.locals.db, user.id, checked.value.attendees) : checked.value.attendees;
-    const fit = partyFit(event, people.length);
+    const pricing = registrationPricing(event, ticketTypes, people);
+    const fit = partyFit(event, people.length, typed ? { types: ticketTypes, picks: people.map((a) => a.ticketTypeId), free: pricing.amountCents === 0 } : {});
     if (fit === 'no_room') {
       errors = [{ path: 'attendees', code: 'no_room' }];
     } else {
-      const stored = new Map(checked.value.answers);
+      const typeById = new Map(ticketTypes.map((tt) => [tt.id, tt]));
+      const reviewPaid = typed ? pricing.amountCents > 0 : paid;
       review = {
-        people: people.map((a) => ({ name: a.name })),
-        fit,
-        answers: questions.flatMap((q) => {
-          const raw = stored.get(q.id);
-          if (raw === undefined) return [];
-          const shown = q.type === 'checkbox' ? (JSON.parse(raw) as string[]).join(', ') : q.type === 'yesno' ? t(locale, raw === 'yes' ? 'register.yes' : 'register.no') : raw;
-          return [{ label: q.label, value: shown }];
+        people: people.map((a) => {
+          const type = a.ticketTypeId === null ? undefined : typeById.get(a.ticketTypeId);
+          return {
+            name: a.name,
+            ticket: type ? (type.price_cents > 0 ? `${type.label} · ${formatCents(type.price_cents, event.currency, locale)}` : type.label) : null,
+            answers: reviewAnswers(a.answers),
+          };
         }),
+        fit,
+        paid: reviewPaid,
+        total: reviewPaid ? formatCents(typed ? pricing.amountCents : event.price_cents! * people.length, event.currency, locale) : '',
+        // Registration-level answers only: hidden questions never reach checked.value.
+        answers: reviewAnswers(checked.value.answers),
       };
     }
   }
 }
 const errorFor = (path: string): string | undefined => {
   const hit = errors.find((e) => e.path === path);
-  return hit ? t(locale, submissionErrorKey(hit)) : undefined;
+  return hit ? t(locale, submissionErrorKey(hit, questionTypes)) : undefined;
 };
 const invalid = (path: string, id: string) => (errorFor(path) ? { 'aria-invalid': 'true' as const, 'aria-describedby': `${id}-err` } : {});
-const questionError = (id: number) => errorFor(`q.${id}`);
 
 const household = user && maxParty > 1 && event?.phase === 'open' ? await getLiveHouseholdForPerson(Astro.locals.db, user.id) : null;
 const householdChips = (household?.members ?? []).filter((m) => m.person_id !== user?.id);
-const left = event ? seatsLeft(event) : null;
+const left = event ? seatsLeft(event, typed ? ticketTypes : []) : null;
 const pageAction = event ? `/${locale}/register/${event.id}` : '';
 const submitAction = user ? '/api/register/submit' : '/api/identity/continuation/start';
-const questionViews: ViewQuestion[] = questions.filter((q) => q.scope === 'registration' && q.type !== 'section').map((q) => ({
-  id: q.id,
-  label: q.label,
-  type: q.type,
-  required: q.required === 1,
-  options: q.options ?? [],
-  value: bag[String(q.id)] ?? [],
-}));
+const personQuestions = questions.filter((q) => q.scope === 'attendee');
+const registrationQuestions = questions.filter((q) => q.scope === 'registration');
+const hasPersonExtras = typed || personQuestions.length > 0;
+// The page script needs the questions whenever something can show or hide (conditions) or switch on (people).
+const showIfJson = hasPersonExtras || questions.some((q) => q.condition) ? jsonForScript(toConditionQuestions(questions)) : null;
+const yesNo = { yes: t(locale, 'register.yes'), no: t(locale, 'register.no'), helpLabel: t(locale, 'register.help.label') };
+// A group that cannot wait goes elsewhere when a type is sold out; one that can waitlist is told it will.
+const canWaitlist = !paid && event?.waitlist_enabled === 1;
+const ticketChoices: TicketChoice[] = ticketTypes.map((tt) => {
+  const soldOut = tt.seats_left === 0;
+  return {
+    id: tt.id,
+    label: tt.label,
+    description: tt.description,
+    priceText: tt.price_cents > 0 ? formatCents(tt.price_cents, event!.currency, locale) : t(locale, 'register.free'),
+    leftText: tt.seats_left !== null && tt.seats_left > 0 ? t(locale, 'register.ticket.left', { count: tt.seats_left }) : null,
+    disabled: soldOut && !canWaitlist,
+    note: soldOut ? t(locale, canWaitlist ? 'register.ticket.soldOutWaitlist' : 'register.ticket.soldOut') : null,
+  };
+});
+// One person's ticket picker and per-person questions. Only person 1 is asked natively (`required`): the other rows
+// are optional until the script reveals them, and a conditional question's star is the script's to switch on.
+const personExtras = (row: number): string => [
+  typed
+    ? renderTicketPicker({ name: ticketField(row), id: `f-ticket-${row}`, legend: t(locale, 'register.ticket.type'), choices: ticketChoices, value: val(ticketField(row)), error: errorFor(`attendees.${row}.ticket`), nativeRequired: row === 0 })
+    : '',
+  ...personQuestions.map((q) => renderQuestionField(toViewQuestion(q, bag[personAnswerField(row, q.id)] ?? []), {
+    name: personAnswerField(row, q.id), id: `f-pq-${row}-${q.id}`, error: errorFor(`attendees.${row}.q.${q.id}`), ...yesNo, nativeRequired: row === 0 && !q.condition,
+  })),
+].join('');
 
 // Every field a review round trip must carry, once, for both the Back and Confirm forms.
 const hiddenFields: Array<[string, string]> = event
@@ -179,13 +231,16 @@ const hiddenFields: Array<[string, string]> = event
         [`person_name_${i}`, val(`person_name_${i}`)],
         [`person_id_${i}`, val(`person_id_${i}`)],
       ]),
-      ...questions.flatMap((q): Array<[string, string]> => (bag[String(q.id)] ?? []).map((v) => [String(q.id), v])),
+      ...registrationQuestions.flatMap((q): Array<[string, string]> => (bag[String(q.id)] ?? []).map((v) => [String(q.id), v])),
+      // Each person's ticket type and per-person answers ride along too (hidden questions are dropped again on confirm).
+      ...Object.entries(bag).flatMap(([name, values]): Array<[string, string]> => {
+        const row = /^(?:ticket|pq)_(\d+)(?:_\d+)?$/.exec(name);
+        return row && Number(row[1]) < maxParty ? values.map((v): [string, string] => [name, v]) : [];
+      }),
     ]
   : [];
 const reviewing = review !== null;
 const stepIndex = !event || event.phase !== 'open' || (isFull && !waitlistOffered) ? 0 : reviewing ? 2 : 1;
-const reviewTotal = event && paid && review ? formatCents(event.price_cents! * review.people.length, event.currency, locale) : '';
-
 const priceLabel = paid ? `$${(event!.price_cents! / 100).toFixed(2)}` : t(locale, 'register.free');
 // Event times are stored in UTC; people read them in the church's time zone (as the emails and the manage page do).
 const stamp = (utc: string) => {
@@ -231,9 +286,11 @@ const when = event ? stamp(event.starts_at) : '';
         <h1 class="mt-3 font-display text-heading-md font-bold">{event.title}</h1>
         <div class="mt-5 flex items-center gap-4"><DateBadge date={utcToDatetimeLocal(event.starts_at)} locale={locale} /><p class="text-sm text-ink-muted">{when}</p></div>
         {event.location && <p class="text-sm text-ink-muted">{event.location}</p>}
-        <p class="mt-2 text-sm">
-          <span class="font-semibold">{t(locale, 'register.price')}:</span> {priceLabel}
-        </p>
+        {!typed && (
+          <p class="mt-2 text-sm">
+            <span class="font-semibold">{t(locale, 'register.price')}:</span> {priceLabel}
+          </p>
+        )}
         {event.description && <p class="mt-5 whitespace-pre-line text-sm leading-relaxed text-ink-muted">{event.description}</p>}
         {event.notes && <div class="mt-5"><h2 class="text-sm font-semibold">{t(locale, 'register.manage.notes')}</h2><p class="mt-1 whitespace-pre-line text-sm leading-relaxed text-ink-muted">{event.notes}</p></div>}
       </section>
@@ -265,15 +322,21 @@ const when = event ? stamp(event.starts_at) : '';
             {review.fit === 'waitlist' && <p class="gathering-registration-note" data-waitlist-party>{t(locale, 'register.review.waitlistParty')}</p>}
             <dl class="reg-facts">
               <div><dt>{t(locale, 'register.review.contact')}</dt><dd>{user ? user.displayName : val('name')}<br />{user ? user.email : val('email')}{val('phone') && <><br />{val('phone')}</>}</dd></div>
-              <div><dt>{t(locale, 'register.review.people')}</dt><dd><ol class="list-decimal pl-5">{review.people.map((p) => <li>{p.name}</li>)}</ol></dd></div>
+              <div><dt>{t(locale, 'register.review.people')}</dt><dd><ol class="list-decimal space-y-2 pl-5">{review.people.map((p) => (
+                <li data-review-person>
+                  <span class="font-semibold">{p.name}</span>{p.ticket && <span class="text-ink-muted" data-review-ticket> · {p.ticket}</span>}
+                  {p.answers.length > 0 && <dl class="reg-facts reg-person-answers mt-1">{p.answers.map((a) => <div><dt>{a.label}</dt><dd>{a.value}</dd></div>)}</dl>}
+                </li>
+              ))}</ol></dd></div>
               {review.answers.map((a) => <div><dt>{a.label}</dt><dd>{a.value}</dd></div>)}
-              {paid && <div><dt>{t(locale, 'register.price')}</dt><dd>{t(locale, 'register.review.price', { price: formatCents(event.price_cents!, event.currency, locale), count: review.people.length, total: reviewTotal })}</dd></div>}
+              {review.paid && !typed && <div><dt>{t(locale, 'register.price')}</dt><dd>{t(locale, 'register.review.price', { price: formatCents(event.price_cents!, event.currency, locale), count: review.people.length, total: review.total })}</dd></div>}
+              {review.paid && typed && <div><dt>{t(locale, 'register.review.total')}</dt><dd data-review-total>{review.total}</dd></div>}
             </dl>
             <div class="flex flex-wrap gap-3">
               <form method="post" action={submitAction}>
                 {hiddenFields.map(([n, v]) => <input type="hidden" name={n} value={v} />)}
                 <input type="hidden" name="step" value="confirm" />
-                <button type="submit" class={btn}>{t(locale, paid ? 'register.submit.paid' : review.fit === 'waitlist' ? 'register.joinWaitlist' : 'register.submit.free')}</button>
+                <button type="submit" class={btn}>{t(locale, review.paid ? 'register.submit.paid' : review.fit === 'waitlist' ? 'register.joinWaitlist' : 'register.submit.free')}</button>
               </form>
               <form method="post" action={pageAction}>
                 {hiddenFields.map(([n, v]) => <input type="hidden" name={n} value={v} />)}
@@ -332,7 +395,10 @@ const when = event ? stamp(event.starts_at) : '';
                   <p class="text-sm font-semibold text-warn" data-seats-left>{left === 1 ? t(locale, 'register.seats.one') : t(locale, 'register.seats.only', { count: left })} {waitlistOffered || (event.price_cents === null && event.waitlist_enabled === 1) ? t(locale, 'register.seats.largerWaitlist') : ''}</p>
                 )}
                 {errorFor('attendees') && <p id="f-party-err" class={errorText}>{errorFor('attendees')}</p>}
-                <p class="reg-person-you">{t(locale, 'register.party.you')}</p>
+                <div class="reg-person-block" data-person-block>
+                  <p class="reg-person-you">{t(locale, 'register.party.you')}</p>
+                  {hasPersonExtras && <div class="reg-person-extra space-y-4" data-person-extra><Fragment set:html={personExtras(0)} /></div>}
+                </div>
                 {householdChips.length > 0 && (
                   <div data-household hidden>
                     <p class="text-sm text-ink-muted">{t(locale, 'register.party.household')}</p>
@@ -344,23 +410,30 @@ const when = event ? stamp(event.starts_at) : '';
                   </div>
                 )}
                 {Array.from({ length: maxParty - 1 }, (_, k) => k + 1).map((i) => (
-                  <div class="reg-person-row" data-person-row>
-                    <label class="block min-w-0 flex-1">
-                      <span class={lab}>{t(locale, 'register.party.person', { n: i + 1 })}</span>
-                      <input id={`f-person-${i}`} name={`person_name_${i}`} maxlength="120" class={tin} value={val(`person_name_${i}`)} autocomplete="off" {...invalid(`attendees.${i}.name`, `f-person-${i}`)} />
-                      {errorFor(`attendees.${i}.name`) && <p id={`f-person-${i}-err`} class={errorText}>{errorFor(`attendees.${i}.name`)}</p>}
-                    </label>
-                    <input type="hidden" name={`person_id_${i}`} value={val(`person_id_${i}`)} />
-                    <button type="button" class={`${btnSecondary} reg-remove`} data-remove-person hidden>{t(locale, 'register.party.remove')}</button>
+                  <div class="reg-person-block" data-person-row data-person-block>
+                    <div class="reg-person-row">
+                      <label class="block min-w-0 flex-1">
+                        <span class={lab}>{t(locale, 'register.party.person', { n: i + 1 })}</span>
+                        <input id={`f-person-${i}`} name={`person_name_${i}`} maxlength="120" class={tin} value={val(`person_name_${i}`)} autocomplete="off" {...invalid(`attendees.${i}.name`, `f-person-${i}`)} />
+                        {errorFor(`attendees.${i}.name`) && <p id={`f-person-${i}-err`} class={errorText}>{errorFor(`attendees.${i}.name`)}</p>}
+                      </label>
+                      <input type="hidden" name={`person_id_${i}`} value={val(`person_id_${i}`)} />
+                      <button type="button" class={`${btnSecondary} reg-remove`} data-remove-person hidden>{t(locale, 'register.party.remove')}</button>
+                    </div>
+                    {hasPersonExtras && <div class="reg-person-extra mt-3 space-y-4" data-person-extra><Fragment set:html={personExtras(i)} /></div>}
                   </div>
                 ))}
                 <button type="button" class={btnSecondary} data-add-person hidden>{t(locale, 'register.party.add')}</button>
               </fieldset>
             )}
+            {maxParty === 1 && hasPersonExtras && (
+              <div class="reg-person-block reg-person-solo space-y-4" data-person-block data-person-extra><Fragment set:html={personExtras(0)} /></div>
+            )}
 
-            {questionViews.map((q) => (
-              <Fragment set:html={renderQuestionField(q, { name: String(q.id), id: `f-q-${q.id}`, error: questionError(q.id), yes: t(locale, 'register.yes'), no: t(locale, 'register.no') })} />
+            {registrationQuestions.map((q) => (
+              <Fragment set:html={renderQuestionField(toViewQuestion(q, bag[String(q.id)] ?? []), { name: String(q.id), id: `f-q-${q.id}`, error: errorFor(`q.${q.id}`), ...yesNo, nativeRequired: !q.condition })} />
             ))}
+            {showIfJson && <script type="application/json" data-reg-conditions set:html={showIfJson} />}
 
             <button type="submit" class={btn}>{t(locale, 'register.review.next')}</button>
           </form>

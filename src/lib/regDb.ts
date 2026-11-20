@@ -57,6 +57,25 @@ export interface RegQuestion {
 /** The label to show for an option key. */
 export const optionLabel = (question: Pick<RegQuestion, 'option_labels'>, key: string): string => question.option_labels[key] ?? key;
 
+/** A stored checkbox answer (a JSON array of keys) as a list; anything else is the stored text itself. */
+export function decodeChoices(raw: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((v) => typeof v === 'string')) return parsed;
+  } catch {
+    // fall through: show the stored text
+  }
+  return [raw];
+}
+
+/** The display text of one stored answer: option labels for select / checkbox (a checkbox's choices joined by ", "; a key
+ *  without a label shows as itself), the stored text for everything else. */
+export function answerDisplayText(question: Pick<RegQuestion, 'type' | 'option_labels'>, raw: string): string {
+  if (question.type === 'checkbox') return decodeChoices(raw).map((key) => optionLabel(question, key)).join(', ');
+  if (question.type === 'select') return optionLabel(question, raw);
+  return raw;
+}
+
 export interface RegEvent {
   id: number;
   title: string;
@@ -2652,58 +2671,101 @@ const ROSTER_SELECT = `SELECT id, name, email, status, amount_cents, confirmatio
        FROM registrations WHERE event_id = ?1
        ORDER BY created_at DESC, id DESC`;
 
-/** The names of the people still on each of an event's registrations (registration id -> names in
- *  form order). Joined in code, not SQL, so the same statement serves D1 and Postgres. */
-async function activePeopleByRegistration(db: AppDb, eventId: number): Promise<Map<number, string[]>> {
+/** One person still on a registration, as the roster shows them: name, ticket type label (admin language; null without
+ *  a type) and their answers to the per-person questions (display text, question order). */
+export interface RosterAttendee {
+  name: string;
+  ticket: string | null;
+  answers: Array<{ questionId: number; label: string; value: string }>;
+}
+
+/** The people still on each of an event's registrations (registration id -> people in form order), with their
+ *  ticket type and per-person answers. Joined in code, not SQL, so the same statements serve D1 and Postgres. */
+async function activeAttendeesByRegistration(db: AppDb, locale: Locale, eventId: number, questions: RegQuestion[]): Promise<Map<number, RosterAttendee[]>> {
   const { results } = await db
     .prepare(
-      `SELECT a.registration_id AS registration_id, a.name AS name
+      `SELECT a.id AS id, a.registration_id AS registration_id, a.name AS name, a.ticket_type_id AS ticket_type_id
        FROM reg_attendees a
        JOIN registrations r ON r.id = a.registration_id
        WHERE r.event_id = ?1 AND a.status = 'active'
        ORDER BY a.registration_id, a.sort, a.id`,
     )
     .bind(eventId)
-    .all<{ registration_id: number; name: string }>();
-  const byReg = new Map<number, string[]>();
-  for (const row of results) (byReg.get(row.registration_id) ?? byReg.set(row.registration_id, []).get(row.registration_id)!).push(row.name);
+    .all<{ id: number; registration_id: number; name: string; ticket_type_id: number | null }>();
+  const { results: stored } = await db
+    .prepare(
+      `SELECT aa.attendee_id AS attendee_id, aa.question_id AS question_id, aa.value AS value
+       FROM reg_attendee_answers aa
+       JOIN reg_attendees a ON a.id = aa.attendee_id
+       JOIN registrations r ON r.id = a.registration_id
+       WHERE r.event_id = ?1`,
+    )
+    .bind(eventId)
+    .all<{ attendee_id: number; question_id: number; value: string }>();
+  const labels = new Map((await listTicketTypes(db, locale, eventId)).map((t) => [t.id, t.label]));
+  const answersOf = new Map<number, Map<number, string>>();
+  for (const row of stored) (answersOf.get(row.attendee_id) ?? answersOf.set(row.attendee_id, new Map()).get(row.attendee_id)!).set(row.question_id, row.value);
+  const personQuestions = questions.filter((q) => q.scope === 'attendee' && q.type !== 'section');
+  const byReg = new Map<number, RosterAttendee[]>();
+  for (const row of results) {
+    const mine = answersOf.get(row.id);
+    const list = byReg.get(row.registration_id) ?? byReg.set(row.registration_id, []).get(row.registration_id)!;
+    list.push({
+      name: row.name,
+      ticket: row.ticket_type_id === null ? null : (labels.get(row.ticket_type_id) ?? null),
+      answers: personQuestions.flatMap((q) => {
+        const raw = mine?.get(q.id);
+        return raw === undefined ? [] : [{ questionId: q.id, label: q.label, value: answerDisplayText(q, raw) }];
+      }),
+    });
+  }
+  return byReg;
+}
+
+/** The registration-level answers of an event's registrations (registration id -> question id -> stored value). */
+async function storedAnswersByRegistration(db: AppDb, eventId: number): Promise<Map<number, Map<number, string>>> {
+  const { results } = await db
+    .prepare(
+      `SELECT a.registration_id AS registration_id, a.question_id AS question_id, a.value AS value
+       FROM reg_answers a
+       JOIN registrations r ON r.id = a.registration_id
+       WHERE r.event_id = ?1`,
+    )
+    .bind(eventId)
+    .all<{ registration_id: number; question_id: number; value: string }>();
+  const byReg = new Map<number, Map<number, string>>();
+  for (const a of results) (byReg.get(a.registration_id) ?? byReg.set(a.registration_id, new Map()).get(a.registration_id)!).set(a.question_id, a.value);
   return byReg;
 }
 
 /** The registration roster for an event, newest first (every status, waitlist
  *  included), each row carrying its confirmation number, party size, phone, the
- *  names of its people and its answers as localized { label, value } pairs
- *  (question sort order). */
+ *  names of its people (`people`), those people with their ticket type and per-person
+ *  answers (`attendees`) and its registration-level answers as localized { label, value }
+ *  pairs (question sort order; option keys shown as their labels in `locale`). */
 export async function listRegistrations(
   db: AppDb,
   locale: Locale,
   eventId: number,
-): Promise<Array<RosterRow & { people: string[]; answers: Array<{ label: string; value: string }> }>> {
+): Promise<Array<RosterRow & { people: string[]; attendees: RosterAttendee[]; answers: Array<{ label: string; value: string }> }>> {
   const { results: regs } = await db.prepare(ROSTER_SELECT).bind(eventId).all<RosterRow>();
-
-  const { select: rawSelect, joins } = i18nJoin('reg_question_i18n', 'q', 'question_id', ['label'], locale);
-  const select = blankLabelAsMissing(rawSelect);
-  const { results: answers } = await db
-    .prepare(
-      `SELECT a.registration_id AS registration_id, ${select}, a.value AS value
-       FROM reg_answers a
-       JOIN registrations r ON r.id = a.registration_id
-       JOIN reg_questions q ON q.id = a.question_id
-       ${joins}
-       WHERE r.event_id = ?1
-       ORDER BY q.sort, q.id`,
-    )
-    .bind(eventId)
-    .all<{ registration_id: number; label: string | null; value: string }>();
-
-  const byReg = new Map<number, Array<{ label: string; value: string }>>();
-  for (const a of answers) {
-    const list = byReg.get(a.registration_id) ?? [];
-    list.push({ label: a.label ?? '', value: a.value });
-    byReg.set(a.registration_id, list);
-  }
-  const people = await activePeopleByRegistration(db, eventId);
-  return regs.map((r) => ({ ...r, people: people.get(r.id) ?? [], answers: byReg.get(r.id) ?? [] }));
+  const questions = await listQuestions(db, locale, eventId);
+  const stored = await storedAnswersByRegistration(db, eventId);
+  const attendees = await activeAttendeesByRegistration(db, locale, eventId, questions);
+  const registrationQuestions = questions.filter((q) => q.scope === 'registration' && q.type !== 'section');
+  return regs.map((r) => {
+    const mine = stored.get(r.id);
+    const people = attendees.get(r.id) ?? [];
+    return {
+      ...r,
+      people: people.map((p) => p.name),
+      attendees: people,
+      answers: registrationQuestions.flatMap((q) => {
+        const raw = mine?.get(q.id);
+        return raw === undefined ? [] : [{ label: q.label, value: answerDisplayText(q, raw) }];
+      }),
+    };
+  });
 }
 
 /**
@@ -2711,7 +2773,10 @@ export async function listRegistrations(
  * size,Amount,Registered followed by one column per question (localized label,
  * question sort order), rows newest first (every status, waitlist included).
  * People (the names still on the registration, joined with "; ") and Phone follow
- * the question columns, so existing exports keep their column order.
+ * the question columns, so existing exports keep their column order. After them come
+ * "Ticket types" ("Name: Type; ...", only for an event that has ticket types) and one
+ * column per per-person question ("Name: value; ..."). Option keys are written as their
+ * labels in `locale`; sections never get a column.
  * Amount is a plain dollars string - cents are integers, so
  * (amount_cents/100).toFixed(2) is exact. Each field goes through the shared
  * csvCell: spreadsheet formula injection is neutralized (a leading = + - @ / tab /
@@ -2721,31 +2786,27 @@ export async function listRegistrations(
  */
 export async function registrationsCsv(db: AppDb, locale: Locale, eventId: number): Promise<string> {
   const questions = await listQuestions(db, locale, eventId);
+  const registrationQuestions = questions.filter((q) => q.scope === 'registration' && q.type !== 'section');
+  const personQuestions = questions.filter((q) => q.scope === 'attendee' && q.type !== 'section');
   const { results: regs } = await db.prepare(ROSTER_SELECT).bind(eventId).all<RosterRow>();
-  const { results: answers } = await db
-    .prepare(
-      `SELECT a.registration_id AS registration_id, a.question_id AS question_id, a.value AS value
-       FROM reg_answers a
-       JOIN registrations r ON r.id = a.registration_id
-       WHERE r.event_id = ?1`,
-    )
-    .bind(eventId)
-    .all<{ registration_id: number; question_id: number; value: string }>();
-
   // Answers keyed by (registration id -> question id) so each lands in its column
   // even when two questions share a label.
-  const byReg = new Map<number, Map<number, string>>();
-  for (const a of answers) {
-    const m = byReg.get(a.registration_id) ?? new Map<number, string>();
-    m.set(a.question_id, a.value);
-    byReg.set(a.registration_id, m);
-  }
+  const byReg = await storedAnswersByRegistration(db, eventId);
+  const people = await activeAttendeesByRegistration(db, locale, eventId, questions);
+  const questionById = new Map(questions.map((q) => [q.id, q]));
+  const hasTickets = (await listTicketTypes(db, locale, eventId)).length > 0;
 
-  const people = await activePeopleByRegistration(db, eventId);
-  const header = ['Confirmation', 'Name', 'Email', 'Status', 'Party size', 'Amount', 'Registered', ...questions.map((q) => q.label), 'People', 'Phone'];
+  // After People and Phone: "Ticket types" (events that have ticket types) and one column per per-person
+  // question ("Name: value; ..."), so the columns that existed before keep their place.
+  const header = [
+    'Confirmation', 'Name', 'Email', 'Status', 'Party size', 'Amount', 'Registered',
+    ...registrationQuestions.map((q) => q.label), 'People', 'Phone',
+    ...(hasTickets ? ['Ticket types'] : []), ...personQuestions.map((q) => q.label),
+  ];
   const lines = [header.map(csvCell).join(',')];
   for (const r of regs) {
     const m = byReg.get(r.id) ?? new Map<number, string>();
+    const mine = people.get(r.id) ?? [];
     const cells = [
       r.confirmation_no ?? '',
       r.name,
@@ -2754,9 +2815,17 @@ export async function registrationsCsv(db: AppDb, locale: Locale, eventId: numbe
       String(r.party_size),
       (r.amount_cents / 100).toFixed(2),
       r.created_at,
-      ...questions.map((q) => m.get(q.id) ?? ''),
-      (people.get(r.id) ?? []).join('; '),
+      ...registrationQuestions.map((q) => {
+        const raw = m.get(q.id);
+        return raw === undefined ? '' : answerDisplayText(questionById.get(q.id)!, raw);
+      }),
+      mine.map((p) => p.name).join('; '),
       r.phone ?? '',
+      ...(hasTickets ? [mine.filter((p) => p.ticket !== null).map((p) => `${p.name}: ${p.ticket}`).join('; ')] : []),
+      ...personQuestions.map((q) => mine.flatMap((p) => {
+        const hit = p.answers.find((a) => a.questionId === q.id);
+        return hit ? [`${p.name}: ${hit.value}`] : [];
+      }).join('; ')),
     ];
     lines.push(cells.map(csvCell).join(','));
   }

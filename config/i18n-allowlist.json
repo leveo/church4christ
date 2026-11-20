@@ -51,7 +51,8 @@
         "my.giving.total",
         "planning.rs.min",
         "register.no",
-        "admin.regBuilder.no"
+        "admin.regBuilder.no",
+        "register.review.total"
       ],
       "values": []
     },
@@ -89,7 +90,8 @@
         "learning.kind.material",
         "my.giving.total",
         "planning.rs.item",
-        "planning.rs.min"
+        "planning.rs.min",
+        "register.review.total"
       ],
       "values": []
     },
@@ -189,7 +191,8 @@
         "admin.regBuilder.option.labelIn",
         "admin.regBuilder.option.unnamed",
         "admin.regBuilder.questions",
-        "admin.regBuilder.type.date"
+        "admin.regBuilder.type.date",
+        "register.review.total"
       ],
       "values": []
     },
@@ -360,7 +363,8 @@
         "profile.groups.colStatus",
         "register.email",
         "signup.emailLabel",
-        "staff.email"
+        "staff.email",
+        "register.review.total"
       ],
       "values": []
     },

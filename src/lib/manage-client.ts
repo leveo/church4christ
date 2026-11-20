@@ -3,6 +3,7 @@
 // POSTs it as JSON to /api/register/manage, and renders the returned view with the same
 // builder the member's page uses. The token is never written to the page, storage, a
 // query string or the console. Bundled with the page (no inline script).
+import { initShowIf } from './reg-showif-client';
 import { renderRegistrationView, type RegistrationView, type ViewError, type ViewLabels } from './regViewHtml';
 
 const TOKEN_RE = /^#t=([A-Za-z0-9_-]{43})$/u;
@@ -53,6 +54,8 @@ export function initManagePage(root: Document = document, fetcher: typeof fetch 
       fields: extra.fields,
     });
     first = false;
+    const editForm = container.querySelector<HTMLElement>('#reg-edit form');
+    if (editForm) initShowIf(editForm);
     const focus = container.querySelector<HTMLElement>('[aria-invalid="true"]') ?? container.querySelector<HTMLElement>('#e-summary');
     if (focus) focus.focus();
     else if (extra.notice) container.querySelector<HTMLElement>('.reg-banner')?.scrollIntoView({ block: 'nearest' });

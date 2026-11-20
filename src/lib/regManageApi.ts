@@ -9,7 +9,7 @@ import { toUtcSql, formatDateWithWeekday, utcToDatetimeLocal } from './dates';
 import { formatCents } from './money';
 import { t } from './i18n';
 import { registrationICalendar } from './ical';
-import { listQuestions } from './regDb';
+import { decodeChoices, listQuestions } from './regDb';
 import { registrationCampusSlug, registrationQrUrl } from './regEmails';
 import {
   cancelAttendee,
@@ -20,7 +20,7 @@ import {
   type RegistrationSummary,
 } from './regManage';
 import { editFromBag, type FieldBag } from './regPublic';
-import type { RegistrationView, ViewError, ViewQuestion } from './regViewHtml';
+import { toViewQuestion, type RegistrationView, type ViewError, type ViewQuestion } from './regViewHtml';
 
 /** 'Sunday, July 5, 2026 18:00' (church time), with the end time when it is the same day. */
 function whenText(startsAt: string, endsAt: string | null, locale: Locale): string {
@@ -29,16 +29,6 @@ function whenText(startsAt: string, endsAt: string | null, locale: Locale): stri
   const [endDate, endTime] = utcToDatetimeLocal(endsAt).split('T');
   const range = endTime && endDate === date ? `${time} – ${endTime}` : time;
   return `${formatDateWithWeekday(date, locale)} ${range}`;
-}
-
-function decodeChoices(raw: string): string[] {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.every((v) => typeof v === 'string')) return parsed;
-  } catch {
-    /* fall through */
-  }
-  return [raw];
 }
 
 /** The display-ready view of one registration in `locale`, or null when it does not exist. */
@@ -54,6 +44,8 @@ export async function buildRegistrationView(
   const { event, registration: reg } = s;
 
   let questions: ViewQuestion[] = [];
+  let personQuestions: ViewQuestion[] = [];
+  const personValues = new Map<number, Record<string, string[]>>();
   if (s.canEdit) {
     const defs = await listQuestions(db, locale, event.id);
     const { results } = await db
@@ -61,18 +53,28 @@ export async function buildRegistrationView(
       .bind(registrationId)
       .all<{ question_id: number; value: string }>();
     const stored = new Map(results.map((r) => [r.question_id, r.value]));
-    // Per-person questions and section headings are not part of this registration-level form.
-    questions = defs.filter((q) => q.scope === 'registration' && q.type !== 'section').map((q) => {
-      const raw = stored.get(q.id);
-      return {
-        id: q.id,
-        label: q.label,
-        type: q.type,
-        required: q.required === 1,
-        options: q.options ?? [],
-        value: raw === undefined ? [] : q.type === 'checkbox' ? decodeChoices(raw) : [raw],
-      };
-    });
+    const valueOf = (q: { id: number; type: string }, raw: string | undefined): string[] =>
+      raw === undefined ? [] : q.type === 'checkbox' ? decodeChoices(raw) : [raw];
+    // Both scopes keep their section headings (a heading shows where the questions it introduces start).
+    questions = defs.filter((q) => q.scope === 'registration').map((q) => toViewQuestion(q, valueOf(q, stored.get(q.id))));
+    personQuestions = defs.filter((q) => q.scope === 'attendee').map((q) => toViewQuestion(q));
+    if (personQuestions.length > 0) {
+      const { results: given } = await db
+        .prepare(
+          `SELECT aa.attendee_id AS attendee_id, aa.question_id AS question_id, aa.value AS value
+           FROM reg_attendee_answers aa JOIN reg_attendees a ON a.id = aa.attendee_id
+           WHERE a.registration_id = ?1`,
+        )
+        .bind(registrationId)
+        .all<{ attendee_id: number; question_id: number; value: string }>();
+      const byId = new Map(defs.map((q) => [q.id, q]));
+      for (const row of given) {
+        const q = byId.get(row.question_id);
+        if (!q) continue;
+        const mine = personValues.get(row.attendee_id) ?? personValues.set(row.attendee_id, {}).get(row.attendee_id)!;
+        mine[String(row.question_id)] = valueOf(q, row.value);
+      }
+    }
   }
 
   const paid = reg.amount_cents > 0;
@@ -96,10 +98,20 @@ export async function buildRegistrationView(
       paid,
     },
     qrUrl: registrationQrUrl('', event.id, reg.confirmation_no, await registrationCampusSlug(db, registrationId)),
-    attendees: s.attendees.map((a) => ({ id: a.id, name: a.name, active: a.status === 'active' })),
+    attendees: s.attendees.map((a) => ({
+      id: a.id,
+      name: a.name,
+      active: a.status === 'active',
+      ticketText: a.ticket_label
+        ? (a.ticket_price_cents ?? 0) > 0 ? `${a.ticket_label} · ${formatCents(a.ticket_price_cents!, reg.currency, locale)}` : a.ticket_label
+        : null,
+      answers: a.answers.map((x) => ({ label: x.label, value: x.value })),
+      ...(s.canEdit ? { values: personValues.get(a.id) ?? {} } : {}),
+    })),
     // Answers show for the people who gave them; the labels are localized by the summary.
     answers: s.answers.map((a) => ({ label: a.label, value: a.value })),
     questions,
+    personQuestions,
     canEdit: s.canEdit,
     canCancel: s.canCancel,
   };
