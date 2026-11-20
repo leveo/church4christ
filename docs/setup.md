@@ -46,15 +46,15 @@ terminal running while completing the form. Enter:
   **Website + Community**, using **Cloudflare D1** as the database. Uncheck features you
   do not need; dependencies are included when required. To start from a narrower set,
   open the form with a preset: `npm run onboard -- --preset checkin` (also
-  `volunteer-scheduling`, `small-groups`, or any other preset listed below).
+  `volunteer-scheduling`, `small-groups`, `event-registration`, or any other preset listed below).
 - **Local preview:** English or Chinese, first-admin name and email, and whether to
   include fictional demo content.
 
 D1 is the recommended starting database; the application also uses Cloudflare Workers
-and R2 for hosting and media. **Giving and Registration** appear as
-advanced options because they require Supabase-compatible PostgreSQL. Choose that backend
-by explicitly selecting one of those advanced features. Member Portal also runs on D1,
-without its Registration-dependent parts. Their provider setup and readiness
+and R2 for hosting and media. **Giving** appears as an advanced option because it requires
+Supabase-compatible PostgreSQL. Choose that backend by explicitly selecting it. Registration
+runs on D1 for free events; paid events need PostgreSQL, so choose `--backend supabase` when you
+set up if you plan to charge. Member Portal also runs on D1. Provider setup and readiness
 requirements still apply. Choosing **campus** describes the organization; it does not add a campus to a
 previously installed site.
 
@@ -131,8 +131,9 @@ the default Cloudflare D1 database except Full Church. Member Portal also runs o
 | `checkin` | People & Households and Children Check-in |
 | `volunteer-scheduling` | Volunteer Scheduling, Spiritual Gifts, and People & Households |
 | `small-groups` | Groups, Fellowships, and People & Households |
+| `event-registration` | Registration (free events on D1; paid events need `--backend supabase` and Stripe) |
 
-The last three back the [single-feature editions](editions.md). A preset only chooses the
+The last four back the [single-feature editions](editions.md). A preset only chooses the
 first features; administrators can turn others on later in **Settings → Modules**.
 
 The original interactive `npm run setup` remains available for terminal-only setup.

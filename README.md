@@ -170,6 +170,7 @@ one area turned on, using the default Cloudflare D1 database:
 | A kids check-in kiosk | [church-checkin](https://github.com/leveo/church-checkin) | `checkin` |
 | Volunteer scheduling | [church-volunteer-scheduling](https://github.com/leveo/church-volunteer-scheduling) | `volunteer-scheduling` |
 | Small group management | [church-small-groups](https://github.com/leveo/church-small-groups) | `small-groups` |
+| Event sign-up and a check-in desk | [church-event-registration](https://github.com/leveo/church-event-registration) | `event-registration` |
 | A church website and CMS | [church-website-cms](https://github.com/leveo/church-website-cms) | `website` |
 
 The editions contain no separate code, so there is nothing extra to maintain. You can also

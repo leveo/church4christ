@@ -168,6 +168,7 @@ satu area yang diaktifkan, memakai basis data Cloudflare D1 bawaan:
 | Kios check-in anak | [church-checkin](https://github.com/leveo/church-checkin) | `checkin` |
 | Penjadwalan relawan | [church-volunteer-scheduling](https://github.com/leveo/church-volunteer-scheduling) | `volunteer-scheduling` |
 | Manajemen kelompok kecil | [church-small-groups](https://github.com/leveo/church-small-groups) | `small-groups` |
+| Pendaftaran dan check-in acara | [church-event-registration](https://github.com/leveo/church-event-registration) | `event-registration` |
 | Situs web gereja dan CMS | [church-website-cms](https://github.com/leveo/church-website-cms) | `website` |
 
 Edisi-edisi ini tidak memuat kode terpisah, jadi tidak ada tambahan yang perlu dipelihara. Anda juga bisa

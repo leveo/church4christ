@@ -102,6 +102,7 @@ Planning Center 及上文提到的其他产品名称均为其各自所有者的�
 | 儿童报到签到台 | [church-checkin](https://github.com/leveo/church-checkin) | `checkin` |
 | 服事排班 | [church-volunteer-scheduling](https://github.com/leveo/church-volunteer-scheduling) | `volunteer-scheduling` |
 | 小组管理 | [church-small-groups](https://github.com/leveo/church-small-groups) | `small-groups` |
+| 活动报名与报到台 | [church-event-registration](https://github.com/leveo/church-event-registration) | `event-registration` |
 | 教会网站与 CMS | [church-website-cms](https://github.com/leveo/church-website-cms) | `website` |
 
 这些版本没有独立的代码，所以不需要额外维护。你也可以跳过它们，直接在这里运行 `npm run onboard -- --preset checkin`。随时可以在**设置 → 功能模块**中开启更多功能。请参阅[单一功能版本](docs/editions.md)。

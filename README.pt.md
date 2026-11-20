@@ -170,6 +170,7 @@ uma área ativada, usando o banco de dados Cloudflare D1 padrão:
 | Um totem de check-in infantil | [church-checkin](https://github.com/leveo/church-checkin) | `checkin` |
 | Escalas de voluntários | [church-volunteer-scheduling](https://github.com/leveo/church-volunteer-scheduling) | `volunteer-scheduling` |
 | Gestão de pequenos grupos | [church-small-groups](https://github.com/leveo/church-small-groups) | `small-groups` |
+| Inscrições e check-in de eventos | [church-event-registration](https://github.com/leveo/church-event-registration) | `event-registration` |
 | Um site e CMS para a igreja | [church-website-cms](https://github.com/leveo/church-website-cms) | `website` |
 
 As edições não têm código separado, então não há nada extra para manter. Você também pode
