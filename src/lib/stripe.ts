@@ -763,6 +763,27 @@ export async function createPortalSession(
   return { url: session.url };
 }
 
+/**
+ * POST /v1/refunds: refund `amountCents` of a PaymentIntent. The idempotency key is required (a retry of the
+ * same refund must never move money twice). Returns the bounded fields the caller records.
+ */
+export async function createRefund(
+  env: StripeEnv,
+  args: { paymentIntentId: string; amountCents: number; metadata?: Record<string, string> },
+  options: StripeRequestOptions & { idempotencyKey: string },
+): Promise<{ id: string; amount: number; status: string | null }> {
+  const refund = await stripeRequest<{ id?: unknown; amount?: unknown; status?: unknown }>(
+    env,
+    'refunds',
+    { payment_intent: args.paymentIntentId, amount: args.amountCents, reason: 'requested_by_customer', metadata: args.metadata },
+    options,
+  );
+  if (typeof refund.id !== 'string' || !/^re_[A-Za-z0-9_]{1,252}$/.test(refund.id) || typeof refund.amount !== 'number') {
+    throw new StripeError('Malformed Stripe refund response', { stage: 'response', code: 'stripe_response_invalid' });
+  }
+  return { id: refund.id, amount: refund.amount, status: typeof refund.status === 'string' ? refund.status : null };
+}
+
 /** GET /v1/<path> with an optional form-style query string. Throws a StripeError on non-2xx. */
 export async function stripeGet<T = Record<string, unknown>>(
   env: StripeEnv,

@@ -2,7 +2,8 @@ import { runCommunityWorkflowPass } from './lib/workflowReminders';
 import { handle } from '@astrojs/cloudflare/handler';
 import { sendReminders, sendWeeklyDigest } from './lib/digest';
 import { sendPlanningReminders } from './lib/planningNotify';
-import { sweepUnsentConfirmations } from './lib/regNotify';
+import { sweepReminders, sweepUnsentConfirmations } from './lib/regNotify';
+import { sweepOutbox } from './lib/regMessaging';
 import { sendAttendanceEmails } from './lib/groupAttendance';
 import { type EmailEnv } from './lib/email';
 import { runBackup, type MaybeBackupEnv } from './lib/backup';
@@ -49,8 +50,12 @@ export default {
         ctx.waitUntil((async () => {
           try { await sendReminders(vars, db); }
           finally {
-            try { await sendPlanningReminders(vars, db); }
-            finally { await sweepUnsentConfirmations(vars, db); }
+            // Registration event reminders (module-gated per campus), isolated from the passes around them.
+            try { await sweepReminders(vars, db); }
+            finally {
+              try { await sendPlanningReminders(vars, db); }
+              finally { await sweepUnsentConfirmations(vars, db); }
+            }
           }
         })().finally(end));
         break;
@@ -69,8 +74,13 @@ export default {
             finally {
               try { await runIdentityRecoveryNotificationSweep(env as never, db); }
               finally {
-                const scheduledAt = new Date(controller.scheduledTime).toISOString().slice(0, 19).replace('T', ' ');
-                await expireIdentityBusinessContinuations(db, { now: scheduledAt });
+                try {
+                  const scheduledAt = new Date(controller.scheduledTime).toISOString().slice(0, 19).replace('T', ' ');
+                  await expireIdentityBusinessContinuations(db, { now: scheduledAt });
+                } finally {
+                  // Registration bulk email: up to 100 queued rows per run (no new cron).
+                  await sweepOutbox(vars, db);
+                }
               }
             }
           }

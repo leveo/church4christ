@@ -50,6 +50,7 @@ import {
   upsertRecurringGift,
   type GiftIdentity,
 } from './givingDb';
+import { registrationIdByPaymentIntent, syncRefundedTotal } from './regOutbox';
 import {
   applyRegistrationCheckoutSession,
   type RegistrationCheckoutAction,
@@ -611,6 +612,24 @@ async function onChargeRefunded(deps: WebhookDeps, charge: Record<string, unknow
   return processed(full ? 'refunded' : 'partial_refund');
 }
 
+/**
+ * charge.refunded for a REGISTRATION's PaymentIntent (found by the stored PaymentIntent, not by metadata):
+ * bring refunded_cents up to Stripe's cumulative amount_refunded. Stripe redelivers, and the drawer's own
+ * refund converges on the same cumulative total (syncRefundedTotal never lowers it), so nothing double counts.
+ * Null when the charge is not a registration's (the caller falls through to the gift path).
+ */
+async function onRegistrationChargeRefunded(deps: WebhookDeps, charge: Record<string, unknown>, kind: string | undefined): Promise<StripeDispatchResult | null> {
+  const amountRefunded = charge.amount_refunded;
+  const pi = paymentIntentIdOrNull(expandableId(charge.payment_intent));
+  const registrationId = pi ? await registrationIdByPaymentIntent(deps.db, pi) : null;
+  if (registrationId === null) return kind === 'registration' ? deferred('registration_not_visible') : null;
+  if (!deps.modules.has('registration')) return ignored('module_disabled');
+  if (typeof amountRefunded !== 'number' || !Number.isInteger(amountRefunded) || amountRefunded < 0) return ignored();
+  await checked(deps);
+  const synced = await syncRefundedTotal(deps.db, registrationId, amountRefunded);
+  return synced.ok ? processed(synced.added > 0 ? 'registration_refund_synced' : 'registration_refund_repeat') : ignored('registration_refund_invalid');
+}
+
 async function onDispute(
   deps: WebhookDeps,
   dispute: Record<string, unknown>,
@@ -713,6 +732,11 @@ export async function handleStripeEvent(deps: WebhookDeps, event: Record<string,
     || type === 'customer.subscription.updated'
     || type === 'customer.subscription.deleted';
   let requiredModule: ModuleKey | null = null;
+  if (type === 'charge.refunded' && kind !== 'gift') {
+    // A registration's refund (attributed by its stored PaymentIntent); anything else falls through to the gift path.
+    const handled = await onRegistrationChargeRefunded(deps, object, kind);
+    if (handled) return handled;
+  }
   if (type === 'invoice.paid' || type === 'invoice.payment_failed') requiredModule = 'giving';
   else if (CHARGE_EVENT_TYPES.has(type)) {
     // Registration charges are handled by the registration flow, never as gifts.

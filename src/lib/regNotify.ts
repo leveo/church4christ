@@ -1,4 +1,5 @@
-// Sending the registration emails: the confirmation (free, waitlist, paid), the
+// Sending the registration emails: the confirmation (free, waitlist, paid, or "received, waiting for
+// approval" on an approval event), the staff decision mail, the reminder, the
 // waitlist-promotion notice, the cancellation notice, the durable-send stamp and the
 // cron retry sweep. Every function is best-effort and never throws: a mail failure must
 // not fail the request, webhook or cron pass that triggered it.
@@ -19,7 +20,9 @@ import { loadDict } from './i18n';
 import { isSupportedLocale, type Locale } from './locales';
 import { getEnabledModules } from './modules';
 import { cancelRegistrationPromoting, hashManageToken } from './regDb';
-import { cancelledEmail, confirmationEmail, promotedEmail, registrationCampusSlug, registrationManageUrl, registrationQrUrl, type BuiltRegEmail } from './regEmails';
+import type { DecisionResult } from './regAdmin';
+import { claimReminder, findReminderCandidates, releaseReminder } from './regOutbox';
+import { cancelledEmail, confirmationEmail, decisionEmail, promotedEmail, reminderEmail, registrationCampusSlug, registrationManageUrl, registrationQrUrl, type BuiltRegEmail } from './regEmails';
 import { issueManageToken, registrationSummary, type RegistrationSummary } from './regManage';
 
 export type RegNotifyEnv = EmailEnv & { APP_ORIGIN?: string };
@@ -29,7 +32,7 @@ export const SWEEP_LIMIT = 50;
 export const SWEEP_GRACE_MS = 15 * 60_000;
 
 /** The registration's own language when that language is enabled, else the installation default. */
-async function emailLocale(db: AppDb, registrationLocale: string | null): Promise<Locale> {
+export async function emailLocale(db: AppDb, registrationLocale: string | null): Promise<Locale> {
   let settings = LEGACY_LOCALE_SETTINGS;
   try {
     settings = await getLocaleSettings(db);
@@ -43,7 +46,7 @@ async function emailLocale(db: AppDb, registrationLocale: string | null): Promis
   return locale;
 }
 
-async function loadSummary(db: AppDb, id: number): Promise<{ summary: RegistrationSummary; locale: Locale } | null> {
+export async function loadSummary(db: AppDb, id: number): Promise<{ summary: RegistrationSummary; locale: Locale } | null> {
   const row = await db.prepare(`SELECT locale FROM registrations WHERE id = ?1`).bind(id).first<{ locale: string | null }>();
   if (!row) return null;
   const locale = await emailLocale(db, row.locale);
@@ -116,7 +119,8 @@ export async function sendConfirmation(
     const loaded = await loadSummary(db, registrationId);
     if (!loaded) return false;
     const { summary, locale } = loaded;
-    if (summary.registration.status !== 'confirmed' && summary.registration.status !== 'waitlist') return false;
+    // 'review' is the approval event's "received, waiting for approval" mail (no QR, never "confirmed").
+    if (!['confirmed', 'waitlist', 'review'].includes(summary.registration.status)) return false;
     if (!summary.registration.email) return false;
 
     let token = opts.manageToken ?? null;
@@ -144,13 +148,17 @@ export async function sendConfirmation(
   }
 }
 
-/** "A place opened up": rotate the token, mail the promoted registrant, mark the confirmation sent. */
+/**
+ * "A place opened up": rotate the token, mail the promoted registrant, mark the confirmation sent. A
+ * registration promoted into 'review' (an approval event) is mailed "a place opened up, waiting for
+ * approval" instead (no QR); staff still decide, and the decision mail follows.
+ */
 export async function sendPromoted(env: RegNotifyEnv, db: AppDb, registrationId: number): Promise<boolean> {
   try {
     const loaded = await loadSummary(db, registrationId);
     if (!loaded) return false;
     const { summary, locale } = loaded;
-    if (summary.registration.status !== 'confirmed' || !summary.registration.email) return false;
+    if ((summary.registration.status !== 'confirmed' && summary.registration.status !== 'review') || !summary.registration.email) return false;
     const rotated = await rotateToken(db, registrationId);
     const origin = originOf(env);
     const campus = await registrationCampusSlug(db, registrationId);
@@ -167,6 +175,74 @@ export async function sendPromoted(env: RegNotifyEnv, db: AppDb, registrationId:
     return ok;
   } catch (e) {
     console.error(`registration promotion mail failed for registration ${registrationId}`, e instanceof Error ? e.name : 'unknown');
+    return false;
+  }
+}
+
+/**
+ * Mail the staff decision on an approval event (`result` is what decideRegistration returned) and the
+ * waitlisted registrations that decision promoted. accepted: the confirmation with the QR and calendar,
+ * waitlisted: the waitlist notice, declined: a courteous no with no manage link. The first two rotate the
+ * manage link (rolled back if the send fails); a declined registrant's link is left alone. The mail is skipped
+ * when the registration no longer has the status the decision gave it (staff changed it again meanwhile).
+ * Returns whether the decision mail went out. Never throws.
+ */
+export async function sendDecision(
+  env: RegNotifyEnv,
+  db: AppDb,
+  result: Pick<DecisionResult, 'decision' | 'registrationId' | 'status' | 'promoted'>,
+): Promise<boolean> {
+  let sent = false;
+  try {
+    const loaded = await loadSummary(db, result.registrationId);
+    if (loaded && loaded.summary.registration.email && loaded.summary.registration.status === result.status) {
+      const { summary, locale } = loaded;
+      const origin = originOf(env);
+      const campus = await registrationCampusSlug(db, result.registrationId);
+      const withLink = result.decision !== 'decline';
+      const rotated = withLink ? await rotateToken(db, result.registrationId) : null;
+      const built = decisionEmail(summary, result.decision, {
+        locale,
+        origin,
+        manageUrl: rotated ? registrationManageUrl(origin, locale, rotated.token, campus) : null,
+        qrUrl: registrationQrUrl(origin, summary.event.id, summary.registration.confirmation_no, campus),
+      });
+      sent = await deliver(env, db, summary, 'regDecision', built, rotated !== null);
+      // An accepted or waitlisted decision mail is the registrant's confirmation: the sweep must not send another.
+      if (sent && withLink) await stampSent(db, result.registrationId);
+      else if (!sent) await rotated?.restore();
+    }
+  } catch (e) {
+    console.error(`registration decision mail failed for registration ${result.registrationId}`, e instanceof Error ? e.name : 'unknown');
+  }
+  for (const id of result.promoted) await sendPromoted(env, db, id);
+  return sent;
+}
+
+/**
+ * The reminder: event details, the people, the notes, the QR and a manage link (rotated; rolled back if the
+ * send fails) to one confirmed registration. The caller owns the once-only claim (see sweepReminders).
+ */
+export async function sendReminder(env: RegNotifyEnv, db: AppDb, registrationId: number): Promise<boolean> {
+  try {
+    const loaded = await loadSummary(db, registrationId);
+    if (!loaded) return false;
+    const { summary, locale } = loaded;
+    if (summary.registration.status !== 'confirmed' || !summary.registration.email) return false;
+    const rotated = await rotateToken(db, registrationId);
+    const origin = originOf(env);
+    const campus = await registrationCampusSlug(db, registrationId);
+    const built = reminderEmail(summary, {
+      locale,
+      origin,
+      manageUrl: rotated ? registrationManageUrl(origin, locale, rotated.token, campus) : null,
+      qrUrl: registrationQrUrl(origin, summary.event.id, summary.registration.confirmation_no, campus),
+    });
+    const ok = await deliver(env, db, summary, 'regReminder', built, rotated !== null);
+    if (!ok) await rotated?.restore();
+    return ok;
+  } catch (e) {
+    console.error(`registration reminder failed for registration ${registrationId}`, e instanceof Error ? e.name : 'unknown');
     return false;
   }
 }
@@ -237,7 +313,7 @@ export async function sweepUnsentConfirmations(env: RegNotifyEnv, db: AppDb, now
          FROM registrations r
          JOIN reg_events e ON e.id = r.event_id
          WHERE r.confirmation_sent_at IS NULL
-           AND r.status IN ('confirmed', 'waitlist')
+           AND r.status IN ('confirmed', 'waitlist', 'review')
            AND r.manage_token_hash IS NOT NULL
            AND r.created_at < ?1
            AND COALESCE(e.ends_at, e.starts_at) > ?2
@@ -260,6 +336,47 @@ export async function sweepUnsentConfirmations(env: RegNotifyEnv, db: AppDb, now
     return sent;
   } catch (e) {
     console.error('registration confirmation sweep failed', e instanceof Error ? e.name : 'unknown');
+    return 0;
+  }
+}
+
+/** The reminder sweep's batch: at most this many registrations per run. */
+export const REMINDER_SWEEP_LIMIT = 100;
+
+/**
+ * The daily reminder pass (REMINDER cron). For every confirmed registration of an event whose reminder window
+ * has opened (findReminderCandidates) and whose campus has registration on: claim it (the stamp is the
+ * once-only guard, so two overlapping runs never both send), mail the reminder, and when the mail fails release
+ * the claim so tomorrow's run tries again. A reminder is never re-sent once stamped. Returns how many went out.
+ */
+export async function sweepReminders(env: RegNotifyEnv, db: AppDb, now: Date = new Date()): Promise<number> {
+  try {
+    const globalModules = await getEnabledModules(db, getBackend(env as unknown as DbEnv));
+    if (!globalModules.has('registration')) return 0;
+    const candidates = await findReminderCandidates(db, now, REMINDER_SWEEP_LIMIT);
+    const campusModules = new Map<number, Set<string>>();
+    let sent = 0;
+    for (const candidate of candidates) {
+      let claimed = false;
+      try {
+        let modules = campusModules.get(candidate.campusId);
+        if (!modules) {
+          modules = await getEffectiveCampusModules(db, candidate.campusId, globalModules);
+          campusModules.set(candidate.campusId, modules);
+        }
+        if (!modules.has('registration')) continue;
+        claimed = await claimReminder(db, candidate.registrationId);
+        if (!claimed) continue;
+        if (await sendReminder(env, db, candidate.registrationId)) sent++;
+        else await releaseReminder(db, candidate.registrationId);
+      } catch (e) {
+        console.error(`registration reminder failed for registration ${candidate.registrationId}`, e instanceof Error ? e.name : 'unknown');
+        if (claimed) await releaseReminder(db, candidate.registrationId).catch(() => undefined);
+      }
+    }
+    return sent;
+  } catch (e) {
+    console.error('registration reminder sweep failed', e instanceof Error ? e.name : 'unknown');
     return 0;
   }
 }

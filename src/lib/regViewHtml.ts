@@ -141,7 +141,7 @@ export const VIEW_LABEL_KEYS = [
   'register.manage.cancelConfirm', 'register.manage.cancelPaidConfirm', 'register.manage.refundNote',
   'register.manage.locked', 'register.manage.notAllowed', 'register.manage.failed', 'register.manage.invalidLink',
   'register.manage.unavailable', 'register.manage.loading', 'register.manage.saved', 'register.manage.cancelledNotice',
-  'register.manage.bannerRegistered', 'register.manage.bannerWaitlist', 'register.manage.bannerPaid',
+  'register.manage.bannerRegistered', 'register.manage.bannerWaitlist', 'register.manage.bannerPaid', 'register.manage.bannerReview',
   'register.manage.statusLabel', 'register.manage.status.confirmed', 'register.manage.status.waitlist',
   'register.manage.status.pending', 'register.manage.status.review', 'register.manage.status.cancelled',
   'register.manage.status.declined', 'register.manage.fixErrors',
@@ -306,9 +306,16 @@ function formOpen(o: RenderOptions, action: string, extra = ''): string {
     : `<form data-reg-form="${esc(action)}"${extra}>`;
 }
 
+/** The dictionary key of a registration status label ("Waiting for approval" for review), for the manage page, My events and the admin. */
+export function statusLabelKey(status: ViewStatus): string {
+  return `register.manage.status.${status}`;
+}
+
 /** The banner shown on the first visit after registering, by status. */
 export function bannerKey(status: ViewStatus, paid: boolean): string {
   if (status === 'waitlist') return 'register.manage.bannerWaitlist';
+  // Waiting for staff approval is never shown as registered, paid or not.
+  if (status === 'review') return 'register.manage.bannerReview';
   return paid ? 'register.manage.bannerPaid' : 'register.manage.bannerRegistered';
 }
 
@@ -329,7 +336,7 @@ export function renderRegistrationView(view: RegistrationView, o: RenderOptions)
   if (o.notice === 'cancelled') out.push(`<p class="reg-banner" role="status">${esc(L(lb, 'register.manage.cancelledNotice'))}</p>`);
 
   out.push(
-    `<header class="reg-head"><p class="gathering-eyebrow">${esc(L(lb, 'register.manage.title'))}</p><h1 class="font-display text-heading-md font-bold">${esc(event.title)}</h1><p><span class="${badge} ${STATUS_CHIP[status]}" data-status="${esc(status)}" aria-label="${esc(L(lb, 'register.manage.statusLabel'))}">${esc(L(lb, `register.manage.status.${status}`))}</span></p></header>`,
+    `<header class="reg-head"><p class="gathering-eyebrow">${esc(L(lb, 'register.manage.title'))}</p><h1 class="font-display text-heading-md font-bold">${esc(event.title)}</h1><p><span class="${badge} ${STATUS_CHIP[status]}" data-status="${esc(status)}" aria-label="${esc(L(lb, 'register.manage.statusLabel'))}">${esc(L(lb, statusLabelKey(status)))}</span></p></header>`,
   );
 
   // Details + QR.

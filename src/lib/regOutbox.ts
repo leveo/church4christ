@@ -285,7 +285,13 @@ export async function recordRefund(
  * running total, and is redelivered): never lowers it, never passes amount_cents, and a repeat changes nothing.
  * Returns the cents newly recorded (0 for a repeat). Writes an activity row when it moved.
  */
-export async function syncRefundedTotal(db: AppDb, registrationId: number, totalRefundedCents: number): Promise<{ ok: true; added: number } | { ok: false; code: 'not_found' | 'invalid_amount' }> {
+export async function syncRefundedTotal(
+  db: AppDb,
+  registrationId: number,
+  totalRefundedCents: number,
+  /** `via: 'drawer'` is a staff refund converging on the same cumulative total (the activity row carries the actor, not `webhook`); the default is the webhook. */
+  opts: { actor?: number | null; via?: 'webhook' | 'drawer' } = {},
+): Promise<{ ok: true; added: number } | { ok: false; code: 'not_found' | 'invalid_amount' }> {
   if (!Number.isInteger(totalRefundedCents) || totalRefundedCents < 0 || totalRefundedCents > MAX_REFUND_CENTS) return { ok: false, code: 'invalid_amount' };
   const before = await db.prepare(`SELECT refunded_cents, amount_cents FROM registrations WHERE id = ?1`).bind(registrationId).first<{ refunded_cents: number; amount_cents: number }>();
   if (!before) return { ok: false, code: 'not_found' };
@@ -300,6 +306,18 @@ export async function syncRefundedTotal(db: AppDb, registrationId: number, total
     .first<{ refunded_cents: number }>();
   if (!row) return { ok: true, added: 0 };
   const added = row.refunded_cents - before.refunded_cents;
-  await activityStatement(db, registrationId, null, 'refund', { cents: added, source: 'stripe', total: row.refunded_cents, webhook: true }).run();
+  await activityStatement(
+    db, registrationId, opts.actor ?? null, 'refund',
+    { cents: added, source: 'stripe', total: row.refunded_cents, ...(opts.via === 'drawer' ? {} : { webhook: true }) },
+  ).run();
   return { ok: true, added };
+}
+
+/** The registration paid with this Stripe PaymentIntent, or null (the webhook's way from a charge to its registration). */
+export async function registrationIdByPaymentIntent(db: AppDb, paymentIntentId: string): Promise<number | null> {
+  const row = await db
+    .prepare(`SELECT id FROM registrations WHERE stripe_payment_intent_id = ?1 ORDER BY id LIMIT 1`)
+    .bind(paymentIntentId)
+    .first<{ id: number }>();
+  return row?.id ?? null;
 }
