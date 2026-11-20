@@ -14,7 +14,7 @@ import Admin from '../../../layouts/Admin.astro';
 import { env } from 'cloudflare:workers';
 import { t } from '../../../lib/i18n';
 import { applyEventAction, saveEventFromForm } from '../../../lib/regAdminActions';
-import { eventIdsWithActiveTickets, listEventsAdmin, listTemplatesAdmin, type RegPhase } from '../../../lib/regDb';
+import { eventHasPricedTicket, eventIdsWithActiveTickets, listEventsAdmin, listTemplatesAdmin, type RegPhase } from '../../../lib/regDb';
 import { utcToDatetimeLocal, toUtcSql } from '../../../lib/dates';
 import { formatCents } from '../../../lib/money';
 import { tin, lab, card, errorText, btn, badge, badgeActive, badgeInactive, badgeScheduled, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
@@ -148,6 +148,7 @@ const v = echoing
       location: g('location'), capacity: g('capacity'), price: g('price'), active: fd!.get('active') !== null,
       waitlist: String(fd!.getAll('waitlist_enabled').at(-1) ?? '1') === '1', prefix: g('confirmation_prefix'), poster: g('poster'),
       maxParty: g('max_party_size'), selfEdit: String(fd!.getAll('allow_self_edit').at(-1) ?? '1') === '1',
+      approval: String(fd!.getAll('requires_approval').at(-1) ?? '0') === '1', reminder: g('reminder_days'),
     }
   : editingRow
     ? {
@@ -158,9 +159,14 @@ const v = echoing
         price: dollars(editingRow.price_cents), active: editingRow.active === 1,
         waitlist: editingRow.waitlist_enabled === 1, prefix: editingRow.confirmation_prefix ?? '', poster: editingRow.poster ?? '',
         maxParty: String(editingRow.max_party_size), selfEdit: editingRow.allow_self_edit === 1,
+        approval: editingRow.requires_approval === 1, reminder: editingRow.reminder_days == null ? '' : String(editingRow.reminder_days),
       }
-    : { startsAt: '', endsAt: '', opensAt: '', closesAt: '', visibleFrom: '', location: '', capacity: '', price: '', active: true, waitlist: true, prefix: '', poster: '', maxParty: '1', selfEdit: true };
+    : { startsAt: '', endsAt: '', opensAt: '', closesAt: '', visibleFrom: '', location: '', capacity: '', price: '', active: true, waitlist: true, prefix: '', poster: '', maxParty: '1', selfEdit: true, approval: false, reminder: '' };
 const posterSrc = mediaPath(v.poster);
+// Approval holds a seat for a free sign-up: while the event (or an active ticket type) has a price it stays off,
+// and the form says why. The writer enforces the same rule.
+const pricedTickets = editingRow ? await eventHasPricedTicket(db, editingRow.id) : false;
+const approvalBlocked = (editingRow?.price_cents ?? 0) > 0 || pricedTickets;
 
 const hasErrors = Object.keys(errors).length > 0;
 const heading = t(lang, 'admin.reg.title');
@@ -408,6 +414,22 @@ const actionBtn =
         </label>
       </div>
       <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.maxPartyHint')} {t(lang, 'admin.reg.selfEditHint')}</p>
+      <div class="grid gap-4 sm:grid-cols-2" data-testid="back-office-settings">
+        <div>
+          <label class="flex min-h-11 items-center gap-2 text-sm">
+            <input type="hidden" name="requires_approval" value="0" />
+            <input type="checkbox" name="requires_approval" value="1" checked={v.approval && !approvalBlocked} disabled={approvalBlocked} data-testid="requires-approval" /> {t(lang, 'admin.reg.bo.requiresApproval')}
+          </label>
+          <p class="text-xs text-ink-subtle">{t(lang, approvalBlocked ? 'admin.reg.bo.approvalBlocked' : 'admin.reg.bo.requiresApprovalHint')}</p>
+          {errors.requires_approval && <span class={errorText}>{t(lang, errors.requires_approval)}</span>}
+        </div>
+        <label class="block">
+          <span class={lab}>{t(lang, 'admin.reg.bo.reminderDays')}</span>
+          <input type="number" name="reminder_days" value={v.reminder} class={tin} min="1" max="30" inputmode="numeric" />
+          <span class="text-xs text-ink-subtle">{t(lang, 'admin.reg.bo.reminderDaysHint')}</span>
+          {errors.reminder_days && <span class={errorText}>{t(lang, errors.reminder_days)}</span>}
+        </label>
+      </div>
       <div><LocaleFields name="notes" label={t(lang, 'admin.reg.notes')} values={noteValues} lang={lang} multiline rows={3} /></div>
       <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.notesHint')}</p>
       <div class="block">

@@ -1,0 +1,108 @@
+---
+// Add a registration by hand (walk-in or phone): contact, people with ticket types, answers; on a paid event an
+// offline amount or complimentary; optionally email the confirmation. Staff skip the registration phase and
+// required answers; a party over a limit asks first ("do it anyway").
+import type { RegQuestion, RegTicketType } from '../../lib/regDb';
+import { tin, lab, btn } from '../../lib/adminUi';
+import { t } from '../../lib/i18n';
+import type { Locale } from '../../lib/locales';
+import QuestionFields from './QuestionFields.astro';
+
+interface Props {
+  questions: RegQuestion[];
+  types: RegTicketType[];
+  lang: Locale;
+  maxParty: number;
+  /** The event or an active ticket type has a price: the payment choice is shown (and required). */
+  paid: boolean;
+  open: boolean;
+  /** What was posted (a refused submission re-renders with it). */
+  echo: Record<string, string>;
+}
+const { questions, types, lang, maxParty, paid, open, echo } = Astro.props;
+const activeTypes = types.filter((ty) => ty.active === 1);
+const regQuestions = questions.filter((q) => q.scope === 'registration');
+const personQuestions = questions.filter((q) => q.scope === 'attendee');
+const rows = Math.max(1, Math.min(20, maxParty));
+const rowIndexes = Array.from({ length: rows }, (_, i) => i);
+// The first two people are always shown; the rest wait behind "more people".
+const SHOWN = 2;
+const v = (name: string) => echo[name] ?? '';
+---
+<details id="add" class="gathering-editor scroll-mt-4" open={open} data-testid="manual-add">
+  <summary>{t(lang, 'admin.reg.bo.manualAdd')}</summary>
+  <div class="gathering-editor-inner">
+    <form method="post" class="space-y-4">
+      <input type="hidden" name="action" value="create" />
+      <p class="text-sm text-ink-muted">{t(lang, 'admin.reg.bo.manualAddHint')}</p>
+      <div class="grid gap-3 sm:grid-cols-3">
+        <label class="block"><span class={lab}>{t(lang, 'register.name')}</span><input name="contact_name" value={v('contact_name')} class={tin} required /></label>
+        <label class="block"><span class={lab}>{t(lang, 'register.email')}</span><input name="contact_email" type="email" value={v('contact_email')} class={tin} required /></label>
+        <label class="block"><span class={lab}>{t(lang, 'admin.reg.phone')}</span><input name="contact_phone" type="tel" value={v('contact_phone')} class={tin} /></label>
+      </div>
+      <div class="space-y-3">
+        <h3 class="text-xs font-semibold uppercase tracking-caps text-ink-subtle">{t(lang, 'admin.reg.people')}</h3>
+        {rowIndexes.slice(0, SHOWN).map((i) => (
+          <fieldset class="space-y-3 rounded-md border border-border p-3" data-person-row={i}>
+            <legend class="px-1 text-sm font-semibold">{i === 0 ? t(lang, 'admin.reg.bo.firstPerson') : t(lang, 'admin.reg.bo.personN', { n: i + 1 })}</legend>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label class="block"><span class={lab}>{t(lang, 'register.name')}{i === 0 ? ` (${t(lang, 'admin.reg.bo.blankIsContact')})` : ''}</span><input name={`p${i}_name`} value={v(`p${i}_name`)} class={tin} /></label>
+              {activeTypes.length > 0 && (
+                <label class="block"><span class={lab}>{t(lang, 'admin.reg.ticketType')}</span>
+                  <select name={`p${i}_ticket`} class={tin}>
+                    {i > 0 && <option value=""></option>}
+                    {activeTypes.map((ty) => <option value={ty.id} selected={v(`p${i}_ticket`) === String(ty.id)}>{ty.label}</option>)}
+                  </select>
+                </label>
+              )}
+            </div>
+            {personQuestions.length > 0 && <QuestionFields questions={personQuestions} prefix={`p${i}_q_`} lang={lang} />}
+          </fieldset>
+        ))}
+        {rows > SHOWN && (
+          <details class="rounded-md border border-border p-3" data-testid="more-people">
+            <summary class="cursor-pointer text-sm font-semibold">{t(lang, 'admin.reg.bo.morePeople')}</summary>
+            <div class="mt-3 space-y-3">
+        {rowIndexes.slice(SHOWN).map((i) => (
+          <fieldset class="space-y-3 rounded-md border border-border p-3" data-person-row={i}>
+            <legend class="px-1 text-sm font-semibold">{i === 0 ? t(lang, 'admin.reg.bo.firstPerson') : t(lang, 'admin.reg.bo.personN', { n: i + 1 })}</legend>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label class="block"><span class={lab}>{t(lang, 'register.name')}{i === 0 ? ` (${t(lang, 'admin.reg.bo.blankIsContact')})` : ''}</span><input name={`p${i}_name`} value={v(`p${i}_name`)} class={tin} /></label>
+              {activeTypes.length > 0 && (
+                <label class="block"><span class={lab}>{t(lang, 'admin.reg.ticketType')}</span>
+                  <select name={`p${i}_ticket`} class={tin}>
+                    {i > 0 && <option value=""></option>}
+                    {activeTypes.map((ty) => <option value={ty.id} selected={v(`p${i}_ticket`) === String(ty.id)}>{ty.label}</option>)}
+                  </select>
+                </label>
+              )}
+            </div>
+            {personQuestions.length > 0 && <QuestionFields questions={personQuestions} prefix={`p${i}_q_`} lang={lang} />}
+          </fieldset>
+        ))}
+            </div>
+          </details>
+        )}
+      </div>
+      {regQuestions.length > 0 && (
+        <fieldset class="space-y-3 rounded-md border border-border p-3">
+          <legend class="px-1 text-sm font-semibold">{t(lang, 'register.manage.answersHeading')}</legend>
+          <QuestionFields questions={regQuestions} prefix="q_" lang={lang} />
+        </fieldset>
+      )}
+      {paid && (
+        <fieldset class="rounded-md border border-border p-3" data-testid="manual-payment">
+          <legend class="px-1 text-sm font-semibold">{t(lang, 'admin.reg.bo.payment')}</legend>
+          <div class="flex flex-wrap items-end gap-4">
+            <label class="inline-flex min-h-11 items-center gap-2 text-sm"><input type="radio" name="payment_method" value="offline" checked={v('payment_method') !== 'comp'} /> {t(lang, 'admin.reg.bo.pay.offline')}</label>
+            <label class="block"><span class={lab}>{t(lang, 'admin.reg.bo.amountCollected')}</span><input name="amount" inputmode="decimal" value={v('amount')} class={`${tin} w-32`} placeholder={t(lang, 'admin.reg.bo.listPrice')} /></label>
+            <label class="inline-flex min-h-11 items-center gap-2 text-sm"><input type="radio" name="payment_method" value="comp" checked={v('payment_method') === 'comp'} /> {t(lang, 'admin.reg.bo.pay.comp')}</label>
+          </div>
+          <p class="mt-1 text-xs text-ink-subtle">{t(lang, 'admin.reg.bo.paymentHint')}</p>
+        </fieldset>
+      )}
+      <label class="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" name="send_confirmation" value="1" checked /> {t(lang, 'admin.reg.bo.sendConfirmation')}</label>
+      <button type="submit" class={btn}>{t(lang, 'admin.reg.bo.createRegistration')}</button>
+    </form>
+  </div>
+</details>

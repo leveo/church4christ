@@ -1,0 +1,72 @@
+---
+// Per-event access (registration admins only): who can do what on this event without area access. Viewer reads the
+// roster, desk runs the check-in desk, registrar manages registrations. Grant by choosing a person; revoke per row.
+import type { RegEventAccessRow } from '../../lib/regAccess';
+import { REG_ROLES } from '../../lib/regAccess';
+import { tin, lab, btnSecondary, td, card } from '../../lib/adminUi';
+import { t } from '../../lib/i18n';
+import type { Locale } from '../../lib/locales';
+
+interface Props { roles: RegEventAccessRow[]; candidates: Array<{ id: number; display_name: string }>; lang: Locale; search: string; eventId: number }
+const { roles, candidates, lang, search, eventId } = Astro.props;
+const base = `/admin/registration/${eventId}`;
+---
+<section id="access" class={`mt-10 ${card} max-w-3xl scroll-mt-4`} data-testid="event-access">
+  <h2 class="font-semibold">{t(lang, 'admin.reg.bo.access')}</h2>
+  <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.reg.bo.accessHint')}</p>
+  <dl class="mt-2 space-y-1 text-xs text-ink-subtle">
+    {REG_ROLES.map((r) => <div><dt class="inline font-semibold">{t(lang, `admin.reg.bo.role.${r}`)}:</dt> <dd class="inline">{t(lang, `admin.reg.bo.roleHint.${r}`)}</dd></div>)}
+  </dl>
+  {roles.length === 0 ? (
+    <p class="mt-3 text-sm text-ink-muted">{t(lang, 'admin.reg.bo.accessNone')}</p>
+  ) : (
+    <div class="mt-4 overflow-x-auto rounded-xl border border-border">
+      <table class="w-full border-collapse text-sm">
+        <tbody>
+          {roles.map((a) => (
+            <tr class="border-t border-border first:border-t-0" data-access-person={a.person_id}>
+              <td class={td}>{a.display_name}{a.email && <span class="block break-all text-xs text-ink-muted">{a.email}</span>}</td>
+              <td class={td}>{t(lang, `admin.reg.bo.role.${a.role}`)}</td>
+              <td class={`${td} text-right whitespace-nowrap`}>
+                <form method="post" class="inline">
+                  <input type="hidden" name="action" value="revoke_role" />
+                  <input type="hidden" name="person_id" value={a.person_id} />
+                  <button type="submit" class="text-xs font-semibold text-danger hover:underline">{t(lang, 'admin.reg.eventAdmins.remove')}</button>
+                </form>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+  <form method="get" action={`${base}#access`} class="mt-4 flex flex-wrap items-end gap-3">
+    <label class="block min-w-48 flex-1">
+      <span class={lab}>{t(lang, 'admin.reg.bo.accessSearch')}</span>
+      <input type="search" name="people" value={search} class={tin} placeholder={t(lang, 'admin.reg.bo.accessSearchHint')} />
+    </label>
+    <button type="submit" class={btnSecondary}>{t(lang, 'admin.reg.bo.search')}</button>
+  </form>
+  {search !== '' && (
+    candidates.length === 0 ? (
+      <p class="mt-3 text-sm text-ink-muted">{t(lang, 'admin.reg.bo.accessNoMatch')}</p>
+    ) : (
+      <ul class="mt-3 divide-y divide-border rounded-lg border border-border" data-testid="access-candidates">
+        {candidates.map((p) => (
+          <li class="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
+            <span>{p.display_name}</span>
+            <form method="post" class="flex items-center gap-2">
+              <input type="hidden" name="action" value="grant_role" />
+              <input type="hidden" name="person_id" value={p.id} />
+              <label class="sr-only" for={`role-${p.id}`}>{t(lang, 'admin.reg.bo.accessRole')}</label>
+              <select id={`role-${p.id}`} name="role" class={`${tin} w-auto`}>
+                {REG_ROLES.map((r) => <option value={r}>{t(lang, `admin.reg.bo.role.${r}`)}</option>)}
+              </select>
+              <button type="submit" class={btnSecondary}>{t(lang, 'admin.form.save')}</button>
+            </form>
+          </li>
+        ))}
+      </ul>
+    )
+  )}
+</section>

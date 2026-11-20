@@ -1,0 +1,190 @@
+---
+// The server-side roster: search, status chips with counts, ticket-type / door / answer filters, sort, paging, and
+// the registration / person views. Everything is a plain GET (links and one filter form), so it works without
+// scripting and a filtered view can be bookmarked or shared. Each row opens the registration in the detail panel.
+import type { RosterPage } from '../../lib/regAdmin';
+import type { RegQuestion, RegTicketType } from '../../lib/regDb';
+import { rosterQuery, type RosterState } from '../../lib/regAdminPage';
+import { formatCents } from '../../lib/money';
+import { tin, lab, btnSecondary, btn } from '../../lib/adminUi';
+import { t } from '../../lib/i18n';
+import type { Locale } from '../../lib/locales';
+
+interface Props {
+  page: RosterPage;
+  state: RosterState;
+  questions: RegQuestion[];
+  types: RegTicketType[];
+  eventId: number;
+  lang: Locale;
+  selected: number | null;
+}
+const { page, state, questions, types, eventId, lang, selected } = Astro.props;
+const base = `/admin/registration/${eventId}`;
+const href = (changes: Partial<Record<keyof RosterState, unknown>>, hash = 'roster') => {
+  const qs = rosterQuery(state, changes);
+  return `${base}${qs ? `?${qs}` : ''}#${hash}`;
+};
+const openHref = (id: number) => {
+  const qs = rosterQuery(state, { page: state.page });
+  return `${base}?${qs ? `${qs}&` : ''}reg=${id}#reg-drawer`;
+};
+const statuses = ['confirmed', 'review', 'waitlist', 'pending', 'declined', 'cancelled'] as const;
+const allCount = statuses.reduce((sum, s) => sum + page.counts[s], 0);
+const choiceQuestions = questions.filter((q) => q.type === 'select' || q.type === 'checkbox' || q.type === 'yesno');
+const answerOptions = choiceQuestions.flatMap((q) =>
+  (q.type === 'yesno' ? ['yes', 'no'] : (q.options ?? [])).map((key) => ({
+    value: `${q.id}:${key}`,
+    label: `${q.label}: ${q.type === 'yesno' ? t(lang, key === 'yes' ? 'register.yes' : 'register.no') : (q.option_labels[key] ?? key)}`,
+  })),
+);
+const filtered = state.q !== '' || state.type !== null || state.checkedIn !== null || state.qid !== null || state.status.length > 0;
+const SORTS = ['newest', 'oldest', 'name', 'status', 'confirmation'] as const;
+const sortKey: Record<(typeof SORTS)[number], string> = {
+  newest: 'admin.reg.bo.sortNewest', oldest: 'admin.reg.bo.sortOldest', name: 'admin.reg.bo.sortName', status: 'admin.reg.status', confirmation: 'admin.reg.confirmation',
+};
+const th = 'px-3 py-2 text-left';
+---
+<section id="roster" aria-labelledby="reg-roster-heading" class="mt-8 scroll-mt-4" data-testid="reg-roster">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <h2 id="reg-roster-heading" class="font-display text-heading-sm font-bold">{t(lang, 'admin.reg.registrations')} <span class="text-sm font-normal text-ink-muted" data-roster-total>{page.total}</span></h2>
+    <div class="flex flex-wrap gap-2 text-sm">
+      <a href={href({ view: 'registration' })} class={`${btnSecondary} ${state.view === 'registration' ? 'bg-surface-sunken' : ''}`} aria-current={state.view === 'registration' ? 'true' : undefined}>{t(lang, 'admin.reg.bo.viewRegistrations')}</a>
+      <a href={href({ view: 'person' })} class={`${btnSecondary} ${state.view === 'person' ? 'bg-surface-sunken' : ''}`} aria-current={state.view === 'person' ? 'true' : undefined}>{t(lang, 'admin.reg.bo.viewPeople')}</a>
+    </div>
+  </div>
+
+  <ul class="mt-3 flex flex-wrap gap-2" data-testid="status-chips">
+    <li><a href={href({ status: [] })} class="gathering-roster-status hover:underline" aria-current={state.status.length === 0 ? 'true' : undefined} data-status="all">{t(lang, 'admin.reg.bo.all')}: {allCount}</a></li>
+    {statuses.filter((s) => page.counts[s] > 0 || state.status.includes(s)).map((s) => (
+      <li><a href={href({ status: state.status.length === 1 && state.status[0] === s ? [] : [s] })} class="gathering-roster-status hover:underline" aria-current={state.status.includes(s) ? 'true' : undefined} data-status={s}>{t(lang, `admin.reg.status.${s}`)}: {page.counts[s]}</a></li>
+    ))}
+  </ul>
+
+  <form method="get" action={`${base}#roster`} class="mt-3 flex flex-wrap items-end gap-3" data-testid="roster-filters">
+    {state.status.length > 0 && <input type="hidden" name="status" value={state.status.join(',')} />}
+    {state.view === 'person' && <input type="hidden" name="view" value="person" />}
+    <label class="block min-w-56 flex-[2]">
+      <span class={lab}>{t(lang, 'admin.reg.bo.search')}</span>
+      <input type="search" name="q" value={state.q} class={tin} placeholder={t(lang, 'admin.reg.bo.searchHint')} />
+    </label>
+    {types.length > 0 && (
+      <label class="block min-w-40 flex-1">
+        <span class={lab}>{t(lang, 'admin.reg.ticketType')}</span>
+        <select name="type" class={tin}>
+          <option value="">{t(lang, 'admin.reg.allTypes')}</option>
+          {types.map((ty) => <option value={ty.id} selected={state.type === ty.id}>{ty.label}</option>)}
+        </select>
+      </label>
+    )}
+    <label class="block min-w-40 flex-1">
+      <span class={lab}>{t(lang, 'admin.reg.bo.door')}</span>
+      <select name="in" class={tin}>
+        <option value="">{t(lang, 'admin.reg.bo.doorAny')}</option>
+        <option value="yes" selected={state.checkedIn === true}>{t(lang, 'admin.reg.bo.doorIn')}</option>
+        <option value="no" selected={state.checkedIn === false}>{t(lang, 'admin.reg.bo.doorNot')}</option>
+      </select>
+    </label>
+    {answerOptions.length > 0 && (
+      <label class="block min-w-40 flex-1">
+        <span class={lab}>{t(lang, 'admin.reg.bo.answer')}</span>
+        <select name="ans" class={tin}>
+          <option value="">{t(lang, 'admin.reg.bo.answerAny')}</option>
+          {answerOptions.map((o) => <option value={o.value} selected={state.qid !== null && o.value === `${state.qid}:${state.opt}`}>{o.label}</option>)}
+        </select>
+      </label>
+    )}
+    <label class="block min-w-40 flex-1">
+      <span class={lab}>{t(lang, 'admin.reg.bo.sort')}</span>
+      <select name="sort" class={tin}>
+        {SORTS.map((s) => <option value={s} selected={state.sort === s}>{t(lang, sortKey[s])}</option>)}
+      </select>
+    </label>
+    <div class="flex items-center gap-3 pb-2">
+      <button type="submit" class={btn}>{t(lang, 'admin.reg.filter')}</button>
+      {filtered && <a href={`${base}#roster`} class="text-sm text-primary hover:underline">{t(lang, 'admin.reg.bo.clear')}</a>}
+    </div>
+  </form>
+
+  <div class="gathering-table-wrap mt-4">
+    {state.view === 'registration' ? (
+      <table class="gathering-table">
+        <thead>
+          <tr>
+            <th class={th}>{t(lang, 'admin.reg.confirmation')}</th>
+            <th class={th}>{t(lang, 'admin.reg.name')}</th>
+            <th class={th}>{t(lang, 'admin.reg.people')}</th>
+            <th class={th}>{t(lang, 'admin.reg.status')}</th>
+            <th class={th}>{t(lang, 'admin.reg.amount')}</th>
+            <th class={th}>{t(lang, 'admin.reg.registered')}</th>
+            <th class={th}><span class="sr-only">{t(lang, 'admin.reg.actions')}</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {page.rows.length === 0 ? (
+            <tr><td colspan="7" class="text-ink-muted">{t(lang, 'admin.reg.rosterEmpty')}</td></tr>
+          ) : page.rows.map(({ registration: r, people }) => (
+            <tr class={`align-top ${selected === r.id ? 'bg-primary-soft' : ''}`} data-reg-row={r.id}>
+              <td class="tabular-nums" data-confirmation>{r.confirmation_no ?? '—'}</td>
+              <td>
+                <span class="font-medium">{r.name}</span>
+                <span class="block break-all text-xs text-ink-muted">{r.email}</span>
+                {r.phone && <span class="block text-xs text-ink-muted">{r.phone}</span>}
+                {r.admin_note && <span class="mt-1 block text-xs italic text-ink-muted" data-note>{r.admin_note}</span>}
+              </td>
+              <td data-people>
+                <ul class="space-y-0.5">
+                  {people.map((p) => (
+                    <li>
+                      <span class="font-medium">{p.name}</span>{p.ticketLabel && <span class="text-ink-muted" data-ticket> · {p.ticketLabel}</span>}
+                      {p.checkedIn && <span class="ml-1 text-success" title={t(lang, 'admin.reg.bo.checkedIn')} data-checked-in>✓</span>}
+                    </li>
+                  ))}
+                </ul>
+              </td>
+              <td><span class="gathering-roster-status" data-status={r.status}>{t(lang, `admin.reg.status.${r.status}`)}</span></td>
+              <td class="tabular-nums">{formatCents(r.amount_cents, r.currency, lang)}{r.refunded_cents > 0 && <span class="block text-xs text-ink-muted">−{formatCents(r.refunded_cents, r.currency, lang)}</span>}</td>
+              <td class="whitespace-nowrap tabular-nums text-ink-muted">{r.created_at.slice(0, 16)}</td>
+              <td><a class="inline-flex min-h-9 items-center text-sm font-semibold text-primary hover:underline" href={openHref(r.id)} data-open-reg>{t(lang, 'admin.reg.bo.open')}</a></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    ) : (
+      <table class="gathering-table">
+        <thead>
+          <tr>
+            <th class={th}>{t(lang, 'admin.reg.bo.person')}</th>
+            <th class={th}>{t(lang, 'admin.reg.ticketType')}</th>
+            <th class={th}>{t(lang, 'admin.reg.bo.registration')}</th>
+            <th class={th}>{t(lang, 'admin.reg.status')}</th>
+            <th class={th}>{t(lang, 'admin.reg.bo.checkedIn')}</th>
+            <th class={th}><span class="sr-only">{t(lang, 'admin.reg.actions')}</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {page.rows.length === 0 ? (
+            <tr><td colspan="6" class="text-ink-muted">{t(lang, 'admin.reg.rosterEmpty')}</td></tr>
+          ) : page.rows.map(({ registration: r, people }) => (
+            <tr class={`align-top ${selected === r.id ? 'bg-primary-soft' : ''}`} data-person-row>
+              <td class="font-medium">{people[0]?.name ?? r.name}</td>
+              <td>{people[0]?.ticketLabel ?? ''}</td>
+              <td><span class="tabular-nums" data-confirmation>{r.confirmation_no ?? '—'}</span><span class="block text-xs text-ink-muted">{r.name}</span></td>
+              <td><span class="gathering-roster-status" data-status={r.status}>{t(lang, `admin.reg.status.${r.status}`)}</span></td>
+              <td>{people[0]?.checkedIn ? <span class="text-success">✓ {people[0].checkedInAt?.slice(11, 16)}</span> : <span class="text-ink-muted">—</span>}</td>
+              <td><a class="inline-flex min-h-9 items-center text-sm font-semibold text-primary hover:underline" href={openHref(r.id)}>{t(lang, 'admin.reg.bo.open')}</a></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </div>
+
+  {page.pages > 1 && (
+    <nav class="mt-3 flex items-center justify-between gap-3 text-sm" aria-label={t(lang, 'admin.reg.bo.paging')} data-testid="roster-paging">
+      {page.page > 1 ? <a class={btnSecondary} href={href({ page: page.page - 1 })} rel="prev">{t(lang, 'admin.reg.bo.prev')}</a> : <span></span>}
+      <span class="text-ink-muted">{t(lang, 'admin.reg.bo.pageOf', { page: page.page, pages: page.pages })}</span>
+      {page.page < page.pages ? <a class={btnSecondary} href={href({ page: page.page + 1 })} rel="next">{t(lang, 'admin.reg.bo.next')}</a> : <span></span>}
+    </nav>
+  )}
+</section>

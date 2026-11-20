@@ -1,95 +1,133 @@
 ---
 import GatheringSurface from '../../../components/gatherings/GatheringSurface.astro';
 import { gatheringsCopy } from '../../../i18n/designGatherings';
-import AvatarInitials from '../../../components/AvatarInitials.astro';
 import DateBadge from '../../../components/gatherings/DateBadge.astro';
 import RegFormBuilder from '../../../components/regBuilder/RegFormBuilder';
+import Overview from '../../../components/regAdmin/Overview.astro';
+import Roster from '../../../components/regAdmin/Roster.astro';
+import Drawer from '../../../components/regAdmin/Drawer.astro';
+import ManualAdd from '../../../components/regAdmin/ManualAdd.astro';
+import BulkEmail from '../../../components/regAdmin/BulkEmail.astro';
+import Duplicates from '../../../components/regAdmin/Duplicates.astro';
+import AccessPanel from '../../../components/regAdmin/AccessPanel.astro';
 import en from '../../../i18n/en';
 
-// One event's registration form builder + registration roster (console class — re-checks
-// editor∪admin). The form builder is a client:only React island (the same pattern as the page
-// builder): GET mounts it with the stored questions and ticket types as JSON; the island saves with
-// a same-page JSON POST (application/json) handled by saveFormRequest (validated in one batch,
-// field-path errors come back for inline display; the CSRF middleware checks Origin on every
-// non-GET). The roster lists each registration with its answers in per-question columns, an admin
-// cancel button, and a CSV link. A template (is_template) opens the same builder but has no roster.
+// One event's back office. The route class is `regEventStaff` (a per-event role holder reaches it without area
+// access); the middleware has already checked the role for this event, and this page checks it AGAIN here, then
+// each section and each POST action checks its own capability before reading or changing anything:
+//   view    overview, roster, detail panel, duplicates, activity, exports, printing
+//   manage  edits, decisions, cancels, manual add, notes, resend, bulk email           (per-event registrar or area access)
+//   edit    event settings link, the form builder, per-event roles, event admins        (registration area only)
+//   refund  refunds                                                                    (payment operations + manage)
+// A person holding only 'view' is never sent the builder, the access panel or any form. The event of a registration
+// opened with ?reg= is derived from the row and must be this page's event (a read leak otherwise).
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
-import { getEventAdmin, listQuestions, listQuestionsAdmin, listRegistrations, listTicketTypesAdmin } from '../../../lib/regDb';
-import { saveFormRequest } from '../../../lib/regFormSave';
-import { cancelAndNotify, type RegNotifyEnv } from '../../../lib/regNotify';
+import { getEventAdmin, listQuestions, listQuestionsAdmin, listTicketTypes, listTicketTypesAdmin } from '../../../lib/regDb';
+import { canEditEvent, canRefund, eventOfRegistration, listEventRoles, regRoleAllows, requireRegRole, searchPeopleForAccess } from '../../../lib/regAccess';
+import { eventOverview, getRegistrationAdmin, listDuplicates, listRoster } from '../../../lib/regAdmin';
+import { parseRosterState, rosterOptions, rosterQuery, runBuilderSave, runRegAdminAction, safeBack, type ActionOutcome } from '../../../lib/regAdminPage';
+import { failureKey, noticeKey, reasonKey } from '../../../lib/regAdminView';
+import { submissionErrorKey } from '../../../lib/regViewHtml';
+import { outboxCounts } from '../../../lib/regOutbox';
 import { env } from 'cloudflare:workers';
-import { listEventAdmins, addEventAdmin, removeEventAdmin, listPeopleWithAccount } from '../../../lib/prayerDb';
-import { formatCents } from '../../../lib/money';
-import { tin, lab, card, btnSecondary, rowBtn, th, td, noticeOk } from '../../../lib/adminUi';
+import { listEventAdmins, listPeopleWithAccount } from '../../../lib/prayerDb';
+import { tin, lab, card, btn, btnSecondary, td, noticeOk, noticeErr } from '../../../lib/adminUi';
 import { SUPPORTED_LOCALES, localeMeta, type Locale } from '../../../lib/locales';
-import { hasAreaAccess } from '../../../lib/adminAreas';
 
 const user = Astro.locals.user;
-if (!user || !(user.isEditor || hasAreaAccess(user, 'registration'))) return new Response(null, { status: 403 });
+if (!user) return new Response(null, { status: 403 });
 const lang: Locale = user.lang ?? 'en';
 const db = Astro.locals.db;
 // Event admins (prayer-approval console) only exist under the portal module.
 const hasPortal = Astro.locals.modules.has('portal');
+const isPg = Astro.locals.dbBackend !== 'd1';
 
 const rawId = Astro.params.id ?? '';
 if (!/^\d+$/.test(rawId)) return new Response(null, { status: 404 });
 const eventId = Number(rawId);
+const gate = await requireRegRole(db, user, eventId, 'view');
+if (!gate.ok) return new Response(null, { status: gate.status });
+const canManage = regRoleAllows(gate.role, 'manage');
+const canEdit = canEditEvent(user);
+const canRefundNow = canManage && canRefund(user);
 const event = await getEventAdmin(db, eventId);
 if (!event) return new Response(null, { status: 404 });
+const defaultLocale = Astro.locals.locales.default;
 
+// ── POST ─────────────────────────────────────────────────────────────────────
+let outcome: ActionOutcome | null = null;
+let echo: Record<string, string> = {};
+let echoStatuses: string[] = [];
 if (Astro.request.method === 'POST') {
-  // The form builder island saves with application/json.
+  // The form builder island saves with application/json (registration admins only).
   if ((Astro.request.headers.get('content-type') ?? '').includes('application/json')) {
-    const saved = await saveFormRequest(db, eventId, await Astro.request.text(), {
-      backend: Astro.locals.dbBackend,
-      defaultLocale: Astro.locals.locales.default,
-    });
-    return new Response(JSON.stringify(saved.body), { status: saved.status, headers: { 'content-type': 'application/json' } });
+    const result = await runBuilderSave({ db, user, eventId, defaultLocale, env: env as never }, await Astro.request.text());
+    if ('denied' in result) return new Response(null, { status: result.denied });
+    return new Response(JSON.stringify(result.saved.body), { status: result.saved.status, headers: { 'content-type': 'application/json' } });
   }
-  const fd = await Astro.request.formData();
-  const action = String(fd.get('action') ?? '');
-  if (action === 'cancel') {
-    const rid = String(fd.get('registration_id') ?? '');
-    // Cancelling frees seats: waitlisted registrations move up (free events), and both they
-    // and the cancelled registrant are emailed. Awaited (the db client is drained after the
-    // redirect) and never throws.
-    if (/^\d+$/.test(rid)) await cancelAndNotify(env as unknown as RegNotifyEnv, db, Number(rid));
-    return Astro.redirect(`/admin/registration/${eventId}?cancelled=1`, 303);
+  let fd: FormData;
+  try {
+    fd = await Astro.request.formData();
+  } catch {
+    return new Response(null, { status: 400 });
   }
-  if (hasPortal && (action === 'addEventAdmin' || action === 'removeEventAdmin')) {
-    const pid = String(fd.get('person_id') ?? '');
-    if (/^\d+$/.test(pid)) {
-      if (action === 'addEventAdmin') await addEventAdmin(db, eventId, Number(pid));
-      else await removeEventAdmin(db, eventId, Number(pid));
-    }
-    return Astro.redirect(`/admin/registration/${eventId}?saved=1`, 303);
+  outcome = await runRegAdminAction({ db, env: env as never, user, eventId, portal: hasPortal, defaultLocale }, fd);
+  if (outcome.kind === 'denied') return new Response(null, { status: outcome.status });
+  if (outcome.kind === 'bad_request') return new Response(null, { status: 400 });
+  const back = safeBack(String(fd.get('back') ?? ''));
+  const go = (extra: Record<string, string | number | null | undefined>, hash = ''): Response => {
+    const p = new URLSearchParams(back);
+    for (const [k, v] of Object.entries(extra)) if (v !== null && v !== undefined) p.set(k, String(v));
+    return Astro.redirect(`/admin/registration/${eventId}?${p.toString()}${hash}`, 303);
+  };
+  if (outcome.kind === 'ok') {
+    const hash = outcome.notice.startsWith('role_') ? '#access' : outcome.reg ? '#reg-drawer' : outcome.notice === 'bulk_queued' ? '#email' : '';
+    return go({ reg: outcome.reg, notice: outcome.notice, ...(outcome.extra ?? {}) }, hash);
   }
+  if (outcome.kind === 'conflict') return go({ reg: outcome.reg, notice: 'conflict' }, outcome.reg ? '#reg-drawer' : '');
+  for (const [k, v] of fd.entries()) if (typeof v === 'string') echo[k] = v;
+  echoStatuses = fd.getAll('audience_status').filter((v): v is string => typeof v === 'string');
+  if (outcome.kind === 'confirm') Astro.response.status = 409;
+  else if (outcome.kind === 'invalid' || outcome.kind === 'failed') Astro.response.status = 422;
 }
 
 const isTemplate = event.is_template === 1;
-const [questions, tickets] = await Promise.all([listQuestionsAdmin(db, eventId), listTicketTypesAdmin(db, eventId)]);
-// A template is only ever copied: it has no registrations, roster or event admins.
-const roster = isTemplate ? [] : await listRegistrations(db, lang, eventId);
-// Roster column headers use the same localized labels the answers carry (so each
-// answer lines up with its column even when two questions share a label).
-const rosterQuestions = isTemplate ? [] : (await listQuestions(db, lang, eventId)).filter((q) => q.scope === 'registration' && q.type !== 'section');
-const saved = Astro.url.searchParams.get('saved') === '1';
-const cancelled = Astro.url.searchParams.get('cancelled') === '1';
+const eventTitle = event.titles[lang] || event.titles[defaultLocale] || event.title_en || `#${eventId}`;
+const base = `/admin/registration/${eventId}`;
+const state = parseRosterState(Astro.url.searchParams);
 
+// The registration opened in the detail panel (POST failures keep it open too).
+const regParam = Astro.url.searchParams.get('reg') ?? (outcome && 'reg' in outcome && outcome.reg ? String(outcome.reg) : '');
+let regId: number | null = /^\d+$/.test(regParam) ? Number(regParam) : null;
+if (regId !== null && isTemplate) regId = null;
+if (regId !== null && (await eventOfRegistration(db, regId)) !== eventId) return new Response(null, { status: 404 });
+
+const tabParam = Astro.url.searchParams.get('tab') ?? '';
+const [overview, roster, questions, tickets, detail, duplicates, counts] = isTemplate
+  ? [null, null, [], [], null, [], null]
+  : await Promise.all([
+      eventOverview(db, eventId, lang),
+      listRoster(db, eventId, rosterOptions(state, lang)),
+      listQuestions(db, lang, eventId),
+      listTicketTypes(db, lang, eventId),
+      regId !== null ? getRegistrationAdmin(db, regId, lang) : Promise.resolve(null),
+      listDuplicates(db, eventId),
+      canManage ? outboxCounts(db, eventId) : Promise.resolve(null),
+    ]);
+
+// Admin-only (registration area) data: the builder, per-event roles and event admins. Never loaded for a viewer or registrar.
+const builderQuestions = canEdit ? await listQuestionsAdmin(db, eventId) : [];
+const builderTickets = canEdit ? await listTicketTypesAdmin(db, eventId) : [];
+const peopleSearch = (Astro.url.searchParams.get('people') ?? '').trim().slice(0, 100);
+const accessRoles = canEdit && !isTemplate ? await listEventRoles(db, eventId) : [];
+const accessCandidates = canEdit && !isTemplate && peopleSearch !== '' ? await searchPeopleForAccess(db, peopleSearch) : [];
 let eventAdmins: Awaited<ReturnType<typeof listEventAdmins>> = [];
 let adminCandidates: Awaited<ReturnType<typeof listPeopleWithAccount>> = [];
-if (hasPortal && !isTemplate) {
+if (canEdit && hasPortal && !isTemplate) {
   [eventAdmins, adminCandidates] = await Promise.all([listEventAdmins(db, eventId), listPeopleWithAccount(db)]);
 }
 
-// The event's display title + the localized question label (for roster headers
-// and aligning each answer to its column — the CSV keys by id, the HTML by label).
-const defaultLocale = Astro.locals.locales.default;
-const eventTitle = event.titles[lang] || event.titles[defaultLocale] || event.title_en || `#${eventId}`;
-// The form is editable in every enabled site language (default first, required); the island
-// folds the others. A disabled language is left out of the payload, which the writer reads as
-// "leave that language's text as it is".
 const { enabled } = Astro.locals.locales;
 const formLocales: Locale[] = [defaultLocale, ...enabled.filter((code) => code !== defaultLocale)].filter((code) => SUPPORTED_LOCALES.includes(code));
 const builderLocales = formLocales.map((code) => ({ code, label: localeMeta(code).nativeName }));
@@ -101,111 +139,119 @@ const builderStrings = Object.fromEntries(
 const copy = gatheringsCopy(lang);
 const heading = t(lang, 'admin.reg.title');
 const h2 = 'font-display text-heading-sm font-bold';
+
+// Banners: a notice from a finished action, or the refusal of the last one.
+const notice = noticeKey(Astro.url.searchParams.get('notice'));
+const bulkQueued = Astro.url.searchParams.get('queued');
+const bulkSent = Astro.url.searchParams.get('sent');
+const legacyCancelled = Astro.url.searchParams.get('cancelled') === '1';
+const saved = Astro.url.searchParams.get('saved') === '1';
+const questionTypes = new Map(questions.map((q) => [q.id, q.type as string]));
+const back = rosterQuery(state, { page: state.page });
+const closeHref = `${base}${back ? `?${back}` : ''}#roster`;
+const priced = (event.price_cents ?? 0) > 0 || tickets.some((ty) => ty.active === 1 && ty.price_cents > 0);
+const openSection = (name: string) => tabParam === name || (outcome !== null && ((name === 'add' && echo.action === 'create') || (name === 'email' && /^bulk_/.test(echo.action ?? ''))));
 ---
 
 <Admin title={`${eventTitle} · ${heading}`}>
   <GatheringSurface>
   <div class="gathering-heading">
     <div><p class="gathering-eyebrow">{copy.eyebrow}</p><h1>{eventTitle}{isTemplate && <span class="ml-3 align-middle rounded-full bg-surface-sunken px-3 py-1 text-xs font-medium text-ink-muted">{t(lang, 'admin.reg.templateBadge')}</span>}</h1><p class="gathering-intro">{isTemplate ? t(lang, 'admin.reg.templateIntroDetail') : copy.rosterIntro}</p></div>
-    <a href="/admin/registration" class="text-sm text-primary hover:underline">{t(lang, 'admin.reg.backToList')}</a>
+    <div class="flex flex-wrap items-center gap-3">
+      {canEdit && !isTemplate && <a href={`/admin/registration?edit=${eventId}`} class="text-sm text-primary hover:underline" data-testid="event-settings-link">{t(lang, 'admin.reg.bo.eventSettings')}</a>}
+      {canEdit && <a href="/admin/registration" class="text-sm text-primary hover:underline">{t(lang, 'admin.reg.backToList')}</a>}
+    </div>
   </div>
-  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
-  {cancelled && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.reg.cancelled')}</p>}
 
-  {!isTemplate && (
-  <>
-  <div class="gathering-section-heading">
-    <div class="gathering-actions"><DateBadge date={event.starts_at} locale={lang} /><div><h2 class={h2}>{t(lang, 'admin.reg.registrations')}</h2><p class="mt-1 text-xs text-ink-muted">{roster.length} {copy.recordsShown}</p></div></div>
-    <a href={`/admin/registration/${eventId}/export.csv`} class={btnSecondary}>{t(lang, 'admin.reg.exportCsv')}</a>
-  </div>
-  <div class="gathering-table-wrap mt-4">
-    <table class="gathering-table">
-      <thead class="bg-surface-sunken">
-        <tr>
-          <th class={th}>{t(lang, 'admin.reg.confirmation')}</th>
-          <th class={th}>{t(lang, 'admin.reg.name')}</th>
-          <th class={th}>{t(lang, 'admin.reg.email')}</th>
-          <th class={th}>{t(lang, 'admin.reg.partySize')}</th>
-          <th class={th}>{t(lang, 'admin.reg.people')}</th>
-          <th class={th}>{t(lang, 'admin.reg.phone')}</th>
-          <th class={th}>{t(lang, 'admin.reg.status')}</th>
-          <th class={th}>{t(lang, 'admin.reg.amount')}</th>
-          <th class={th}>{t(lang, 'admin.reg.registered')}</th>
-          {rosterQuestions.map((q) => <th class={th}>{q.label}</th>)}
-          <th class={th}>{t(lang, 'admin.reg.actions')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {
-          roster.length === 0 ? (
-            <tr>
-              <td class={`${td} text-ink-muted`} colspan={10 + rosterQuestions.length}>
-                {t(lang, 'admin.reg.rosterEmpty')}
-              </td>
-            </tr>
-          ) : (
-            roster.map((r) => {
-              const byLabel = new Map(r.answers.map((a) => [a.label, a.value]));
-              return (
-                <tr class="border-t border-border align-top">
-                  <td class={`${td} font-medium tabular-nums`} data-confirmation>{r.confirmation_no ?? '—'}</td>
-                  <td class={`${td} font-medium`}><div class="gathering-identity"><AvatarInitials name={r.name} sizeClass="h-8 w-8 text-xs" />{r.name}</div></td>
-                  <td class={`${td} break-all`}>{r.email}</td>
-                  <td class={`${td} tabular-nums`}>{r.party_size}</td>
-                  <td class={td} data-people>
-                    {r.attendees.length > 1 || r.attendees.some((p) => p.ticket || p.answers.length > 0 || p.name !== r.name) ? (
-                      <ul class="space-y-1">
-                        {r.attendees.map((p) => (
-                          <li>
-                            <span class="font-medium">{p.name}</span>{p.ticket && <span class="text-ink-muted" data-ticket> · {p.ticket}</span>}
-                            {p.answers.length > 0 && <p class="text-xs text-ink-muted" data-person-answers>{p.answers.map((a) => `${a.label}: ${a.value}`).join('; ')}</p>}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : ''}
-                  </td>
-                  <td class={`${td} whitespace-nowrap`}>{r.phone ?? ''}</td>
-                  <td class={td}><span class="gathering-roster-status" data-status={r.status}>{t(lang, `admin.reg.status.${r.status}`)}</span></td>
-                  <td class={`${td} tabular-nums`}>{formatCents(r.amount_cents, event.currency)}</td>
-                  <td class={`${td} text-ink-muted tabular-nums`}>{r.created_at.slice(0, 16)}</td>
-                  {rosterQuestions.map((q) => (
-                    <td class={td}>{byLabel.get(q.label) ?? ''}</td>
-                  ))}
-                  <td class={td}>
-                    <form method="post" onsubmit={`return confirm(${JSON.stringify(t(lang, 'admin.reg.cancelConfirm'))})`}>
-                      <input type="hidden" name="action" value="cancel" />
-                      <input type="hidden" name="registration_id" value={r.id} />
-                      <button type="submit" class={rowBtn} disabled={r.status === 'cancelled' || r.status === 'declined'}>
-                        {t(lang, 'admin.reg.cancel')}
-                      </button>
-                    </form>
-                  </td>
-                </tr>
-              );
-            })
-          )
-        }
-      </tbody>
-    </table>
-  </div>
-  </>
+  {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
+  {legacyCancelled && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.reg.cancelled')}</p>}
+  {notice && (
+    <p class={`mt-4 ${Astro.url.searchParams.get('notice') === 'conflict' ? noticeErr : noticeOk}`} role="status" data-testid="notice" data-notice={Astro.url.searchParams.get('notice')}>
+      {t(lang, notice)}{Astro.url.searchParams.get('notice') === 'bulk_queued' && bulkQueued ? ` ${t(lang, 'admin.reg.bo.bulkQueuedDetail', { queued: Number(bulkQueued) || 0, sent: Number(bulkSent) || 0 })}` : ''}
+    </p>
+  )}
+  {outcome?.kind === 'failed' && <p class={`mt-4 ${noticeErr}`} role="alert" data-testid="refusal" data-code={outcome.code}>{t(lang, failureKey(outcome.code))}</p>}
+  {outcome?.kind === 'invalid' && (
+    <div class={`mt-4 ${noticeErr}`} role="alert" data-testid="validation-errors">
+      <p class="font-semibold">{t(lang, 'register.err.summary')}</p>
+      <ul class="mt-1 list-disc pl-5">
+        {outcome.errors.length === 0 ? <li>{t(lang, failureKey(outcome.code))}</li> : outcome.errors.map((e) => <li data-path={e.path}>{e.path} — {t(lang, submissionErrorKey(e, questionTypes))}</li>)}
+      </ul>
+    </div>
+  )}
+  {outcome?.kind === 'confirm' && (
+    <form method="post" class={`mt-4 ${noticeErr} flex flex-wrap items-center gap-3`} role="alert" data-testid="needs-confirm" data-reason={outcome.reason}>
+      <p class="min-w-0 flex-1 text-sm">{t(lang, reasonKey(outcome.reason))}</p>
+      {outcome.fields.map(([k, v]) => <input type="hidden" name={k} value={v} />)}
+      <input type="hidden" name="confirm" value="1" />
+      <button type="submit" class={btn}>{t(lang, 'admin.reg.bo.doItAnyway')}</button>
+    </form>
   )}
 
-  <section class={isTemplate ? 'mt-6' : 'mt-10'} aria-labelledby="reg-form-heading">
-    <h2 id="reg-form-heading" class={h2}>{t(lang, 'admin.regBuilder.title')}</h2>
-    <p class="mt-1 max-w-2xl text-sm text-ink-muted">{t(lang, isTemplate ? 'admin.reg.templateBuilderIntro' : 'admin.regBuilder.intro')}</p>
-    <RegFormBuilder
-      client:only="react"
-      questions={questions}
-      tickets={tickets}
-      locales={builderLocales}
-      defaultLocale={defaultLocale}
-      isD1={Astro.locals.dbBackend === 'd1'}
-      strings={builderStrings}
-    />
-  </section>
+  {!isTemplate && overview && roster && (
+    <>
+    <div class="gathering-section-heading">
+      <div class="gathering-actions"><DateBadge date={event.starts_at} locale={lang} /><p class="text-xs text-ink-muted">{event.location ?? ''}</p></div>
+      <div class="flex flex-wrap gap-2" data-testid="export-links">
+        <a href={`${base}/export.csv`} class={btnSecondary}>{t(lang, 'admin.reg.exportCsv')}</a>
+        <a href={`${base}/export-people.csv`} class={btnSecondary}>{t(lang, 'admin.reg.bo.exportPeople')}</a>
+        <a href={`${base}/badges`} class={btnSecondary} target="_blank" rel="noopener">{t(lang, 'admin.reg.badges.title')}</a>
+        <a href={`${base}/sign-in-sheet`} class={btnSecondary} target="_blank" rel="noopener">{t(lang, 'admin.reg.sheet.title')}</a>
+        <a href={`${base}/checkin`} class={btnSecondary}>{t(lang, 'admin.reg.bo.checkinDesk')}</a>
+      </div>
+    </div>
+
+    <Overview overview={overview} lang={lang} eventId={eventId} />
+
+    {detail && (
+      <Drawer
+        detail={detail}
+        questions={questions}
+        types={tickets}
+        lang={lang}
+        eventId={eventId}
+        back={back}
+        closeHref={closeHref}
+        canManage={canManage}
+        canRefund={canRefundNow}
+        isPg={isPg}
+        requiresApproval={event.requires_approval === 1}
+      />
+    )}
+    {regId !== null && !detail && <p class={`mt-6 ${noticeErr}`}>{t(lang, 'register.manage.notAllowed')}</p>}
+
+    <Roster page={roster} state={state} questions={questions} types={tickets} eventId={eventId} lang={lang} selected={regId} />
+
+    <div class="mt-6">
+      {canManage && <ManualAdd questions={questions} types={tickets} lang={lang} maxParty={event.max_party_size} paid={priced} open={openSection('add')} echo={echo.action === 'create' ? echo : {}} />}
+      <Duplicates groups={duplicates} lang={lang} eventId={eventId} open={tabParam === 'duplicates'} />
+      {canManage && counts && (
+        <BulkEmail types={tickets} lang={lang} counts={counts} open={openSection('email')} echo={/^bulk_/.test(echo.action ?? '') ? echo : {}} echoStatuses={echoStatuses} preview={outcome?.kind === 'preview' ? outcome.count : null} />
+      )}
+    </div>
+    </>
+  )}
+
+  {canEdit && (
+    <section class={isTemplate ? 'mt-6' : 'mt-10'} aria-labelledby="reg-form-heading" data-testid="form-builder">
+      <h2 id="reg-form-heading" class={h2}>{t(lang, 'admin.regBuilder.title')}</h2>
+      <p class="mt-1 max-w-2xl text-sm text-ink-muted">{t(lang, isTemplate ? 'admin.reg.templateBuilderIntro' : 'admin.regBuilder.intro')}</p>
+      <RegFormBuilder
+        client:only="react"
+        questions={builderQuestions}
+        tickets={builderTickets}
+        locales={builderLocales}
+        defaultLocale={defaultLocale}
+        isD1={Astro.locals.dbBackend === 'd1'}
+        strings={builderStrings}
+      />
+    </section>
+  )}
+
+  {canEdit && !isTemplate && <AccessPanel roles={accessRoles} candidates={accessCandidates} lang={lang} search={peopleSearch} eventId={eventId} />}
+
   {
-    hasPortal && !isTemplate && (
+    canEdit && hasPortal && !isTemplate && (
       <section class={`mt-10 ${card} max-w-2xl`}>
         <h2 class="font-semibold">{t(lang, 'admin.reg.eventAdmins.title')}</h2>
         <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.reg.eventAdmins.hint')}</p>
@@ -251,6 +297,6 @@ const h2 = 'font-display text-heading-sm font-bold';
       </section>
     )
   }
-  {!hasPortal && !isTemplate && <p class="mt-10 max-w-2xl text-sm text-ink-muted">{t(lang, 'admin.reg.eventAdmins.portalOff')}</p>}
+  {canEdit && !hasPortal && !isTemplate && <p class="mt-10 max-w-2xl text-sm text-ink-muted">{t(lang, 'admin.reg.eventAdmins.portalOff')}</p>}
   </GatheringSurface>
 </Admin>

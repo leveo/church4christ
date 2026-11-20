@@ -1,0 +1,64 @@
+---
+// The bulk email composer: audience (status, ticket type), subject, plain-text body with placeholders, a
+// recipient-count preview, then send (queued in the outbox; the first rows go out with this request, the hourly
+// job finishes the rest). Shows the outbox counts for the event.
+import type { RegTicketType } from '../../lib/regDb';
+import { tin, lab, btn, btnSecondary } from '../../lib/adminUi';
+import { t } from '../../lib/i18n';
+import type { Locale } from '../../lib/locales';
+
+interface Props {
+  types: RegTicketType[];
+  lang: Locale;
+  counts: Record<'queued' | 'sent' | 'failed' | 'skipped', number>;
+  open: boolean;
+  echo: Record<string, string>;
+  echoStatuses: string[];
+  /** Set after "Preview": the recipient count. */
+  preview: number | null;
+}
+const { types, lang, counts, open, echo, echoStatuses, preview } = Astro.props;
+const statuses = ['confirmed', 'review', 'waitlist', 'pending', 'declined', 'cancelled'] as const;
+const picked = echoStatuses.length > 0 ? echoStatuses : ['confirmed'];
+const total = counts.queued + counts.sent + counts.failed + counts.skipped;
+---
+<details id="email" class="gathering-editor scroll-mt-4" open={open} data-testid="bulk-email">
+  <summary>{t(lang, 'admin.reg.bo.bulkEmail')}</summary>
+  <div class="gathering-editor-inner">
+    <form method="post" class="space-y-4">
+      <p class="text-sm text-ink-muted">{t(lang, 'admin.reg.bo.bulkHint')}</p>
+      <fieldset>
+        <legend class={lab}>{t(lang, 'admin.reg.bo.audience')}</legend>
+        <div class="flex flex-wrap gap-x-4 gap-y-1">
+          {statuses.map((s) => (
+            <label class="inline-flex min-h-9 items-center gap-2 text-sm"><input type="checkbox" name="audience_status" value={s} checked={picked.includes(s)} /> {t(lang, `admin.reg.status.${s}`)}</label>
+          ))}
+        </div>
+      </fieldset>
+      {types.length > 0 && (
+        <label class="block max-w-xs">
+          <span class={lab}>{t(lang, 'admin.reg.ticketType')}</span>
+          <select name="audience_ticket" class={tin}>
+            <option value="">{t(lang, 'admin.reg.allTypes')}</option>
+            {types.map((ty) => <option value={ty.id} selected={echo.audience_ticket === String(ty.id)}>{ty.label}</option>)}
+          </select>
+        </label>
+      )}
+      <label class="block"><span class={lab}>{t(lang, 'admin.reg.bo.subject')}</span><input name="subject" maxlength="200" value={echo.subject ?? ''} class={tin} required /></label>
+      <label class="block"><span class={lab}>{t(lang, 'admin.reg.bo.body')}</span><textarea name="body" rows="6" maxlength="10000" class={tin} required>{echo.body ?? ''}</textarea></label>
+      <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.bo.placeholderHelp')} <code>{'{name}'}</code> <code>{'{event}'}</code> <code>{'{confirmation}'}</code></p>
+      {preview !== null && (
+        <p class="rounded-md bg-primary-soft px-3 py-2 text-sm text-on-primary-soft" data-testid="bulk-preview">{t(lang, 'admin.reg.bo.previewCount', { count: preview })}</p>
+      )}
+      <div class="flex flex-wrap gap-3">
+        <button type="submit" name="action" value="bulk_preview" class={btnSecondary}>{t(lang, 'admin.reg.bo.preview')}</button>
+        <button type="submit" name="action" value="bulk_send" class={btn} data-confirm={t(lang, 'admin.reg.bo.sendConfirm')}>{t(lang, 'admin.reg.bo.send')}</button>
+      </div>
+    </form>
+    {total > 0 && (
+      <p class="mt-4 text-sm text-ink-muted" data-testid="outbox-counts">
+        {t(lang, 'admin.reg.bo.outbox')}: {t(lang, 'admin.reg.bo.outboxQueued')} {counts.queued} · {t(lang, 'admin.reg.bo.outboxSent')} {counts.sent} · {t(lang, 'admin.reg.bo.outboxFailed')} {counts.failed}{counts.skipped > 0 ? ` · ${t(lang, 'admin.reg.bo.outboxSkipped')} ${counts.skipped}` : ''}
+      </p>
+    )}
+  </div>
+</details>

@@ -1,0 +1,292 @@
+---
+// The detail panel for one registration (?reg=<id>): the summary, the people, the answers, the staff note and the
+// history, and (for a registrar) every change: edit contact / people / answers, change a ticket type, add or
+// remove a person, move between waitlist and confirmed, approval decisions, resend, cancel and, for payment
+// operations, refunds. A viewer gets the read-only parts only. Every form carries the `version` it was read at, so
+// a stale form is refused ("someone else changed this registration").
+import type { RegistrationAdminDetail } from '../../lib/regAdmin';
+import type { RegQuestion, RegTicketType } from '../../lib/regDb';
+import { activityDetailText, activityKey } from '../../lib/regAdminView';
+import { formatCents } from '../../lib/money';
+import { tin, lab, btn, btnSecondary, btnDanger, rowBtn } from '../../lib/adminUi';
+import { t } from '../../lib/i18n';
+import type { Locale } from '../../lib/locales';
+import QuestionFields from './QuestionFields.astro';
+
+interface Props {
+  detail: RegistrationAdminDetail;
+  questions: RegQuestion[];
+  types: RegTicketType[];
+  lang: Locale;
+  eventId: number;
+  /** The roster query string the panel was opened from (kept on every redirect). */
+  back: string;
+  closeHref: string;
+  canManage: boolean;
+  canRefund: boolean;
+  /** Stripe refunds exist on Postgres only. */
+  isPg: boolean;
+  requiresApproval: boolean;
+}
+const { detail, questions, types, lang, back, closeHref, canManage, canRefund, isPg, requiresApproval } = Astro.props;
+const reg = detail.summary.registration;
+const currency = reg.currency;
+const people = detail.summary.attendees.filter((a) => a.status === 'active');
+const gone = people.length === 0 || reg.status === 'cancelled' || reg.status === 'declined';
+const editable = canManage && !gone;
+const doorOf = new Map(detail.checkins.map((c) => [c.attendeeId, c]));
+const activeTypes = types.filter((ty) => ty.active === 1);
+const regQuestions = questions.filter((q) => q.scope === 'registration');
+const personQuestions = questions.filter((q) => q.scope === 'attendee');
+const statusLabel = (s: string) => t(lang, `admin.reg.status.${s}`);
+const paidCents = reg.amount_cents;
+const remaining = paidCents - detail.refundedCents;
+const decisions = [
+  { decision: 'accept', to: 'confirmed', label: 'admin.reg.bo.accept' },
+  { decision: 'waitlist', to: 'waitlist', label: 'admin.reg.bo.waitlist' },
+  { decision: 'decline', to: 'declined', label: 'admin.reg.bo.decline' },
+].filter((d) => d.to !== reg.status);
+const canDecide = canManage && requiresApproval && ['review', 'waitlist', 'declined'].includes(reg.status);
+const canMove = editable && paidCents === 0 && ((reg.status === 'waitlist' && !requiresApproval) || (reg.status === 'confirmed'));
+const moveTo = reg.status === 'waitlist' ? 'confirmed' : 'waitlist';
+const canResend = canManage && ['confirmed', 'waitlist', 'review'].includes(reg.status);
+const showStripeRefund = canRefund && isPg && detail.paymentMethod === 'stripe' && remaining > 0;
+const showOfflineRefund = canRefund && detail.paymentMethod === 'offline' && remaining > 0;
+const h3 = 'text-xs font-semibold uppercase tracking-caps text-ink-subtle';
+const box = 'mt-4 rounded-lg border border-border p-4';
+---
+<section id="reg-drawer" class="mt-8 scroll-mt-4 rounded-xl border border-primary bg-surface-raised p-4 shadow-sm sm:p-6" aria-labelledby="reg-drawer-heading" data-testid="reg-drawer" data-registration={reg.id} data-version={detail.version}>
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h2 id="reg-drawer-heading" class="font-display text-heading-sm font-bold break-words">{reg.name}</h2>
+      <p class="mt-1 text-sm text-ink-muted"><span class="tabular-nums">{reg.confirmation_no ?? '—'}</span> · <span class="gathering-roster-status" data-status={reg.status}>{statusLabel(reg.status)}</span></p>
+    </div>
+    <a href={closeHref} class={btnSecondary}>{t(lang, 'admin.reg.bo.close')}</a>
+  </div>
+
+  {canDecide && (
+    <div class={box} data-testid="approval-actions">
+      <h3 class={h3}>{t(lang, 'admin.reg.bo.decision')}</h3>
+      <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.reg.bo.decisionHint')}</p>
+      <div class="mt-3 flex flex-wrap gap-2">
+        {decisions.map((d) => (
+          <form method="post">
+            <input type="hidden" name="action" value="decide" />
+            <input type="hidden" name="registration_id" value={reg.id} />
+            <input type="hidden" name="version" value={detail.version} />
+            <input type="hidden" name="back" value={back} />
+            <input type="hidden" name="decision" value={d.decision} />
+            <button type="submit" class={d.decision === 'accept' ? btn : d.decision === 'decline' ? btnDanger : btnSecondary} data-decision={d.decision}>{t(lang, d.label)}</button>
+          </form>
+        ))}
+      </div>
+    </div>
+  )}
+
+  <dl class="mt-4 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2" data-testid="reg-summary">
+    <div><dt class="text-ink-muted">{t(lang, 'register.email')}</dt><dd class="break-all">{reg.email}</dd></div>
+    <div><dt class="text-ink-muted">{t(lang, 'admin.reg.phone')}</dt><dd>{reg.phone ?? '—'}</dd></div>
+    <div><dt class="text-ink-muted">{t(lang, 'admin.reg.partySize')}</dt><dd>{reg.party_size}</dd></div>
+    <div><dt class="text-ink-muted">{t(lang, 'admin.reg.registered')}</dt><dd class="tabular-nums">{reg.created_at.slice(0, 16)}</dd></div>
+    {paidCents > 0 && (
+      <div>
+        <dt class="text-ink-muted">{t(lang, 'admin.reg.amount')}</dt>
+        <dd data-testid="reg-money">{formatCents(paidCents, currency, lang)}{detail.paymentMethod ? ` · ${t(lang, `admin.reg.bo.pay.${detail.paymentMethod}`)}` : ''}{detail.refundedCents > 0 ? ` · ${t(lang, 'admin.reg.bo.refunded')}: ${formatCents(detail.refundedCents, currency, lang)}` : ''}</dd>
+      </div>
+    )}
+    {paidCents === 0 && detail.paymentMethod === 'comp' && <div><dt class="text-ink-muted">{t(lang, 'admin.reg.amount')}</dt><dd>{t(lang, 'admin.reg.bo.pay.comp')}</dd></div>}
+    {detail.decidedAt && <div><dt class="text-ink-muted">{t(lang, 'admin.reg.bo.decidedBy')}</dt><dd>{detail.decidedBy?.name ?? ''} · {detail.decidedAt.slice(0, 16)}</dd></div>}
+    <div><dt class="text-ink-muted">{t(lang, 'admin.reg.bo.confirmationSent')}</dt><dd>{detail.confirmationSentAt ? detail.confirmationSentAt.slice(0, 16) : '—'}</dd></div>
+  </dl>
+
+  <h3 class={`mt-6 ${h3}`}>{t(lang, 'admin.reg.people')}</h3>
+  <ul class="mt-2 divide-y divide-border rounded-lg border border-border" data-testid="reg-people">
+    {people.length === 0 && <li class="p-3 text-sm text-ink-muted">—</li>}
+    {people.map((p) => {
+      const door = doorOf.get(p.id);
+      return (
+        <li class="flex flex-wrap items-center justify-between gap-2 p-3 text-sm" data-person={p.id}>
+          <div>
+            <span class="font-medium">{p.name}</span>
+            {p.ticket_label && <span class="text-ink-muted" data-ticket> · {p.ticket_label}</span>}
+            {door && !door.checkedOutAt && <span class="ml-2 text-success" data-checked-in>✓ {door.checkedInAt.slice(11, 16)}</span>}
+            {p.answers.length > 0 && <p class="text-xs text-ink-muted" data-person-answers>{p.answers.map((a) => `${a.label}: ${a.value}`).join('; ')}</p>}
+          </div>
+          {editable && (
+            <div class="flex flex-wrap items-center gap-2">
+              {activeTypes.length > 0 && (
+                <form method="post" class="flex items-center gap-1">
+                  <input type="hidden" name="action" value="change_ticket" />
+                  <input type="hidden" name="registration_id" value={reg.id} />
+                  <input type="hidden" name="version" value={detail.version} />
+                  <input type="hidden" name="back" value={back} />
+                  <input type="hidden" name="attendee_id" value={p.id} />
+                  <label class="sr-only" for={`tt-${p.id}`}>{t(lang, 'admin.reg.ticketType')}</label>
+                  <select id={`tt-${p.id}`} name="ticket_type_id" class={`${tin} w-auto`}>
+                    {activeTypes.map((ty) => <option value={ty.id} selected={ty.id === p.ticket_type_id}>{ty.label}</option>)}
+                  </select>
+                  <button type="submit" class={rowBtn}>{t(lang, 'admin.reg.bo.change')}</button>
+                </form>
+              )}
+              <form method="post" data-confirm={t(lang, 'admin.reg.bo.removeConfirm')}>
+                <input type="hidden" name="action" value="remove_person" />
+                <input type="hidden" name="registration_id" value={reg.id} />
+                <input type="hidden" name="version" value={detail.version} />
+                <input type="hidden" name="back" value={back} />
+                <input type="hidden" name="attendee_id" value={p.id} />
+                <button type="submit" class={rowBtn}>{t(lang, 'admin.reg.bo.remove')}</button>
+              </form>
+            </div>
+          )}
+        </li>
+      );
+    })}
+  </ul>
+
+  {detail.summary.answers.length > 0 && !editable && (
+    <dl class="mt-4 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2" data-testid="reg-answers">
+      {detail.summary.answers.map((a) => <div><dt class="text-ink-muted">{a.label}</dt><dd>{a.value}</dd></div>)}
+    </dl>
+  )}
+
+  {editable && (
+    <details class={box} data-testid="edit-details">
+    <summary class={`${h3} cursor-pointer`}>{t(lang, 'admin.reg.bo.edit')}</summary>
+    <form method="post" class="mt-3 space-y-3" data-testid="edit-form">
+      <input type="hidden" name="action" value="edit" />
+      <input type="hidden" name="registration_id" value={reg.id} />
+      <input type="hidden" name="version" value={detail.version} />
+      <input type="hidden" name="back" value={back} />
+      <div class="grid gap-3 sm:grid-cols-3">
+        <label class="block"><span class={lab}>{t(lang, 'register.name')}</span><input name="contact_name" value={reg.name} class={tin} /></label>
+        <label class="block"><span class={lab}>{t(lang, 'register.email')}</span><input name="contact_email" type="email" value={reg.email} class={tin} /></label>
+        <label class="block"><span class={lab}>{t(lang, 'admin.reg.phone')}</span><input name="contact_phone" type="tel" value={reg.phone ?? ''} class={tin} /></label>
+      </div>
+      {people.map((p) => (
+        <fieldset class="space-y-3 rounded-md border border-border p-3">
+          <legend class="px-1 text-sm font-semibold">{p.name}</legend>
+          <label class="block"><span class={lab}>{t(lang, 'register.name')}</span><input name={`att_${p.id}_name`} value={p.name} class={tin} /></label>
+          {personQuestions.length > 0 && (
+            <>
+              <input type="hidden" name={`att_${p.id}_answers`} value="1" />
+              <QuestionFields questions={personQuestions} prefix={`att_${p.id}_q_`} values={detail.rawAttendeeAnswers[p.id] ?? {}} lang={lang} />
+            </>
+          )}
+        </fieldset>
+      ))}
+      {regQuestions.length > 0 && (
+        <fieldset class="space-y-3 rounded-md border border-border p-3">
+          <legend class="px-1 text-sm font-semibold">{t(lang, 'register.manage.answersHeading')}</legend>
+          <input type="hidden" name="reg_answers" value="1" />
+          <QuestionFields questions={regQuestions} prefix="q_" values={detail.rawAnswers} lang={lang} />
+        </fieldset>
+      )}
+      <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.bo.skipRequiredHint')}</p>
+      <button type="submit" class={btn}>{t(lang, 'admin.form.save')}</button>
+    </form>
+    </details>
+  )}
+
+  {editable && reg.amount_cents === 0 && people.length < 50 && (
+    <form method="post" class={`${box} flex flex-wrap items-end gap-3`} data-testid="add-person-form">
+      <input type="hidden" name="action" value="add_person" />
+      <input type="hidden" name="registration_id" value={reg.id} />
+      <input type="hidden" name="version" value={detail.version} />
+      <input type="hidden" name="back" value={back} />
+      <label class="block min-w-48 flex-1"><span class={lab}>{t(lang, 'admin.reg.bo.addPerson')}</span><input name="name" class={tin} required /></label>
+      {activeTypes.length > 0 && (
+        <label class="block"><span class={lab}>{t(lang, 'admin.reg.ticketType')}</span>
+          <select name="ticket_type_id" class={tin}>{activeTypes.map((ty) => <option value={ty.id}>{ty.label}</option>)}</select>
+        </label>
+      )}
+      <button type="submit" class={btnSecondary}>{t(lang, 'admin.reg.bo.add')}</button>
+    </form>
+  )}
+
+  <div class="mt-4 flex flex-wrap gap-2">
+    {canMove && (
+      <form method="post">
+        <input type="hidden" name="action" value="move" />
+        <input type="hidden" name="registration_id" value={reg.id} />
+        <input type="hidden" name="version" value={detail.version} />
+        <input type="hidden" name="back" value={back} />
+        <input type="hidden" name="to" value={moveTo} />
+        <button type="submit" class={btnSecondary} data-move={moveTo}>{t(lang, moveTo === 'confirmed' ? 'admin.reg.bo.moveConfirmed' : 'admin.reg.bo.moveWaitlist')}</button>
+      </form>
+    )}
+    {canResend && (
+      <form method="post">
+        <input type="hidden" name="action" value="resend" />
+        <input type="hidden" name="registration_id" value={reg.id} />
+        <input type="hidden" name="back" value={back} />
+        <button type="submit" class={btnSecondary} data-resend>{t(lang, 'admin.reg.bo.resend')}</button>
+      </form>
+    )}
+    {canManage && reg.status !== 'cancelled' && (
+      <form method="post" data-confirm={t(lang, 'admin.reg.cancelConfirm')}>
+        <input type="hidden" name="action" value="cancel" />
+        <input type="hidden" name="registration_id" value={reg.id} />
+        <input type="hidden" name="version" value={detail.version} />
+        <input type="hidden" name="back" value={back} />
+        <button type="submit" class={btnDanger} data-cancel>{t(lang, 'admin.reg.cancel')}</button>
+      </form>
+    )}
+  </div>
+
+  {(showStripeRefund || showOfflineRefund) && (
+    <div class={box} data-testid="refund-panel">
+      <h3 class={h3}>{t(lang, 'admin.reg.bo.refund')}</h3>
+      <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.reg.bo.refundHint', { remaining: formatCents(remaining, currency, lang) })}</p>
+      <form method="post" class="mt-3 flex flex-wrap items-end gap-3" data-confirm={t(lang, showStripeRefund ? 'admin.reg.bo.refundConfirm' : 'admin.reg.bo.offlineRefundConfirm')}>
+        <input type="hidden" name="action" value={showStripeRefund ? 'refund' : 'offline_refund'} />
+        <input type="hidden" name="registration_id" value={reg.id} />
+        <input type="hidden" name="back" value={back} />
+        <label class="block"><span class={lab}>{t(lang, 'admin.reg.bo.refundAmount')}</span><input name="amount" inputmode="decimal" value={(remaining / 100).toFixed(2)} class={`${tin} w-32`} /></label>
+        {showStripeRefund ? (
+          <label class="inline-flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" name="also_cancel" value="1" /> {t(lang, 'admin.reg.bo.alsoCancel')}</label>
+        ) : (
+          <label class="block min-w-48 flex-1"><span class={lab}>{t(lang, 'admin.reg.bo.refundNote')}</span><input name="note" maxlength="200" class={tin} /></label>
+        )}
+        <button type="submit" class={btnDanger}>{t(lang, showStripeRefund ? 'admin.reg.bo.refundStripe' : 'admin.reg.bo.refundOffline')}</button>
+      </form>
+    </div>
+  )}
+
+  <div class={box}>
+    <h3 class={h3}>{t(lang, 'admin.reg.bo.note')}</h3>
+    {canManage ? (
+      <form method="post" class="mt-2 space-y-2" data-testid="note-form">
+        <input type="hidden" name="action" value="note" />
+        <input type="hidden" name="registration_id" value={reg.id} />
+        <input type="hidden" name="version" value={detail.version} />
+        <input type="hidden" name="back" value={back} />
+        <textarea name="note" rows="2" maxlength="2000" class={tin}>{detail.adminNote ?? ''}</textarea>
+        <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.bo.noteHint')}</p>
+        <button type="submit" class={btnSecondary}>{t(lang, 'admin.reg.bo.saveNote')}</button>
+      </form>
+    ) : (
+      <p class="mt-2 whitespace-pre-line text-sm">{detail.adminNote ?? '—'}</p>
+    )}
+  </div>
+
+  <div class={box} data-testid="reg-history">
+    <h3 class={h3}>{t(lang, 'admin.reg.bo.history')}</h3>
+    {detail.activity.length === 0 ? (
+      <p class="mt-2 text-sm text-ink-muted">—</p>
+    ) : (
+      <ol class="mt-2 space-y-2 text-sm">
+        {detail.activity.map((entry) => {
+          const extra = activityDetailText(entry, currency, statusLabel);
+          return (
+            <li class="flex flex-wrap gap-x-3" data-activity={entry.action}>
+              <span class="tabular-nums text-ink-muted">{entry.created_at.slice(0, 16)}</span>
+              <span class="font-medium">{t(lang, activityKey(entry.action))}</span>
+              {extra && <span class="text-ink-muted">{extra}</span>}
+              {entry.actor_name && <span class="text-ink-muted">— {entry.actor_name}</span>}
+            </li>
+          );
+        })}
+      </ol>
+    )}
+  </div>
+</section>
