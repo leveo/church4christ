@@ -439,6 +439,12 @@ const LEGACY_CAPTURE_ROWS = [
     interact: [{ click: '[data-testid="reg-form-builder"] ol > li:nth-child(4) button[aria-expanded]' }] },
   { path: '/admin/registration/931', out: 'docs/images/registration/builder-tickets.png', admin: true, backend: 'd1', anchor: 'Ticket types', anchorMargin: 24, waitForSelector: '[data-testid="ticket-card"]', expectedText: 'Ticket types' },
   { path: '/admin/registration', out: 'docs/images/registration/admin-templates.png', admin: true, backend: 'd1', anchorSelector: '#reg-templates', anchorMargin: 24, expectedText: 'Save as template' },
+  // Page-builder registration block (Phase 3). Needs a page with the block on a throwaway database: save a page
+  // (slug "gatherings") through the builder's JSON POST with three registration blocks in columns (events 920, 930,
+  // 931). The builder row opens that page by its id and selects the first block so the properties panel shows.
+  { path: '/en/p/gatherings', out: 'docs/images/public/page-builder-registration.png', backend: 'd1', expectedText: 'Join us this season' },
+  { path: '/admin/pages/builder/20b5038d-5321-41ef-8b28-74ffb462bbe1', out: 'docs/images/admin/page-builder-registration.png', admin: true, sessionIdentity: Object.freeze({ personId: 1, email: 'admin@example.com', sessionEpoch: 0 }), identityExpectedText: 'admin@example.com', backend: 'd1', anchorSelector: '.builder-canvas-panel', anchorMargin: 24, waitForSelector: '[data-testid="builder-registration"]', expectedText: 'Registration',
+    interact: [{ click: '[data-testid="builder-registration"]' }] },
   // Children's check-in (Task 8). The kiosk needs no session — the token in
   // the URL is the gate — so it captures in the same admin-bypass pass. The
   // dev seed fixes the kiosk token and gives Chen Family two children, which
@@ -567,6 +573,7 @@ export const MOBILE_CAPTURE_ROWS = Object.freeze([
   // Event Registration on D1 at phone width (public pages, no session).
   { path: '/en/register', out: 'docs/images/mobile/register-list.png', viewport: MOBILE_VIEWPORT, backend: 'd1', expectedText: 'Neighbors Potluck Night' },
   { path: '/en/register/920', out: 'docs/images/mobile/register-detail.png', viewport: MOBILE_VIEWPORT, anchor: 'Your registration', anchorMargin: 20, backend: 'd1', expectedText: 'What will you bring?' },
+  { path: '/en/p/gatherings', out: 'docs/images/mobile/page-builder-registration.png', viewport: MOBILE_VIEWPORT, backend: 'd1', expectedText: 'Join us this season' },
   // Seeded Christmas Service run sheet (planning_events id 31000 in seed/dev-seed.sql); Sarah coordinates it.
   { path: '/en/planning/31000', out: 'docs/images/mobile/planning-run-sheet.png', bypass: 'sarah.johnson@example.com', viewport: MOBILE_VIEWPORT, expectedText: 'Christmas Service' },
 ]);
