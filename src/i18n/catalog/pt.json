@@ -117,6 +117,10 @@
     "small-groups": {
       "label": "Pequenos grupos",
       "description": "Pequenos grupos com membros, eventos e presença, além de um diretório de comunhões."
+    },
+    "event-registration": {
+      "label": "Inscrições em eventos",
+      "description": "Inscrições em eventos com suas próprias perguntas, lista de espera, gestão para a equipe e recepção na entrada."
     }
   },
   "readiness": {

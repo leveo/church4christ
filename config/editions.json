@@ -144,6 +144,56 @@
       }
     },
     {
+      "repo": "church-event-registration",
+      "preset": "event-registration",
+      "title": "Open-source church event registration",
+      "tagline": "Online sign-up for church events: your own questions, seat limits that hold, a waitlist, confirmation emails with a QR code, and a check-in desk on a phone at the door.",
+      "description": "Open-source church event registration: sign-up forms with your own questions, family sign-ups, seat limits, a waitlist, confirmation emails, a staff back office, and a phone check-in desk. Self-hosted, 12 interface languages. A Church4Christ edition.",
+      "topics": ["church", "event-registration", "church-events", "event-signup", "registration-form", "waitlist", "check-in", "retreat", "conference", "church-management", "chms", "church4christ", "self-hosted", "nonprofit", "multilingual", "cloudflare-workers", "cloudflare-d1", "astro"],
+      "features": [
+        "**A public page for every event.** Visitors see the date, the place, and the seats left. You choose when an event appears, when sign-up opens, and when it closes.",
+        "**The questions you need.** Build each event's form by dragging questions into order: dropdowns, yes/no, numbers, and paragraphs. Ask some once and some for each person, and show a question only when an earlier answer fits.",
+        "**Families and groups sign up together.** One sign-up can cover several people, up to a limit you set, and they take seats together. Ticket types such as Adult and Child can each have their own limit.",
+        "**Seat limits that hold, and a waitlist.** The last seat never goes to two people. When an event is full, people can join the waitlist and move up when seats free up.",
+        "**Guests need no account.** A guest confirms their email with a short code before the sign-up is saved. Everyone gets a confirmation email with a QR code, a calendar file, and a private link to change or cancel.",
+        "**A back office for each event.** Numbers at a glance, a roster you can search and filter, answer tallies, approval when you want it, sign-ups added by hand, possible duplicates, reminder emails, and one message to everyone who registered. Download the roster as a spreadsheet.",
+        "**A check-in desk on a phone.** Volunteers find people by name or scan the QR code, and several phones stay in step. Print name badges and a sign-in sheet.",
+        "**Access for one event only.** Give a volunteer a role on one event, such as the check-in desk, without opening the rest of the admin area.",
+        "**12 interface languages**, including English and Chinese. Event titles, descriptions, and questions can be written in every language your site offers."
+      ],
+      "limits": [
+        "This edition runs on the default Cloudflare D1 database, where every event is free. Paid events need a Supabase (PostgreSQL) database and a Stripe account. If you plan to charge, install with Supabase from the start (`npm run setup -- --mode local --preset event-registration --backend supabase`); an existing D1 site is not moved to Supabase automatically.",
+        "Rooms, tables, and small groups for retreats and banquets come from the separate Event Logistics feature. It is off here; turn it on later in **Settings → Modules**.",
+        "Confirmation, reminder, and sign-in emails need an email provider when deployed; on your own computer they print to the terminal."
+      ],
+      "screenshots": [
+        { "path": "docs/images/registration/public-list.png", "alt": "The public list of events, each marked Free" },
+        { "path": "docs/images/registration/party-form.png", "alt": "A sign-up form for a family, with seats left and the event's own questions" },
+        { "path": "docs/images/registration/builder-questions.png", "alt": "The form builder, with a question shown only when an earlier answer fits" },
+        { "path": "docs/images/registration/backoffice-overview.png", "alt": "An event's back office: seats, waitlist, check-ins, answer tallies, and the roster" }
+      ],
+      "docs": [
+        { "path": "docs/features/registration.md", "label": "Event registration" },
+        { "path": "docs/features/event-logistics.md", "label": "Rooms, tables, and small groups (optional add-on)" },
+        { "path": "docs/supabase-setup.md", "label": "Supabase and Stripe for paid events" }
+      ],
+      "demo": "Open **Register** in the site menu to see the public event list, then choose **Administrator** and open **Registration** in the admin menu. Each event has a **Check-in desk** button.",
+      "zh": {
+        "title": "开源教会活动报名系统",
+        "summary": "教会活动的网上报名：自订报名问题、名额上限、候补名单、附二维码的确认邮件，以及门口用手机操作的报到台。",
+        "features": [
+          "每个活动都有公开页面，可设定何时显示、何时开放报名、何时截止。",
+          "拖拽排序的报名表：下拉、是/否、数字、段落，可按条件显示问题。",
+          "一次报名可包含全家或多人，并可设定票种与各自名额。",
+          "名额不会超卖；额满后可加入候补名单，有空位时自动递补。",
+          "访客无需账号，用邮箱验证码确认；确认邮件附二维码、日历文件和修改/取消的私人链接。",
+          "每个活动的后台：数据总览、名单搜索与筛选、审核、手动添加、群发邮件、导出表格。",
+          "手机报到台：按姓名查找或扫描二维码，多部手机同步；可打印名牌和签到表。",
+          "支持 12 种界面语言（含中英文）。"
+        ]
+      }
+    },
+    {
       "repo": "church-website-cms",
       "preset": "website",
       "title": "Open-source church website CMS",

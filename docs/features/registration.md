@@ -614,6 +614,23 @@ only the parts it needs. See [Event logistics](event-logistics.md).
 
 ## Setting it up
 
+**Registration on its own.** A church that only wants event sign-up can install Registration by
+itself with the `event-registration` preset, which turns on Registration and nothing else:
+
+```bash
+npm run onboard -- --preset event-registration
+```
+
+It runs on the default Cloudflare D1 database, so every event is free. The home page then lists
+the events people can sign up for, and the menu links to **Register**. Rooms, tables, and small
+groups ([Event logistics](event-logistics.md)) stay off until you turn them on in
+**Settings → Modules**. If you plan to charge for events, install with Supabase from the start,
+for example `npm run setup -- --mode local --preset event-registration --backend supabase`, then
+follow the Stripe steps below. An existing D1 site is not moved to Supabase automatically. The
+same setup is published as the
+[church-event-registration](https://github.com/leveo/church-event-registration) edition; see
+[Single-feature editions](../editions.md).
+
 **On D1 (free events).** Nothing extra is needed. If you are upgrading an existing D1 church,
 Registration stays **off** after the upgrade. Turn it on in **Admin → Settings → Modules**.
 A new install follows the module choice you made in setup. See [Upgrading](../upgrade.md).

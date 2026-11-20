@@ -379,7 +379,7 @@ describe('registration submit: D1 paid refusal, waitlist, submission key', () =>
   it('still takes a free event on D1 and keeps the paid flow on Postgres', async () => {
     const free = deps({ getOpenEvent: vi.fn(async () => event(0)) });
     // No manage token in this fake result = a replayed submission, which lands on the member's own page.
-    expect((await run(free, form(), { dbBackend: 'd1' })).headers.get('location')).toBe('/en/my/events/41?new=1');
+    expect((await run(free, form(), { dbBackend: 'd1', modules: new Set(['registration', 'portal']) })).headers.get('location')).toBe('/en/my/events/41?new=1');
     expect(free.createRegistration).toHaveBeenCalledOnce();
 
     const paid = deps({ getOpenEvent: vi.fn(async () => event(2500)) });
@@ -409,8 +409,17 @@ describe('registration submit: D1 paid refusal, waitlist, submission key', () =>
       getOpenEvent: vi.fn(async () => event(0)),
       createRegistration: vi.fn(async () => ({ id: 43, status: 'confirmed' as const, confirmationNo: 'R26-0003', manageToken: null })),
     });
-    const response = await run(dependencies, form(), { dbBackend: 'd1' });
+    const response = await run(dependencies, form(), { dbBackend: 'd1', modules: new Set(['registration', 'portal']) });
     expect(response.headers.get('location')).toBe('/en/my/events/43?new=1');
+  });
+
+  it('sends a replayed submission to the done page when the Member Portal is off', async () => {
+    const dependencies = deps({
+      getOpenEvent: vi.fn(async () => event(0)),
+      createRegistration: vi.fn(async () => ({ id: 44, status: 'waitlist' as const, confirmationNo: 'R26-0004', manageToken: null })),
+    });
+    const response = await run(dependencies, form(), { dbBackend: 'd1' });
+    expect(response.headers.get('location')).toBe('/en/register/done?status=waitlist');
   });
 
   it('maps event_full to the full error', async () => {

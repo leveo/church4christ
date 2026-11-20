@@ -14,6 +14,7 @@ describe('local onboarding preferences', () => {
     expect(defaults.setup.modules).toEqual(catalog.presets['website-community'].modules);
     expect(defaults.setup.modules).not.toContain('portal');
     expect(defaultPreferences(catalog, 'small-groups').setup.modules).toEqual(catalog.presets['small-groups'].modules);
+    expect(defaultPreferences(catalog, 'event-registration').setup.modules).toEqual(['registration']);
     expect(() => defaultPreferences(catalog, 'nope')).toThrow(/Unknown preset/);
     const input = draft();
     input.setup.modules = ['learning'];

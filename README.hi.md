@@ -171,6 +171,7 @@ Church4Christ एक स्वतंत्र परियोजना है �
 | बच्चों का चेक-इन कियोस्क | [church-checkin](https://github.com/leveo/church-checkin) | `checkin` |
 | स्वयंसेवक शेड्यूलिंग | [church-volunteer-scheduling](https://github.com/leveo/church-volunteer-scheduling) | `volunteer-scheduling` |
 | छोटे समूहों का प्रबंधन | [church-small-groups](https://github.com/leveo/church-small-groups) | `small-groups` |
+| कार्यक्रम पंजीकरण और चेक-इन | [church-event-registration](https://github.com/leveo/church-event-registration) | `event-registration` |
 | कलीसिया की वेबसाइट और CMS | [church-website-cms](https://github.com/leveo/church-website-cms) | `website` |
 
 इन संस्करणों में अलग कोड नहीं है, इसलिए अतिरिक्त रखरखाव कुछ नहीं है। आप इन्हें छोड़कर

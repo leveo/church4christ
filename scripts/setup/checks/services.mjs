@@ -82,7 +82,10 @@ export async function checkServices(options) {
 
   if (required.has('stripe') || optional.has('stripe')) {
     const count = Number(options.presence.stripeSecretKey) + Number(options.presence.stripeWebhookSecret);
-    if (count === 0) {
+    if (count === 0 && options.manifest.database === 'd1' && !required.has('stripe')) {
+      // On D1 every event is free and Giving is unavailable, so there is nothing for Stripe to do.
+      checks.push(result('services.stripe-not-used', 'info', 'Stripe is not used on the D1 database; registration runs free events without it.', 'No action is required. Paid events and online giving need Supabase (PostgreSQL) and Stripe.'));
+    } else if (count === 0) {
       checks.push(result('services.stripe-absent', required.has('stripe') ? 'error' : 'warning', 'Stripe is not configured; free registration and offline giving remain available without online payments.', 'Configure both Stripe secrets to enable payments.'));
     } else if (count === 1) {
       checks.push(result('services.stripe-partial', 'error', 'Stripe configuration is partial and cannot safely process payments.', 'Configure both STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET, or remove both.'));

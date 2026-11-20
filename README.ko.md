@@ -102,6 +102,7 @@ Planning Center를 비롯해 위에서 언급한 다른 제품 이름은 각 소
 | 어린이 체크인 키오스크 | [church-checkin](https://github.com/leveo/church-checkin) | `checkin` |
 | 봉사 일정 | [church-volunteer-scheduling](https://github.com/leveo/church-volunteer-scheduling) | `volunteer-scheduling` |
 | 소그룹 관리 | [church-small-groups](https://github.com/leveo/church-small-groups) | `small-groups` |
+| 행사 등록과 체크인 | [church-event-registration](https://github.com/leveo/church-event-registration) | `event-registration` |
 | 교회 웹사이트와 CMS | [church-website-cms](https://github.com/leveo/church-website-cms) | `website` |
 
 이 에디션들에는 별도의 코드가 없으므로 따로 유지 관리할 것이 없습니다. 에디션을 건너뛰고 여기서 바로 `npm run onboard -- --preset checkin`을 실행해도 됩니다. **설정 → 모듈**에서 언제든 기능을 더 켤 수 있습니다. [단일 기능 에디션](docs/editions.md)을 참고하세요.

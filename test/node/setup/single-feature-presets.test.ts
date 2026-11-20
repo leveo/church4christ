@@ -19,6 +19,7 @@ describe('single-feature setup presets', () => {
     ['checkin', ['people', 'children']],
     ['volunteer-scheduling', ['serve', 'gifts', 'people']],
     ['small-groups', ['fellowships', 'groups', 'people']],
+    ['event-registration', ['registration']],
   ])('%s enables exactly its modules on D1 and leaves the rest off', (preset, modules) => {
     const plan = buildSetupPlan({ ...base, preset }, rawCatalog);
     expect(plan.backend).toBe('d1');

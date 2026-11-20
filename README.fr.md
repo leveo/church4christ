@@ -170,6 +170,7 @@ domaine activé, en utilisant la base de données Cloudflare D1 par défaut :
 | Une borne d'enregistrement des enfants | [church-checkin](https://github.com/leveo/church-checkin) | `checkin` |
 | Un planning des bénévoles | [church-volunteer-scheduling](https://github.com/leveo/church-volunteer-scheduling) | `volunteer-scheduling` |
 | La gestion des petits groupes | [church-small-groups](https://github.com/leveo/church-small-groups) | `small-groups` |
+| Les inscriptions aux événements et l'accueil à l'entrée | [church-event-registration](https://github.com/leveo/church-event-registration) | `event-registration` |
 | Un site web d'église et un CMS | [church-website-cms](https://github.com/leveo/church-website-cms) | `website` |
 
 Les éditions ne contiennent aucun code séparé, il n'y a donc rien de plus à maintenir. Vous pouvez aussi

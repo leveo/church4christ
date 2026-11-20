@@ -5,7 +5,8 @@ export const SETUP_HELP = `Usage: npm run setup -- [options]
   --preferences .church/preferences.json
       Import browser onboarding choices for first setup; explicit flags override them
   --mode local|deploy
-  --preset website|website-community|full-church|checkin|volunteer-scheduling|small-groups
+  --preset website|website-community|full-church|checkin|volunteer-scheduling|small-groups|
+            event-registration
   --modules key,key,... (repeatable)
   --site-slug slug
   --church-name name

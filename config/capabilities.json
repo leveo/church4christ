@@ -36,6 +36,11 @@
       "labels": { "en": "Small Groups", "zh": "小组管理" },
       "descriptions": { "en": "Small groups with membership, events, and attendance, plus a fellowship directory.", "zh": "小组成员、活动与出席管理，加上团契目录。" },
       "modules": ["fellowships", "groups", "people"]
+    },
+    "event-registration": {
+      "labels": { "en": "Event Registration", "zh": "活动报名" },
+      "descriptions": { "en": "Event sign-ups with your own questions, a waitlist, a back office, and a check-in desk.", "zh": "活动报名：自订问题、候补名单、同工后台与报到台。" },
+      "modules": ["registration"]
     }
   },
   "order": ["bulletins", "sermons", "prayer-sheets", "prayer-wall", "events", "serve", "gifts", "testimonies", "articles", "fellowships", "groups", "people", "children", "attendance", "newcomers", "activity-score", "page-builder", "portal", "giving", "registration", "learning", "planning", "event-logistics"],

@@ -30,7 +30,8 @@
     "full-church": { "label": "Hội Thánh đầy đủ", "description": "Mọi khả năng về trang web, cộng đồng, cổng thông tin, dâng hiến và đăng ký." },
     "checkin": { "label": "Điểm danh thiếu nhi", "description": "Các gia đình, máy điểm danh tự phục vụ và bảng điều khiển mục vụ thiếu nhi." },
     "volunteer-scheduling": { "label": "Xếp lịch tình nguyện viên", "description": "Các mục vụ, đội, lịch hầu việc, nhắc nhở và bài trắc nghiệm ân tứ thuộc linh." },
-    "small-groups": { "label": "Nhóm nhỏ", "description": "Các nhóm nhỏ với thành viên, sự kiện và sự tham dự, cùng danh bạ các đoàn thể." }
+    "small-groups": { "label": "Nhóm nhỏ", "description": "Các nhóm nhỏ với thành viên, sự kiện và sự tham dự, cùng danh bạ các đoàn thể." },
+    "event-registration": { "label": "Đăng ký sự kiện", "description": "Đăng ký sự kiện với câu hỏi riêng, danh sách chờ, trang quản lý cho đội ngũ và bàn điểm danh tại cửa." }
   },
   "readiness": {
     "identity": { "title": "Nhận diện Hội Thánh", "description": "Xác nhận tệp kê khai cài đặt và nhận diện công khai của Hội Thánh.", "remediation": "Hoàn tất thiết lập và xem lại các cài đặt nhận diện." },

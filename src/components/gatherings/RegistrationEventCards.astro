@@ -1,0 +1,49 @@
+---
+// The public registration event cards (poster, date badge, title, date, place, price or Free, and
+// Full / Join the waitlist / Registration opens ...). Shared by /register and, when the Events module
+// is off, the home page. Render inside a public GatheringSurface, which styles the cards.
+import DateBadge from './DateBadge.astro';
+import { gatheringsCopy } from '../../i18n/designGatherings';
+import { localePath, type Locale } from '../../lib/locales';
+import { t } from '../../lib/i18n';
+import { formatDate, utcToDatetimeLocal } from '../../lib/dates';
+import { mediaPath } from '../../lib/mediaRef';
+import { badge, badgeInactive, badgeScheduled } from '../../lib/adminUi';
+import type { RegPublicEvent } from '../../lib/regDb';
+import type { SeatState } from '../../lib/regPublic';
+
+interface Props { locale: Locale; events: RegPublicEvent[]; seats: Map<number, SeatState> }
+const { locale, events, seats } = Astro.props;
+const copy = gatheringsCopy(locale);
+const priceLabel = (e: RegPublicEvent) =>
+  e.price_cents !== null && e.price_cents > 0 ? `$${(e.price_cents / 100).toFixed(2)}` : t(locale, 'register.free');
+// Event times are stored in UTC; people read them in the church's time zone.
+const stamp = (utc: string) => {
+  const [date, time] = utcToDatetimeLocal(utc).split('T');
+  return `${formatDate(date, locale)} ${time}`;
+};
+const when = (e: RegPublicEvent) => stamp(e.starts_at);
+---
+<ul class="gathering-registration-list">
+  {events.map((e) => (
+    <li class="gathering-registration-card"><DateBadge date={utcToDatetimeLocal(e.starts_at)} locale={locale} /><div>
+      {mediaPath(e.poster) && <img src={mediaPath(e.poster)!} alt="" class="gathering-registration-card-poster" loading="lazy" />}
+      <div class="flex items-start justify-between gap-3">
+        <h2 class="font-display text-lg font-bold">
+          <a href={localePath(locale, `/register/${e.id}`)} class="hover:underline">
+            {e.title}
+          </a>
+        </h2>
+        {e.phase === 'open' && seats.get(e.id)?.full && (
+          seats.get(e.id)?.waitlist
+            ? <span class={`${badge} ${badgeScheduled}`}>{t(locale, 'register.joinWaitlist')}</span>
+            : <span class={`${badge} ${badgeInactive}`}>{t(locale, 'register.full')}</span>
+        )}
+      </div>
+      <p class="mt-2 text-sm text-ink-muted">{when(e)}</p>
+      {e.location && <p class="text-sm text-ink-muted">{e.location}</p>}
+      {e.phase === 'preview' && e.opens_at && <p class="mt-1 text-sm font-semibold text-primary">{t(locale, 'register.opensOn', { date: stamp(e.opens_at) })}</p>}
+      <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3"><p class="text-sm font-semibold">{priceLabel(e)}</p><a href={localePath(locale, `/register/${e.id}`)} class="text-xs font-semibold text-primary hover:underline">{copy.reviewDetails} →</a></div>
+    </div></li>
+  ))}
+</ul>

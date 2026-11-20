@@ -171,6 +171,7 @@ einem aktivierten Bereich und der standardmäßigen Cloudflare-D1-Datenbank:
 | Einen Kinder-Check-in-Kiosk | [church-checkin](https://github.com/leveo/church-checkin) | `checkin` |
 | Dienstplanung für Ehrenamtliche | [church-volunteer-scheduling](https://github.com/leveo/church-volunteer-scheduling) | `volunteer-scheduling` |
 | Verwaltung von Kleingruppen | [church-small-groups](https://github.com/leveo/church-small-groups) | `small-groups` |
+| Anmeldung und Check-in für Veranstaltungen | [church-event-registration](https://github.com/leveo/church-event-registration) | `event-registration` |
 | Eine Gemeinde-Website und ein CMS | [church-website-cms](https://github.com/leveo/church-website-cms) | `website` |
 
 Die Editionen enthalten keinen eigenen Code, es gibt also nichts zusätzlich zu pflegen. Du kannst sie auch

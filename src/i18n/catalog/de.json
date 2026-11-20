@@ -117,6 +117,10 @@
     "small-groups": {
       "label": "Kleingruppen",
       "description": "Kleingruppen mit Mitgliedschaft, Veranstaltungen und Anwesenheit sowie ein Verzeichnis der Gemeinschaften."
+    },
+    "event-registration": {
+      "label": "Veranstaltungsanmeldung",
+      "description": "Veranstaltungsanmeldungen mit eigenen Fragen, Warteliste, Verwaltung für das Team und Check-in am Eingang."
     }
   },
   "readiness": {

@@ -117,6 +117,10 @@
     "small-groups": {
       "label": "Kelompok Kecil",
       "description": "Kelompok kecil dengan keanggotaan, acara, dan kehadiran, ditambah direktori persekutuan."
+    },
+    "event-registration": {
+      "label": "Pendaftaran Acara",
+      "description": "Pendaftaran acara dengan pertanyaan Anda sendiri, daftar tunggu, pengelolaan untuk tim, dan meja check-in di pintu masuk."
     }
   },
   "readiness": {
