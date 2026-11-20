@@ -18,7 +18,7 @@ import { MODULE_KEYS, filterByBackend, getEnabledModules, moduleForPath } from '
 import { applySecurityHeaders } from './lib/securityHeaders';
 import { SESSION_COOKIE, verifySession } from './lib/session';
 import { loadSessionUser, loadSessionUserByEmail } from './lib/currentUser';
-import { canAccess, classifyRoute } from './lib/routePolicy';
+import { canAccess, classifyRoute, regEventStaffGate } from './lib/routePolicy';
 import { adminAreaForPath, hasAreaAccess } from './lib/adminAreas';
 import { requireRegRole } from './lib/regAccess';
 import { hasValidMutationProvenance } from './lib/csrf';
@@ -399,9 +399,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
     // capability for the event in the URL (view for the event page, checkin for the desk) before the page runs.
     // Pages still check each action's own need; this gate means a page that forgets cannot leak to every member.
     if (cls === 'regEventStaff') {
-      const match = /^\/admin\/registration\/(\d+)(\/checkin)?\/?$/.exec(rest);
-      const eventId = match ? Number(match[1]) : NaN;
-      const check = await requireRegRole(context.locals.db, u, eventId, match?.[2] ? 'checkin' : 'view');
+      const gate = regEventStaffGate(rest);
+      // A path the policy class admits but the gate table does not know can never pass: fail closed.
+      if (!gate) return finish(forbidden(context.locals.locale));
+      const check = await requireRegRole(context.locals.db, u, gate.eventId, gate.need);
       if (!check.ok) return finish(check.status === 404 ? opaqueNotFound() : forbidden(context.locals.locale));
     }
 

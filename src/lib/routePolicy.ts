@@ -125,15 +125,42 @@ const ADMIN_CONSOLE = [
   '/admin/registration',
 ];
 
-// The only registration admin pages a person with just a per-event role (reg_event_access) may reach: one
-// event's page and its check-in desk. The route needs a session; the page derives the role from the database
-// (regEventRole) and answers 403/404 itself, like /planning. Everything else under /admin/registration (the
-// event list, CSV export, ...) stays `console`. Extend this list, never the class, when a new per-event page
-// is added.
-const REG_EVENT_STAFF_PATHS = [/^\/admin\/registration\/\d+$/, /^\/admin\/registration\/\d+\/checkin$/];
+// The registration admin pages a person with just a per-event role (reg_event_access) may reach, each with the
+// capability it needs. This is the ONE table behind both the route class (classifyRoute -> `regEventStaff`) and
+// the middleware's fail-closed role check, so a page added here is gated the moment it is listed and a path
+// missing here stays `console` (registration admins only). The page (or endpoint) still checks every action's
+// own need; the route needs a session and the middleware checks the role before the page runs.
+//   /admin/registration/<id>                 view     event page: overview, roster, drawer, printing links
+//   /admin/registration/<id>/checkin         checkin  the check-in desk
+//   /admin/registration/<id>/export.csv      view     roster CSV (one row per registration)
+//   /admin/registration/<id>/export-people.csv  view  roster CSV (one row per person)
+//   /admin/registration/<id>/badges          view     printable badges
+//   /admin/registration/<id>/sign-in-sheet   view     printable sign-in sheet
+// Extend this table, never the class, when a new per-event page is added.
+const REG_EVENT_STAFF_PATHS: ReadonlyArray<{ re: RegExp; need: 'view' | 'checkin' }> = [
+  { re: /^\/admin\/registration\/(\d+)$/, need: 'view' },
+  { re: /^\/admin\/registration\/(\d+)\/checkin$/, need: 'checkin' },
+  { re: /^\/admin\/registration\/(\d+)\/export\.csv$/, need: 'view' },
+  { re: /^\/admin\/registration\/(\d+)\/export-people\.csv$/, need: 'view' },
+  { re: /^\/admin\/registration\/(\d+)\/badges$/, need: 'view' },
+  { re: /^\/admin\/registration\/(\d+)\/sign-in-sheet$/, need: 'view' },
+];
 
-/** True for the per-event registration pages open to per-event roles (locale-stripped, trailing slash removed). */
-export const isRegEventStaffPath = (pathname: string): boolean => REG_EVENT_STAFF_PATHS.some((re) => re.test(norm(pathname)));
+/** The event and capability a per-event registration page needs (locale-stripped, one trailing slash tolerated), or null. */
+export function regEventStaffGate(pathname: string): { eventId: number; need: 'view' | 'checkin' } | null {
+  const p = norm(pathname);
+  for (const { re, need } of REG_EVENT_STAFF_PATHS) {
+    const match = re.exec(p);
+    if (match) {
+      const eventId = Number(match[1]);
+      return Number.isSafeInteger(eventId) ? { eventId, need } : null;
+    }
+  }
+  return null;
+}
+
+/** True for the per-event registration pages open to per-event roles. */
+export const isRegEventStaffPath = (pathname: string): boolean => regEventStaffGate(pathname) !== null;
 
 /** Strip a single trailing slash (but keep the bare root `/`). */
 function norm(pathname: string): string {

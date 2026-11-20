@@ -107,8 +107,11 @@ describe('classifyRoute', () => {
     ['/admin/applications', 'console'],
     ['/admin/testimonies', 'console'],
     ['/admin/registration', 'console'],
-    ['/admin/registration/5/export.csv', 'console'],
-    ['/admin/registration/5/badges', 'console'],
+    ['/admin/registration/5/export.csv', 'regEventStaff'],
+    ['/admin/registration/5/export-people.csv', 'regEventStaff'],
+    ['/admin/registration/5/badges', 'regEventStaff'],
+    ['/admin/registration/5/sign-in-sheet', 'regEventStaff'],
+    ['/admin/registration/5/labels', 'console'],
     ['/admin/registration/new', 'console'],
     ['/admin/registration/5/checkin/extra', 'console'],
     // ── regEventStaff: the per-event page and its check-in desk only ──
@@ -297,7 +300,7 @@ describe('canAccess', () => {
   it('a person with only a per-event role gets no other registration or admin surface', () => {
     for (const path of [
       '/admin/registration',
-      '/admin/registration/5/export.csv',
+      '/admin/registration/5/labels',
       '/admin/registration/5/anything-else',
       '/admin/registration/5/checkin/extra',
       '/admin/registration/abc',

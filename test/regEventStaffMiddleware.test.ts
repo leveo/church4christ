@@ -98,22 +98,35 @@ describe('per-event registration roles at the middleware', () => {
     expect(await status(`/admin/registration/${viewEvent}/checkin`, token)).toEqual({ status: 403, reached: false });
     // A role on one event opens nothing on another.
     expect(await status(`/admin/registration/${viewEvent + 1000}`, token)).toEqual({ status: 403, reached: false });
-    for (const path of ['/admin/registration', `/admin/registration/${viewEvent}/export.csv`, `/admin/registration/${viewEvent}/other`, '/admin', '/admin/people']) {
+    for (const path of ['/admin/registration', `/admin/registration/${viewEvent}/other`, '/admin', '/admin/people']) {
       expect(await status(path, token), path).toEqual({ status: 403, reached: false });
     }
   });
 
-  it('carves the two pages out of the limited-admin area gate only for a held role, and keeps every other registration page gated', async () => {
+  it('every read-only per-event page (CSV, people CSV, badges, sign-in sheet) needs view: a viewer reaches them, a desk volunteer does not', async () => {
+    const token = await session(980, 'door@example.com');
+    const viewEvent = await newEvent();
+    const deskEvent = await newEvent();
+    await grantEventRole(env.DB, viewEvent, 980, 'viewer');
+    await grantEventRole(env.DB, deskEvent, 980, 'desk');
+    for (const tail of ['export.csv', 'export-people.csv', 'badges', 'sign-in-sheet']) {
+      expect(await status(`/admin/registration/${viewEvent}/${tail}`, token), tail).toEqual({ status: 200, reached: true });
+      expect(await status(`/admin/registration/${deskEvent}/${tail}`, token), `desk ${tail}`).toEqual({ status: 403, reached: false });
+      // A role on one event opens nothing on another.
+      expect(await status(`/admin/registration/${viewEvent + 5000}/${tail}`, token), `other ${tail}`).toEqual({ status: 403, reached: false });
+    }
+  });
+
+  it('carves the per-event pages out of the limited-admin area gate only for a held role, and keeps the event list gated', async () => {
     const token = await session(981, 'limited@example.com');
     const event = await newEvent();
     expect(await status(`/admin/registration/${event}`, token)).toEqual({ status: 403, reached: false });
     await grantEventRole(env.DB, event, 981, 'registrar');
-    for (const path of [`/admin/registration/${event}`, `/admin/registration/${event}/checkin`]) {
+    for (const path of [`/admin/registration/${event}`, `/admin/registration/${event}/checkin`, `/admin/registration/${event}/export.csv`, `/admin/registration/${event}/badges`]) {
       expect(await status(path, token), path).toEqual({ status: 200, reached: true });
     }
-    for (const path of ['/admin/registration', `/admin/registration/${event}/export.csv`]) {
-      expect(await status(path, token), path).toEqual({ status: 403, reached: false });
-    }
+    // The event list stays for registration admins only.
+    expect(await status('/admin/registration', token)).toEqual({ status: 403, reached: false });
   });
 
   it('through the real session loader a limited admin is not a registration admin; only an explicit role makes them staff', async () => {
