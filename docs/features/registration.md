@@ -528,7 +528,7 @@ The event page has buttons for printing and exports:
 ![Printable badges](../images/registration/backoffice-badges.png)
 
 Both CSV files now start with an invisible marker (a UTF-8 byte-order mark), so Excel shows
-accents and Chinese correctly. A script that reads the first column may need to remove it.
+accents and Chinese correctly. A script that reads the first column header may need to remove it.
 
 ### Refunds
 
@@ -539,7 +539,8 @@ where they can manage registrations.
 - Open a registration that was paid by card. Under **Refund by card**, enter an amount up to
   what is still refundable, and tick **Also cancel the registration** if they are not coming.
   Stripe sends the money back. This cannot be undone.
-- Pressing twice, or retrying after a timeout, does not refund twice.
+- A double click does not refund twice. If a refund shows an error, reload the page and check
+  the refunded amount before you try again.
 - A refund made in the Stripe dashboard is recorded on the registration too. The two never
   add up twice.
 - For a payment taken in cash or by check, **Record offline refund** only updates the books.
@@ -551,7 +552,7 @@ total refunded.
 
 ### Access to one event
 
-Registration admins can give anyone a role on **one** event in the **Access to this event**
+Registration admins can give any active member a role on **one** event in the **Access to this event**
 panel at the bottom of the event page. Find the person by name or email, pick a role, and
 press **Save**. Press **Remove** to take it away.
 
@@ -696,7 +697,8 @@ before switching modes.
   `reminder_days`; `registrations.admin_note`, `decided_at`, `decided_by`, `reminder_sent_at`,
   `version`, `refunded_cents`, and `payment_method` (`stripe`, `offline`, or `comp`; backfilled to
   `stripe` where a Checkout session exists); and the tables `reg_checkins`, `reg_activity`,
-  `reg_event_access`, and `reg_outbox`. The `review` and `declined` statuses, allowed since 0050 and 0042, are now used. Modules:
+  `reg_event_access`, and `reg_outbox`. The `review` and `declined` statuses, allowed since
+  0050 and 0042, are now used. Modules:
   `src/lib/regAccess.ts` (roles and needs), `src/lib/regAdmin.ts` and `src/lib/regAdminCore.ts`
   (roster, detail panel writes with `version` checks and the `NEEDS_CONFIRM` soft confirm,
   approval, manual add, duplicates, overview), `src/lib/regAdminPage.ts` (the one POST action

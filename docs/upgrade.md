@@ -588,7 +588,7 @@ database. There is no new secret, binding, or cron trigger.
   tool, the same as an event admin. Remove the role first.
 - **CSV.** Both roster exports now start with a UTF-8 byte-order mark so Excel shows accents and
   Chinese correctly. The columns of the existing export are unchanged. A script that reads the
-  first column header or value may need to strip the mark. A new **Export people (CSV)** gives
+  first column header may need to strip the mark. A new **Export people (CSV)** gives
   one row per person.
 - **Refunds.** On Postgres with Stripe, staff with payment operations can refund from the
   registration's detail panel. Refunds made in the Stripe dashboard are recorded through the

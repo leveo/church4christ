@@ -104,7 +104,7 @@ than published to npm.
     registrars can now download that event's CSV.
   - Identity merge: a person with a role on one event is a hard conflict, like an event admin.
   - Both roster CSVs now start with a UTF-8 byte-order mark. Columns are unchanged, but a script
-    that reads the first column may need to strip the mark.
+    that reads the first column header may need to strip the mark.
 - Operator impact for Registration form builder (see [Upgrading](docs/upgrade.md#registration-form-builder-ticket-types-and-templates)):
   - D1: apply `migrations/0052_registration_builder.sql`. Postgres: apply
     `migrations-supabase/0044_registration_builder.sql`. Existing option text becomes option keys
