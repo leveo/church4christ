@@ -72,14 +72,15 @@ const no = t(lang, 'register.no');
       <ul class="max-h-[32rem] divide-y divide-border overflow-y-auto rounded-md border border-border">
         {board.waiting.map((p) => {
           const more = board.partyLeft.get(p.attendeeId) ?? 0;
+          const details = [
+            p.registrationName !== p.name ? t(lang, 'admin.reg.lx.partyOf', { name: p.registrationName }) : '',
+            p.ticketTypeId !== null ? (typeLabel.get(p.ticketTypeId) ?? '') : '',
+            more > 0 ? t(lang, 'admin.reg.lx.partyLeft', { n: more }) : '',
+          ].filter(Boolean);
           const body = (
             <>
               <span class="font-medium">{p.name}</span>
-              <span class="block text-xs text-ink-muted">
-                {p.registrationName !== p.name && <span>{t(lang, 'admin.reg.lx.partyOf', { name: p.registrationName })}</span>}
-                {p.ticketTypeId !== null && typeLabel.has(p.ticketTypeId) && <span> · {typeLabel.get(p.ticketTypeId)}</span>}
-                {more > 0 && <span data-party-left={more}> · {t(lang, 'admin.reg.lx.partyLeft', { n: more })}</span>}
-              </span>
+              {details.length > 0 && <span class="block text-xs text-ink-muted" data-party-left={more > 0 ? more : undefined}>{details.join(' · ')}</span>}
               {p.tags.length > 0 && <span class="mt-1 flex flex-wrap gap-1"><LxTagChips ids={p.tags} tags={tagMap} /></span>}
             </>
           );
