@@ -371,7 +371,8 @@ interface SummaryRow {
   event_currency: string;
   max_party_size: number;
   allow_self_edit: number;
-  show_assignments: number;
+  /** Only selected when the caller asked for logistics (the column arrives with migration 0054 / 0046). */
+  show_assignments?: number;
   id: number;
   confirmation_no: string | null;
   status: RegStatus;
@@ -423,7 +424,7 @@ export async function registrationSummary(
               e.starts_at AS starts_at, e.ends_at AS ends_at, e.location AS location,
               e.active AS active, e.visible_from AS visible_from, e.opens_at AS opens_at, e.closes_at AS closes_at,
               e.price_cents AS price_cents, e.currency AS event_currency,
-              e.max_party_size AS max_party_size, e.allow_self_edit AS allow_self_edit, e.show_assignments AS show_assignments,
+              e.max_party_size AS max_party_size, e.allow_self_edit AS allow_self_edit${opts.logistics ? ', e.show_assignments AS show_assignments' : ''},
               r.confirmation_no AS confirmation_no, r.status AS status, r.name AS name, r.email AS email,
               r.phone AS phone, r.locale AS locale, r.party_size AS party_size,
               r.amount_cents AS amount_cents, r.currency AS currency,
