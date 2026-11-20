@@ -665,9 +665,10 @@ export function defineRegBuilderCases(label: string, getDb: () => AppDb, backend
         // the visible original still shows
         expect((await listPublicEvents(getDb(), 'en')).map((e) => e.id)).toContain(id);
         // even a registration row somehow attached to a template never shows in "my events"
-        await getDb().prepare(`INSERT INTO registrations (event_id, name, email, status, submission_key) VALUES (?1, 'T', 'tpl-owner@example.com', 'confirmed', ?2)`).bind(templateId, key()).run();
-        await getDb().prepare(`INSERT INTO registrations (event_id, name, email, status, submission_key) VALUES (?1, 'T', 'tpl-owner@example.com', 'confirmed', ?2)`).bind(id, key()).run();
-        expect((await listRegistrationsForPerson(getDb(), 'en', 987654, 'tpl-owner@example.com')).map((r) => r.event_id)).toEqual([id]);
+        const owner = `tpl-owner-${key()}@example.com`;
+        await getDb().prepare(`INSERT INTO registrations (event_id, name, email, status, submission_key) VALUES (?1, 'T', ?3, 'confirmed', ?2)`).bind(templateId, key(), owner).run();
+        await getDb().prepare(`INSERT INTO registrations (event_id, name, email, status, submission_key) VALUES (?1, 'T', ?3, 'confirmed', ?2)`).bind(id, key(), owner).run();
+        expect((await listRegistrationsForPerson(getDb(), 'en', 987654, owner)).map((r) => r.event_id)).toEqual([id]);
       });
 
       it('createFromTemplate makes a regular inactive event with everything copied; only a template qualifies', async () => {
