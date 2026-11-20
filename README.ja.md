@@ -102,6 +102,7 @@ Planning Center および上記のその他の製品名は、それぞれの所�
 | 子どものチェックイン用キオスク | [church-checkin](https://github.com/leveo/church-checkin) | `checkin` |
 | 奉仕スケジュール | [church-volunteer-scheduling](https://github.com/leveo/church-volunteer-scheduling) | `volunteer-scheduling` |
 | 小グループの管理 | [church-small-groups](https://github.com/leveo/church-small-groups) | `small-groups` |
+| イベント申込と受付 | [church-event-registration](https://github.com/leveo/church-event-registration) | `event-registration` |
 | 教会ウェブサイトと CMS | [church-website-cms](https://github.com/leveo/church-website-cms) | `website` |
 
 これらのエディションに独自のコードはないので、余分に保守するものはありません。エディションを使わずに、ここで `npm run onboard -- --preset checkin` を実行することもできます。**設定 → モジュール**で、いつでも機能を追加できます。[単一機能のエディション](docs/editions.md)をご覧ください。

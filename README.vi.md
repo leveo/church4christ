@@ -172,6 +172,7 @@ một mảng được bật, dùng cơ sở dữ liệu Cloudflare D1 mặc đ�
 | Máy kiosk điểm danh cho trẻ em | [church-checkin](https://github.com/leveo/church-checkin) | `checkin` |
 | Xếp lịch tình nguyện viên | [church-volunteer-scheduling](https://github.com/leveo/church-volunteer-scheduling) | `volunteer-scheduling` |
 | Quản lý nhóm nhỏ | [church-small-groups](https://github.com/leveo/church-small-groups) | `small-groups` |
+| Đăng ký và điểm danh sự kiện | [church-event-registration](https://github.com/leveo/church-event-registration) | `event-registration` |
 | Website Hội Thánh và CMS | [church-website-cms](https://github.com/leveo/church-website-cms) | `website` |
 
 Các phiên bản này không chứa mã riêng, nên không có gì thêm phải bảo trì. Bạn cũng có thể

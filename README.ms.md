@@ -168,6 +168,7 @@ satu bidang diaktifkan, menggunakan pangkalan data Cloudflare D1 lalai:
 | Kiosk daftar masuk kanak-kanak | [church-checkin](https://github.com/leveo/church-checkin) | `checkin` |
 | Jadual sukarelawan | [church-volunteer-scheduling](https://github.com/leveo/church-volunteer-scheduling) | `volunteer-scheduling` |
 | Pengurusan kumpulan kecil | [church-small-groups](https://github.com/leveo/church-small-groups) | `small-groups` |
+| Pendaftaran dan daftar masuk acara | [church-event-registration](https://github.com/leveo/church-event-registration) | `event-registration` |
 | Laman web gereja dan CMS | [church-website-cms](https://github.com/leveo/church-website-cms) | `website` |
 
 Edisi ini tidak mengandungi kod berasingan, jadi tiada apa-apa tambahan yang perlu diselenggara. Anda juga boleh

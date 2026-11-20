@@ -230,3 +230,12 @@ export function manageLanding(locale: string, token: string, campusSlug?: string
 export function myEventLanding(locale: string, registrationId: number | undefined): string {
   return registrationId === undefined ? `/${locale}/my/events` : `/${locale}/my/events/${registrationId}?new=1`;
 }
+
+/** A replayed submission's landing: the member's own page when the Member Portal is on, otherwise the static
+ *  done page for the registration's status (its confirmation email, sent by the first call, holds the manage link). */
+export function replayLanding(locale: string, registrationId: number | undefined, status: string | undefined, portalOn: boolean): string {
+  if (portalOn) return myEventLanding(locale, registrationId);
+  if (status === 'confirmed') return `/${locale}/register/done?ok=1`;
+  if (status === 'waitlist' || status === 'review') return `/${locale}/register/done?status=${status}`;
+  return `/${locale}/register`;
+}

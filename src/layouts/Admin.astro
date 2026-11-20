@@ -80,7 +80,7 @@ const isConsole = isStaff || (user?.leaderTeamIds.length ?? 0) > 0;
 // none — it is core). Groups drop out once every child is hidden.
 const modules = Astro.locals.modules;
 const modOn = (m?: ModuleKey) => !m || modules.has(m);
-const hasPaymentOperations = paymentOperationsEnabled(modules);
+const hasPaymentOperations = paymentOperationsEnabled(modules, Astro.locals.dbBackend);
 // Per-admin area filter: only narrows admins — editors/leaders/finance keep
 // their role-based rows (their `show` booleans), so non-admins pass areaOn.
 const areaOn = (a?: AdminAreaKey) => !a || !user?.isAdmin || hasAreaAccess(user, a);

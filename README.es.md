@@ -170,6 +170,7 @@ un solo ámbito activado, usando la base de datos Cloudflare D1 predeterminada:
 | Un quiosco de registro de entrada para niños | [church-checkin](https://github.com/leveo/church-checkin) | `checkin` |
 | Programación de voluntarios | [church-volunteer-scheduling](https://github.com/leveo/church-volunteer-scheduling) | `volunteer-scheduling` |
 | Gestión de grupos pequeños | [church-small-groups](https://github.com/leveo/church-small-groups) | `small-groups` |
+| Inscripciones a eventos y control de entrada | [church-event-registration](https://github.com/leveo/church-event-registration) | `event-registration` |
 | Un sitio web y CMS para la iglesia | [church-website-cms](https://github.com/leveo/church-website-cms) | `website` |
 
 Las ediciones no contienen código aparte, así que no hay nada adicional que mantener. También puedes

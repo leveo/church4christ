@@ -11,6 +11,7 @@ import {
   fieldIdForPath,
   manageLanding,
   myEventLanding,
+  replayLanding,
   partyFit,
   partyRowCount,
   seatsLeft,
@@ -120,6 +121,14 @@ describe('landing targets', () => {
     expect(parsed.hash).toBe(`#t=${'T'.repeat(43)}`);
     expect(myEventLanding('zh', 12)).toBe('/zh/my/events/12?new=1');
     expect(myEventLanding('zh', undefined)).toBe('/zh/my/events');
+  });
+
+  it('sends a replay to the done page for its status when the Member Portal is off', () => {
+    expect(replayLanding('en', 12, 'confirmed', true)).toBe('/en/my/events/12?new=1');
+    expect(replayLanding('en', 12, 'confirmed', false)).toBe('/en/register/done?ok=1');
+    expect(replayLanding('en', 12, 'waitlist', false)).toBe('/en/register/done?status=waitlist');
+    expect(replayLanding('zh', 12, 'review', false)).toBe('/zh/register/done?status=review');
+    expect(replayLanding('en', 12, 'cancelled', false)).toBe('/en/register');
   });
 });
 

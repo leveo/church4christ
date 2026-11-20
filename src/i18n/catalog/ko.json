@@ -117,6 +117,10 @@
     "small-groups": {
       "label": "소그룹",
       "description": "구성원, 모임, 출석을 갖춘 소그룹과 교제 모임 목록을 제공해요."
+    },
+    "event-registration": {
+      "label": "행사 등록",
+      "description": "직접 만든 질문, 대기자 명단, 담당자용 관리 화면, 입구 체크인 데스크를 갖춘 행사 등록을 제공해요."
     }
   },
   "readiness": {

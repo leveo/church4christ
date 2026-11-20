@@ -114,6 +114,7 @@ const quickActions = [
   { show: user.isAdmin && areaOk('attendance') && modules.has('attendance'), href: '/admin/attendance', label: t(lang, 'admin.dashboard.attendance'), detail: '', icon: 'chart' },
   { show: user.isAdmin && areaOk('activity-score') && modules.has('activity-score'), href: '/admin/activity-score', label: t(lang, 'admin.dashboard.activityScore'), detail: '', icon: 'chart' },
   { show: user.isAdmin && areaOk('learning') && modules.has('learning'), href: '/admin/learning', label: t(lang, 'admin.dashboard.learning'), detail: '', icon: 'book' },
+  { show: isStaff && areaOk('registration') && modules.has('registration'), href: '/admin/registration', label: t(lang, 'admin.reg.title'), detail: '', icon: 'calendar' },
 ].filter(action => action.show);
 
 // Revision entity → edit-page href (announcement/event/custom_page have no per-id editor).

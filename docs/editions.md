@@ -1,7 +1,8 @@
 # Single-feature editions
 
 Church4Christ is one codebase with switchable modules. Some churches look for a single tool
-first: a kids check-in kiosk, volunteer scheduling, small groups, or a church website.
+first: a kids check-in kiosk, volunteer scheduling, small groups, event sign-up, or a church
+website.
 Single-feature editions are small public repositories that meet them there. Each one
 describes one setup preset and installs a pinned release of this repository with only that
 preset's features turned on.
@@ -11,7 +12,13 @@ preset's features turned on.
 | [`church-checkin`](https://github.com/leveo/church-checkin) | `checkin` | People & Households, Children Check-in |
 | [`church-volunteer-scheduling`](https://github.com/leveo/church-volunteer-scheduling) | `volunteer-scheduling` | Volunteer Scheduling, Spiritual Gifts, People & Households |
 | [`church-small-groups`](https://github.com/leveo/church-small-groups) | `small-groups` | Groups, Fellowships, People & Households |
+| [`church-event-registration`](https://github.com/leveo/church-event-registration) | `event-registration` | Registration |
 | [`church-website-cms`](https://github.com/leveo/church-website-cms) | `website` | The website preset |
+
+Every edition runs on the default Cloudflare D1 database. On D1 the event registration edition
+takes free sign-ups only; a church that wants to charge for events installs with Supabase
+(PostgreSQL) and Stripe from the start, as its README explains. Its optional rooms, tables, and
+small groups (Event Logistics) are left off, to be turned on later in **Settings → Modules**.
 
 ## What an edition contains
 

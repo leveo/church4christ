@@ -117,6 +117,10 @@
     "small-groups": {
       "label": "Kumpulan Kecil",
       "description": "Kumpulan kecil dengan keahlian, acara dan kehadiran, serta direktori persekutuan."
+    },
+    "event-registration": {
+      "label": "Pendaftaran Acara",
+      "description": "Pendaftaran acara dengan soalan anda sendiri, senarai menunggu, pengurusan untuk pasukan dan meja daftar masuk."
     }
   },
   "readiness": {
