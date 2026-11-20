@@ -349,7 +349,10 @@ describe('Registration on D1: a family signs up, reviews, manages and cancels on
     expect(formPage).toContain('name="person_name_3"');
     expect(formPage).not.toContain('name="person_name_4"');
     expect(formPage).toMatch(/name="submission_key" value="[A-Za-z0-9_-]{16,64}"/);
-    expect(formPage).toContain('data-add-person'); // (the page's own markup; this used to match a CSS rule that was inlined in the page)
+    expect(formPage).toContain('data-add-person');
+    // Household chips come from the signed-in person's household (Sarah has none; David's has Amy). The old check on the
+    // bare attribute matched a CSS rule that used to be inlined in the page; this one looks for the element itself.
+    expect(await (await get('/en/register/920', { cookie: await sessionCookie(2, 'pastor.david@example.com') })).text()).toContain('<div data-household hidden>');
 
     // Review: nothing is written, the page shows the party and carries every id through.
     const cookie = await sessionCookie(...SARAH);

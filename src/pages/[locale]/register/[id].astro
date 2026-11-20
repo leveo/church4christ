@@ -191,6 +191,9 @@ const showIfJson = hasPersonExtras || questions.some((q) => q.condition) ? jsonF
 const yesNo = { yes: t(locale, 'register.yes'), no: t(locale, 'register.no'), helpLabel: t(locale, 'register.help.label') };
 // A group that cannot wait goes elsewhere when a type is sold out; one that can waitlist is told it will.
 const canWaitlist = !paid && event?.waitlist_enabled === 1;
+// A card says how many places that ticket has left, never more than the event itself has.
+const eventLeft = event ? seatsLeft(event) : null;
+const cardLeft = (typeLeft: number | null): number | null => (typeLeft === null ? null : eventLeft === null ? typeLeft : Math.min(typeLeft, eventLeft));
 const ticketChoices: TicketChoice[] = ticketTypes.map((tt) => {
   const soldOut = tt.seats_left === 0;
   return {
@@ -198,7 +201,7 @@ const ticketChoices: TicketChoice[] = ticketTypes.map((tt) => {
     label: tt.label,
     description: tt.description,
     priceText: tt.price_cents > 0 ? formatCents(tt.price_cents, event!.currency, locale) : t(locale, 'register.free'),
-    leftText: tt.seats_left !== null && tt.seats_left > 0 ? t(locale, 'register.ticket.left', { count: tt.seats_left }) : null,
+    leftText: cardLeft(tt.seats_left) !== null && cardLeft(tt.seats_left)! > 0 ? t(locale, 'register.ticket.left', { count: cardLeft(tt.seats_left)! }) : null,
     disabled: soldOut && !canWaitlist,
     note: soldOut ? t(locale, canWaitlist ? 'register.ticket.soldOutWaitlist' : 'register.ticket.soldOut') : null,
   };

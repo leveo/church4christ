@@ -46,8 +46,17 @@ export async function buildRegistrationView(
   let questions: ViewQuestion[] = [];
   let personQuestions: ViewQuestion[] = [];
   const personValues = new Map<number, Record<string, string[]>>();
+  const defs = await listQuestions(db, locale, event.id);
+  // The summary's answer text is the stored value for yes/no and terms; the page shows them as people read them.
+  const typeById = new Map(defs.map((q) => [q.id, q.type]));
+  const readable = (a: { question_id: number; label: string; value: string }): { label: string; value: string } => {
+    const type = typeById.get(a.question_id);
+    return {
+      label: a.label,
+      value: type === 'yesno' ? t(locale, a.value === 'yes' ? 'register.yes' : 'register.no') : type === 'terms' ? t(locale, 'register.review.accepted') : a.value,
+    };
+  };
   if (s.canEdit) {
-    const defs = await listQuestions(db, locale, event.id);
     const { results } = await db
       .prepare(`SELECT question_id, value FROM reg_answers WHERE registration_id = ?1`)
       .bind(registrationId)
@@ -108,11 +117,11 @@ export async function buildRegistrationView(
       ticketText: a.ticket_label
         ? (a.ticket_price_cents ?? 0) > 0 ? `${a.ticket_label} · ${formatCents(a.ticket_price_cents!, reg.currency, locale)}` : a.ticket_label
         : null,
-      answers: a.answers.map((x) => ({ label: x.label, value: x.value })),
+      answers: a.answers.map(readable),
       ...(s.canEdit ? { values: personValues.get(a.id) ?? {} } : {}),
     })),
     // Answers show for the people who gave them; the labels are localized by the summary.
-    answers: s.answers.map((a) => ({ label: a.label, value: a.value })),
+    answers: s.answers.map(readable),
     questions,
     personQuestions,
     canEdit: s.canEdit,

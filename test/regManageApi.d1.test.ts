@@ -313,6 +313,20 @@ describe('manage view and edit with ticket types and per-person answers', () => 
     if (outcome.kind === 'invalid') expect(outcome.errors).toEqual([{ path: `attendees.1.q.${meal.id}`, code: 'missing_required' }]);
   });
 
+  it('shows yes/no and terms answers as people read them, not as stored', async () => {
+    const eventId = await saveEvent(env.DB, { title_en: 'Readable', title_zh: '可读', starts_at: ts(10 * DAY), active: 1, max_party_size: 2 });
+    expect(await saveEventForm(env.DB, eventId, {
+      questions: [{ type: 'yesno', labels: { en: 'First time?' } }, { type: 'terms', required: true, labels: { en: 'Photo release' } }],
+    }, { backend: 'd1' })).toEqual({ ok: true });
+    const [first, terms] = await listQuestions(env.DB, 'en', eventId);
+    const created = await createRegistration(env.DB, {
+      eventId, personId: null, name: 'Ada', email: 'ada@example.com', status: 'confirmed', amountCents: 0, currency: 'usd',
+      answers: [[first.id, 'yes'], [terms.id, '@accepted']], submissionKey: `manage-readable-${Date.now()}-${++seq}`, locale: 'en',
+    });
+    const view = (await buildRegistrationView(env.DB, created.id, 'en'))!;
+    expect(view.answers).toEqual([{ label: 'First time?', value: 'Yes' }, { label: 'Photo release', value: 'Accepted' }]);
+  });
+
   it('frees the seat of that person\'s ticket type when they cannot come', async () => {
     const { eventId, registrationId, child } = await typedEvent();
     expect((await listTicketTypes(env.DB, 'en', eventId)).find((t) => t.id === child.id)!.seats_left).toBe(0);
