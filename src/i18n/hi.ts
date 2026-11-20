@@ -3719,6 +3719,8 @@ const dict: Partial<Record<keyof typeof en, string>> = {
   "reg.email.assign.table": "मेज़",
   "reg.email.assign.group": "समूह",
   "reg.email.assign.none": "अभी तय नहीं",
+  "admin.reg.lx.move": "किसी को दूसरी जगह भेजें",
+  "admin.reg.lx.moveButton": "भेजें",
 };
 
 export default dict as Record<string, string>;

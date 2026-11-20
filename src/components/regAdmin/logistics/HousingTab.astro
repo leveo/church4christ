@@ -170,6 +170,30 @@ const badgeBase = 'inline-flex items-center rounded-full px-2 py-0.5 text-xs fon
             {confirmedRooms.length === 0 && <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.lx.confirmFirst')}</p>}
           </form>
         )}
+        {canManage && assigned.length > 0 && confirmedRooms.length > 0 && (
+          <form method="post" class="gathering-panel space-y-3" data-testid="lx-move">
+            <LxHidden action="room_assign" back={back} tab="housing" />
+            <input type="hidden" name="party" value="0" />
+            <h3 class={h3}>{t(lang, 'admin.reg.lx.move')}</h3>
+            <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.person')}</span>
+              <select name="attendee_id" required class={tin}>
+                <option value="">—</option>
+                {assigned.map((p) => <option value={p.attendeeId}>{p.name} · {roomOf.get(p.roomId!)!.room.label}</option>)}
+              </select>
+            </label>
+            <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.room')}</span>
+              <select name="room_id" required class={tin}>
+                <option value="">—</option>
+                {venues.map((v) => (
+                  <optgroup label={v.name}>
+                    {v.rooms.filter((r) => r.confirmed).map((r) => <option value={r.id}>{r.label} · {r.occupants.length}/{r.beds}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+            <button type="submit" class={btnSecondary}>{t(lang, 'admin.reg.lx.moveButton')}</button>
+          </form>
+        )}
         {canManage && assigned.length > 1 && (
           <form method="post" class="gathering-panel space-y-3" data-testid="lx-swap">
             <LxHidden action="room_swap" back={back} tab="housing" />

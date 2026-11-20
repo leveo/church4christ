@@ -3869,4 +3869,6 @@ export default {
   'reg.email.assign.table': 'Table',
   'reg.email.assign.group': 'Group',
   'reg.email.assign.none': 'not assigned yet',
+  'admin.reg.lx.move': 'Move someone',
+  'admin.reg.lx.moveButton': 'Move',
 } satisfies Record<string, string>;

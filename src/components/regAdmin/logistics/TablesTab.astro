@@ -37,6 +37,8 @@ const planned = preview
   ? tables.map((tb) => ({ table: tb, people: preview.plan.seats.filter((s) => s.tableId === tb.id).map((s) => s.attendeeId), host: preview.plan.hosts.find((h) => h.tableId === tb.id)?.attendeeId ?? tb.hostAttendeeId }))
   : [];
 const v = preview?.plan.violations;
+const seatedPeople = board.people.filter((p) => p.tableId !== null && tables.some((tb) => tb.id === p.tableId)).sort((a, b) => a.name.localeCompare(b.name, lang));
+const labelOf = new Map(tables.map((tb) => [tb.id, tb.label]));
 ---
 <section id="logistics" class="mt-6 scroll-mt-4" aria-labelledby="lx-tables-heading" data-testid="lx-tables">
   <div class="flex flex-wrap items-baseline justify-between gap-3">
@@ -163,6 +165,26 @@ const v = preview?.plan.violations;
               <input type="checkbox" name="party" value="1" checked /> {t(lang, 'admin.reg.lx.seatParty')}
             </label>
             <button type="submit" class={btn}>{t(lang, 'admin.reg.lx.seat')}</button>
+          </form>
+        )}
+        {canManage && seatedPeople.length > 0 && (
+          <form method="post" class="gathering-panel space-y-3" data-testid="lx-move">
+            <LxHidden action="table_seat" back={back} tab="tables" />
+            <input type="hidden" name="party" value="0" />
+            <h3 class="font-semibold">{t(lang, 'admin.reg.lx.move')}</h3>
+            <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.person')}</span>
+              <select name="attendee_id" required class={tin}>
+                <option value="">—</option>
+                {seatedPeople.map((p) => <option value={p.attendeeId}>{p.name} · {labelOf.get(p.tableId!)}</option>)}
+              </select>
+            </label>
+            <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.table')}</span>
+              <select name="table_id" required class={tin}>
+                <option value="">—</option>
+                {tables.map((tb) => <option value={tb.id}>{tb.label} · {tb.occupants.length}/{tb.seats}</option>)}
+              </select>
+            </label>
+            <button type="submit" class={btnSecondary}>{t(lang, 'admin.reg.lx.moveButton')}</button>
           </form>
         )}
       </div>

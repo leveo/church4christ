@@ -3864,4 +3864,6 @@ export default {
   'reg.email.assign.table': '餐桌',
   'reg.email.assign.group': '小组',
   'reg.email.assign.none': '尚未安排',
+  'admin.reg.lx.move': '调换某人',
+  'admin.reg.lx.moveButton': '调换',
 } satisfies Record<string, string>;

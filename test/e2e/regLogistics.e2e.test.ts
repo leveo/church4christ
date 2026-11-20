@@ -131,7 +131,10 @@ describe('Event logistics on D1', () => {
     expect(placed.status).toBe(303);
     expect(placed.headers.get('location')).toBe(`${EVENT}?tab=housing&notice=lx_assigned&n=2#logistics`);
     expect((await all<{ attendee_id: number }>(`SELECT attendee_id FROM reg_room_assignments WHERE room_id = ?1 ORDER BY attendee_id`, rooms[0])).map((r) => r.attendee_id)).toEqual(lopez.people);
-    expect(await page(placed.headers.get('location')!, admin)).toContain('Done: 2 people placed.');
+    const after = await page(placed.headers.get('location')!, admin);
+    expect(after).toContain('Done: 2 people placed.');
+    // A placed person can be moved straight to another room (the Move form posts room_assign without the party).
+    expect(after).toContain('data-testid="lx-move"');
 
     // Three Kims in a two-bed room of a hotel (flexible): asked first, with the reason and a checkbox; nothing written.
     const asked = await act({ action: 'room_assign', attendee_id: String(kim.people[0]), room_id: String(rooms[1]), party: ['0', '1'], tab: 'housing', back: 'tab=housing' }, admin, '?tab=housing');

@@ -21,6 +21,8 @@ const nameOf = (id: number) => board.byId.get(id)?.name ?? `#${id}`;
 const eligible = board.people.filter((p) => p.eligible).length;
 const placed = board.people.filter((p) => p.eligible && p.groupId !== null).length;
 const fillQuestions = personChoiceQuestions(board.questions);
+const grouped = board.people.filter((p) => p.groupId !== null && groups.some((g) => g.id === p.groupId)).sort((a, b) => a.name.localeCompare(b.name, lang));
+const nameOfGroup = new Map(groups.map((g) => [g.id, g.name]));
 ---
 <section id="logistics" class="mt-6 scroll-mt-4" aria-labelledby="lx-groups-heading" data-testid="lx-groups">
   <div class="flex flex-wrap items-baseline justify-between gap-3">
@@ -79,6 +81,25 @@ const fillQuestions = personChoiceQuestions(board.questions);
               </select>
             </label>
             <button type="submit" class={btn}>{t(lang, 'admin.reg.lx.addToGroup')}</button>
+          </form>
+        )}
+        {canManage && grouped.length > 0 && (
+          <form method="post" class="gathering-panel space-y-3" data-testid="lx-move">
+            <LxHidden action="group_join" back={back} tab="groups" />
+            <h3 class="font-semibold">{t(lang, 'admin.reg.lx.move')}</h3>
+            <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.person')}</span>
+              <select name="attendee_id" required class={tin}>
+                <option value="">—</option>
+                {grouped.map((p) => <option value={p.attendeeId}>{p.name} · {nameOfGroup.get(p.groupId!)}</option>)}
+              </select>
+            </label>
+            <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.group')}</span>
+              <select name="group_id" required class={tin}>
+                <option value="">—</option>
+                {groups.map((g) => <option value={g.id}>{g.name} · {g.members.length}{g.capacity !== null ? `/${g.capacity}` : ''}</option>)}
+              </select>
+            </label>
+            <button type="submit" class={btnSecondary}>{t(lang, 'admin.reg.lx.moveButton')}</button>
           </form>
         )}
       </div>

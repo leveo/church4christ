@@ -26,7 +26,7 @@ const makeHandler = (over: { limit?: number; secret?: string | undefined } = {})
 
 type Reply = Omit<Response, 'json'> & { json(): Promise<any> }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-async function call(body: unknown, opts: { handler?: ReturnType<typeof makeHandler>; ip?: string } = {}): Promise<Reply> {
+async function call(body: unknown, opts: { handler?: ReturnType<typeof makeHandler>; ip?: string; modules?: string[] } = {}): Promise<Reply> {
   const handler = opts.handler ?? makeHandler();
   return handler({
     request: new Request('https://church.example/api/register/manage', {
@@ -34,7 +34,7 @@ async function call(body: unknown, opts: { handler?: ReturnType<typeof makeHandl
       headers: { 'content-type': 'application/json', ...(opts.ip ? { 'cf-connecting-ip': opts.ip } : {}) },
       body: typeof body === 'string' ? body : JSON.stringify(body),
     }),
-    locals: { modules: new Set(['registration']), db: env.DB, dbBackend: 'd1', locale: 'en' },
+    locals: { modules: new Set(opts.modules ?? ['registration']), db: env.DB, dbBackend: 'd1', locale: 'en' },
   } as never);
 }
 
@@ -98,6 +98,16 @@ describe('manage API: authorization', () => {
     expect(body.view.canCancel).toBe(true);
     expect(body.view.questions[0]).toMatchObject({ label: 'What will you bring?', value: ['Salad'] });
     expect(body.view.qrUrl).toBe(`/register/qr/${eventId}/${created.confirmationNo}.png?campus=main`);
+  });
+
+  it('shows room, table and group only with the event-logistics module on and the event showing them', async () => {
+    const { eventId, questionId } = await newEvent();
+    const created = await register(eventId, questionId);
+    await env.DB.prepare(`UPDATE reg_events SET seating_enabled = 1, show_assignments = 1 WHERE id = ?1`).bind(eventId).run();
+    const off = await (await call({ token: created.manageToken, action: 'view' })).json();
+    expect(off.view.attendees[0].assignments).toBeUndefined();
+    const on = await (await call({ token: created.manageToken, action: 'view' }, { modules: ['registration', 'event-logistics'] })).json();
+    expect(on.view.attendees[0].assignments).toEqual([{ label: 'Table', value: 'Not assigned yet' }]);
   });
 
   it('answers a wrong, garbled, missing or replaced token with the same bare 404', async () => {
