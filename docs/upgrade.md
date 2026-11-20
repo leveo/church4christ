@@ -594,3 +594,33 @@ database. There is no new secret, binding, or cron trigger.
   registration's detail panel. Refunds made in the Stripe dashboard are recorded through the
   `charge.refunded` event you already send. Nothing to configure.
 - No down migration. Restore the pre-upgrade backup as in section 5 if you must go back.
+
+### Registration event logistics
+
+This part adds the optional **Event Logistics** module: rooms, tables with Auto-seat, small
+groups, tags, and their prints on a registration event's page. See
+[Event logistics](features/event-logistics.md). It adds one more migration on each database.
+There is no new secret, binding, cron trigger, or dependency.
+
+- **Apply the migrations** before deploying: D1 `migrations/0054_registration_logistics.sql`
+  (`npm run db:migrate:remote`) and Postgres
+  `migrations-supabase/0046_registration_logistics.sql` (`npm run db:migrate:supabase`). Back up
+  first. They add defaulted columns to `reg_events` (every switch starts off) and ten new tables
+  (`reg_tags`, `reg_attendee_tags`, `reg_venues`, `reg_room_types`, `reg_rooms`,
+  `reg_room_assignments`, `reg_tables`, `reg_table_seats`, `reg_groups`, `reg_group_members`).
+  There is no backfill. Existing events and registrations behave as before.
+- **The module stays off after the upgrade.** On a database that already has data, the
+  migration records `module.event-logistics = 0`. An explicit saved choice is never changed. A
+  fresh install follows the module choice made in setup, and no preset includes it.
+- **To turn it on:** a super admin ticks **Event Logistics** in **Settings → Modules** (Registration
+  must be on too). Then edit each event that needs it and, in its **Rooms, tables and groups**
+  section, turn on **Housing (rooms)**, **Tables (seating)**, **Small groups**, and, if wanted,
+  **Show registrants their room, table and group**.
+- **Setup doctor** now also expects the ten new tables. Run the migration before running doctor.
+- **Access to one event.** Per-event viewers and registrars can also open the event's room list,
+  door signs, table list, table cards, and group list (names only). Viewers see the Housing,
+  Tables, and Groups tabs without changing anything. Check-in desk volunteers see each person's
+  room and table on the desk.
+- **Identity merge.** Who placed a person in a room, at a table, or in a group is kept as history
+  (`historical_preserve`). There is no new merge conflict.
+- No down migration. Restore the pre-upgrade backup as in section 5 if you must go back.

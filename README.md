@@ -254,6 +254,7 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Page builder](docs/features/page-builder.md)** | Drag and drop your own custom pages together — multilingual, always on-theme, and published pages load with zero JavaScript. Optional; switching it off never breaks a page you already built. |
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Implemented: online gifts through Stripe (test mode by default, live after the go-live checklist), an offline ledger for checks and cash, and annual giving statements. |
 | [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Implemented: free event sign-up on D1 or Supabase, custom questions, waitlist, event stages, and roster export, plus paid Stripe checkout on Supabase in the same Stripe mode as Giving (verify with a small live registration before relying on it). |
+| [![](docs/images/registration/logistics-housing.png)](docs/features/event-logistics.md) | **[Event logistics](docs/features/event-logistics.md)** | Optional add-on to Registration: put people in rooms, seat them at tables with an Auto-seat preview, sort them into small groups, and print room lists, door signs, and table cards. |
 | [![](docs/images/portal/member-opportunities.png)](docs/features/member-portal.md) | **[Member portal](docs/features/member-portal.md)** | One signed-in hub for current participation and open opportunities, plus household profiles, events, serving, calendar, giving, and scoped prayer. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Twelve languages](docs/features/i18n.md)** | Choose from 12 interface languages per site, with an English fallback and one-click Simplified-to-Traditional Chinese. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & automation](docs/features/email-automation.md)** | Sign-in links, reminders, and digests, with local logging and a paid-capable production configuration. |
@@ -262,7 +263,7 @@ Every feature has its own plain-English guide. Start with any of these:
 **Pick your modules.** Most optional domain capabilities are **modules** you can switch
 off from one panel in Settings — bulletins, sermons, the prayer wall, volunteer scheduling,
 and more. New installations write every module setting explicitly from the setup selection;
-the Full Church demo selects its 21 (Service Planning is switched on separately). On older installations only, missing module rows retain
+the Full Church demo selects its 21 (Service Planning and Event Logistics are switched on separately). On older installations only, missing module rows retain
 the legacy default-on behavior. A church that wants only service times and sermons can hide
 the rest in a click: the module's pages, links, and emails disappear together, and nothing
 is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
