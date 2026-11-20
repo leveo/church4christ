@@ -122,6 +122,22 @@ function host(origin: string | undefined): string {
 
 const multiline = (value: string): string => escapeHtml(value).replace(/\r?\n/g, '<br>');
 
+/** "Ana Lopez: Room 101 (Pine Lodge) · Table 2 · Group Blue" per active person who has event logistics to show. */
+function assignmentLines(summary: RegistrationSummary, locale: Locale): string[] {
+  const none = copy(locale, 'assign.none');
+  const lines: string[] = [];
+  for (const a of summary.attendees) {
+    const x = a.assignments;
+    if (a.status !== 'active' || !x) continue;
+    const parts: string[] = [];
+    if (x.room !== undefined) parts.push(`${copy(locale, 'assign.room')}: ${x.room ? (x.room.venue ? `${x.room.label} (${x.room.venue})` : x.room.label) : none}`);
+    if (x.table !== undefined) parts.push(`${copy(locale, 'assign.table')}: ${x.table ? x.table.label : none}`);
+    if (x.group !== undefined) parts.push(`${copy(locale, 'assign.group')}: ${x.group ? x.group.name : none}`);
+    if (parts.length > 0) lines.push(`${a.name}: ${parts.join(' · ')}`);
+  }
+  return lines;
+}
+
 function build(summary: RegistrationSummary, variant: Variant, opts: RegEmailOptions, person?: string): BuiltRegEmail {
   const { locale } = opts;
   const { event, registration } = summary;
@@ -149,6 +165,11 @@ function build(summary: RegistrationSummary, variant: Variant, opts: RegEmailOpt
     add(copy(locale, 'label.when'), whenText(event, locale));
     add(copy(locale, 'label.where'), event.location);
     if (active.length > 0) add(copy(locale, 'label.people'), active.join(', '));
+    // The reminder carries each person's room / table / group when the event shows them (see registrationSummary).
+    if (variant === 'reminder') {
+      const placed = assignmentLines(summary, locale);
+      if (placed.length > 0) add(copy(locale, 'label.assignments'), placed.join('\n'), placed.map(escapeHtml).join('<br>'));
+    }
     if (variant === 'paid' && registration.amount_cents > 0) {
       add(copy(locale, 'label.amount'), moneyText(registration.amount_cents, registration.currency, locale));
     }

@@ -18,7 +18,7 @@ import { sendEmail, type EmailEnv } from './email';
 import { getLocaleSettings, LEGACY_LOCALE_SETTINGS } from './localeSettings';
 import { loadDict } from './i18n';
 import { isSupportedLocale, type Locale } from './locales';
-import { getEnabledModules } from './modules';
+import { getEnabledModules, logisticsModuleEnabled } from './modules';
 import { cancelRegistrationPromoting, hashManageToken } from './regDb';
 import type { DecisionResult } from './regAdmin';
 import { claimReminder, findReminderCandidates, releaseReminder } from './regOutbox';
@@ -46,11 +46,12 @@ export async function emailLocale(db: AppDb, registrationLocale: string | null):
   return locale;
 }
 
-export async function loadSummary(db: AppDb, id: number): Promise<{ summary: RegistrationSummary; locale: Locale } | null> {
+/** `logistics`: the event-logistics module is on (the reminder then shows room / table / group when the event does). */
+export async function loadSummary(db: AppDb, id: number, opts: { logistics?: boolean } = {}): Promise<{ summary: RegistrationSummary; locale: Locale } | null> {
   const row = await db.prepare(`SELECT locale FROM registrations WHERE id = ?1`).bind(id).first<{ locale: string | null }>();
   if (!row) return null;
   const locale = await emailLocale(db, row.locale);
-  const summary = await registrationSummary(db, id, locale);
+  const summary = await registrationSummary(db, id, locale, undefined, opts);
   return summary ? { summary, locale } : null;
 }
 
@@ -223,9 +224,9 @@ export async function sendDecision(
  * The reminder: event details, the people, the notes, the QR and a manage link (rotated; rolled back if the
  * send fails) to one confirmed registration. The caller owns the once-only claim (see sweepReminders).
  */
-export async function sendReminder(env: RegNotifyEnv, db: AppDb, registrationId: number): Promise<boolean> {
+export async function sendReminder(env: RegNotifyEnv, db: AppDb, registrationId: number, opts: { logistics?: boolean } = {}): Promise<boolean> {
   try {
-    const loaded = await loadSummary(db, registrationId);
+    const loaded = await loadSummary(db, registrationId, opts);
     if (!loaded) return false;
     const { summary, locale } = loaded;
     if (summary.registration.status !== 'confirmed' || !summary.registration.email) return false;
@@ -369,7 +370,7 @@ export async function sweepReminders(env: RegNotifyEnv, db: AppDb, now: Date = n
         if (!modules.has('registration')) continue;
         claimed = await claimReminder(db, candidate.registrationId);
         if (!claimed) continue;
-        if (await sendReminder(env, db, candidate.registrationId)) sent++;
+        if (await sendReminder(env, db, candidate.registrationId, { logistics: logisticsModuleEnabled(modules) })) sent++;
         else await releaseReminder(db, candidate.registrationId);
       } catch (e) {
         console.error(`registration reminder failed for registration ${candidate.registrationId}`, e instanceof Error ? e.name : 'unknown');

@@ -12,6 +12,7 @@ import { findRegistrationByToken, type RegistrationRef } from '../../../lib/regM
 import { performManageAction, type ManageAction, type NotifyRelease } from '../../../lib/regManageApi';
 import { notifyAfterRelease, type RegNotifyEnv } from '../../../lib/regNotify';
 import type { FieldBag } from '../../../lib/regPublic';
+import { logisticsModuleEnabled } from '../../../lib/modules';
 
 export const prerender = false;
 
@@ -93,7 +94,7 @@ export function createManageHandler(makeDeps: () => ManageDeps = defaultDeps): A
     else return json({ error: 'bad_request' }, 400);
 
     const notify: NotifyRelease = (input) => deps.notify(deps.notifyEnv, locals.db, input);
-    const outcome = await deps.perform(locals.db, ref, locale, action, notify);
+    const outcome = await deps.perform(locals.db, ref, locale, action, notify, undefined, { logistics: logisticsModuleEnabled(locals.modules) });
     switch (outcome.kind) {
       case 'view':
         return json({ ok: true, view: outcome.view, notice: outcome.notice });

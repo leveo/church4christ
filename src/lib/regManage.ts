@@ -371,6 +371,7 @@ interface SummaryRow {
   event_currency: string;
   max_party_size: number;
   allow_self_edit: number;
+  show_assignments: number;
   id: number;
   confirmation_no: string | null;
   status: RegStatus;
@@ -422,7 +423,7 @@ export async function registrationSummary(
               e.starts_at AS starts_at, e.ends_at AS ends_at, e.location AS location,
               e.active AS active, e.visible_from AS visible_from, e.opens_at AS opens_at, e.closes_at AS closes_at,
               e.price_cents AS price_cents, e.currency AS event_currency,
-              e.max_party_size AS max_party_size, e.allow_self_edit AS allow_self_edit,
+              e.max_party_size AS max_party_size, e.allow_self_edit AS allow_self_edit, e.show_assignments AS show_assignments,
               r.confirmation_no AS confirmation_no, r.status AS status, r.name AS name, r.email AS email,
               r.phone AS phone, r.locale AS locale, r.party_size AS party_size,
               r.amount_cents AS amount_cents, r.currency AS currency,
@@ -479,7 +480,9 @@ export async function registrationSummary(
     ticket_price_cents: a.ticket_type_id === null ? null : a.ticket_price_cents,
     answers: display(storedPerson.results.filter((r) => r.attendee_id === a.id), 'attendee'),
   }));
-  if (opts.logistics) {
+  // Registrants see logistics only when the event shows them (checked here first, so an event that does not costs
+  // no query at all).
+  if (opts.logistics && Number(row.show_assignments) === 1) {
     const assigned = await assignmentsForAttendees(db, row.event_id, attendees.map((a) => a.id), { forRegistrant: true });
     if (assigned) for (const a of attendees) a.assignments = assigned.get(a.id) ?? {};
   }
