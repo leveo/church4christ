@@ -18,9 +18,9 @@ function summary(over: { status?: 'confirmed' | 'waitlist' | 'cancelled'; amount
       locale: 'en', party_size: 2, amount_cents: over.amount ?? 0, currency: 'usd', created_at: '2031-01-01 00:00:00', cancelled_at: null,
     },
     attendees: [
-      { id: 1, name: 'Ada <script>', status: 'active', person_id: null },
-      { id: 2, name: 'Bob & Co', status: 'active', person_id: null },
-      { id: 3, name: 'Gone Person', status: 'cancelled', person_id: null },
+      { id: 1, name: 'Ada <script>', status: 'active', person_id: null, ticket_type_id: null, ticket_label: null, ticket_price_cents: null, answers: [] },
+      { id: 2, name: 'Bob & Co', status: 'active', person_id: null, ticket_type_id: null, ticket_label: null, ticket_price_cents: null, answers: [] },
+      { id: 3, name: 'Gone Person', status: 'cancelled', person_id: null, ticket_type_id: null, ticket_label: null, ticket_price_cents: null, answers: [] },
     ],
     answers: [],
     canEdit: true,

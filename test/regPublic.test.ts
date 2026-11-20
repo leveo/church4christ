@@ -21,8 +21,8 @@ import { validateSubmission } from '../src/lib/regManage';
 import type { RegQuestion } from '../src/lib/regDb';
 
 const questions: RegQuestion[] = [
-  { id: 11, sort: 0, type: 'text', required: 1, options: null, label: 'Dish' },
-  { id: 12, sort: 1, type: 'checkbox', required: 0, options: ['a', 'b'], label: 'Allergies' },
+  { id: 11, sort: 0, type: 'text', required: 1, options: null, label: 'Dish', scope: 'registration', condition: null, max_length: null, help: null, placeholder: null, option_labels: {} },
+  { id: 12, sort: 1, type: 'checkbox', required: 0, options: ['a', 'b'], label: 'Allergies', scope: 'registration', condition: null, max_length: null, help: null, placeholder: null, option_labels: {} },
 ];
 
 const formOf = (entries: Array<[string, string]>): FormData => {

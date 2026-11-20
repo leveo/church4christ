@@ -129,8 +129,10 @@ describe('validateConditions', () => {
     expect(codes(withCondition({ target: 42, op: 'answered' }))).toEqual(['5:condition_target_unknown']);
     expect(codes(withCondition({ target: -1, op: 'answered' }))).toEqual(['5:condition_target_unknown']);
     expect(codes(withCondition({ target: 5, op: 'answered' }))).toEqual(['5:condition_target_forward']);
-    expect(codes([{ type: 'text', scope: 'registration' }, { type: 'text', scope: 'registration' }]
-      .map((q, i) => (i === 0 ? { ...q, condition: { target: 1, op: 'answered' } } : q)))).toEqual(['0:condition_target_forward']);
+    expect(codes([
+      { type: 'text', scope: 'registration', condition: { target: 1, op: 'answered' } },
+      { type: 'text', scope: 'registration' },
+    ])).toEqual(['0:condition_target_forward']);
   });
 
   it('refuses cycles (every cycle needs a forward edge)', () => {

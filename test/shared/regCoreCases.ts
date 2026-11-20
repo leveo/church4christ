@@ -654,8 +654,8 @@ export function defineRegCoreCases(label: string, getDb: () => AppDb): void {
     // ── validateSubmission ─────────────────────────────────────────────────────
     describe('validateSubmission', () => {
       const questions: RegQuestion[] = [
-        { id: 11, sort: 0, type: 'text', required: 1, options: null, label: 'Diet' },
-        { id: 12, sort: 1, type: 'select', required: 0, options: ['S', 'M'], label: 'Size' },
+        { id: 11, sort: 0, type: 'text', required: 1, options: null, label: 'Diet', scope: 'registration', condition: null, max_length: null, help: null, placeholder: null, option_labels: {} },
+        { id: 12, sort: 1, type: 'select', required: 0, options: ['S', 'M'], label: 'Size', scope: 'registration', condition: null, max_length: null, help: null, placeholder: null, option_labels: {} },
       ];
       const ok = { contact: { name: ' Ada ', email: ' ADA@Example.com ', phone: ' 555 0100 ' }, answers: { '11': ' none ' } };
 
@@ -665,7 +665,7 @@ export function defineRegCoreCases(label: string, getDb: () => AppDb): void {
           ok: true,
           value: {
             contact: { name: 'Ada', email: 'ada@example.com', phone: '555 0100' },
-            attendees: [{ name: 'Ada', personId: null }],
+            attendees: [{ name: 'Ada', personId: null, ticketTypeId: null, answers: [] }],
             answers: [[11, 'none']],
           },
         });
@@ -676,7 +676,9 @@ export function defineRegCoreCases(label: string, getDb: () => AppDb): void {
           ...ok, attendees: [{ name: '' }, { name: '  ' }, { name: 'Bob', personId: 7 }, { name: '' }, { name: 'Cy', personId: 'x' }],
         });
         expect(result.ok && result.value.attendees).toEqual([
-          { name: 'Ada', personId: null }, { name: 'Bob', personId: 7 }, { name: 'Cy', personId: null },
+          { name: 'Ada', personId: null, ticketTypeId: null, answers: [] },
+          { name: 'Bob', personId: 7, ticketTypeId: null, answers: [] },
+          { name: 'Cy', personId: null, ticketTypeId: null, answers: [] },
         ]);
       });
 
