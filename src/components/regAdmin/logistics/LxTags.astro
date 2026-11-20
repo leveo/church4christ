@@ -1,0 +1,107 @@
+---
+// The event's tags, shared by the three logistics tabs: the list (with how many people carry each), and for staff
+// who may change things: create, rename / recolor, delete, tag or untag one person, and "tag everyone who
+// answered <option> to <question>" (a one-off apply). Colors are the design-token names only.
+import type { LogisticsBoard, LogisticsTab } from '../../../lib/regLogisticsPage';
+import { choiceQuestions, questionOptions } from '../../../lib/regLogisticsPage';
+import { TAG_COLORS } from '../../../lib/regLogistics';
+import { TAG_CHIP, tagColorKey } from '../../../lib/regLogisticsView';
+import { tin, lab, btnSecondary, rowBtn } from '../../../lib/adminUi';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+import LxHidden from './LxHidden.astro';
+
+interface Props { board: LogisticsBoard; tab: LogisticsTab; lang: Locale; back: string; canManage: boolean }
+const { board, tab, lang, back, canManage } = Astro.props;
+const questions = choiceQuestions(board.questions);
+const people = [...board.people].sort((a, b) => a.name.localeCompare(b.name, lang));
+const yes = t(lang, 'register.yes');
+const no = t(lang, 'register.no');
+---
+<details class="gathering-editor mt-4" data-testid="lx-tags">
+  <summary>{t(lang, 'admin.reg.lx.tags')} ({board.tags.length})</summary>
+  <div class="gathering-editor-inner space-y-4">
+    <p class="text-sm text-ink-muted">{t(lang, 'admin.reg.lx.tagsHint')}</p>
+    {board.tags.length === 0 ? (
+      <p class="text-sm text-ink-muted">{t(lang, 'admin.reg.lx.noTags')}</p>
+    ) : (
+      <ul class="space-y-2">
+        {board.tags.map((tag) => (
+          <li class="flex flex-wrap items-center gap-2 text-sm" data-tag-row={tag.id}>
+            <span class={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TAG_CHIP[tag.color]}`}>{tag.label}</span>
+            <span class="text-ink-muted tabular-nums">{t(lang, 'admin.reg.lx.peopleCount', { n: tag.people })}</span>
+            {canManage && (
+              <form method="post" class="flex flex-wrap items-center gap-1">
+                <LxHidden action="tag_update" back={back} tab={tab} />
+                <input type="hidden" name="tag_id" value={tag.id} />
+                <label class="sr-only" for={`tag-label-${tag.id}`}>{t(lang, 'admin.reg.lx.tagName')}</label>
+                <input id={`tag-label-${tag.id}`} name="label" value={tag.label} maxlength="40" required class={`${tin} w-40`} />
+                <label class="sr-only" for={`tag-color-${tag.id}`}>{t(lang, 'admin.reg.lx.color')}</label>
+                <select id={`tag-color-${tag.id}`} name="color" class={`${tin} w-auto`}>
+                  {TAG_COLORS.map((c) => <option value={c} selected={c === tag.color}>{t(lang, tagColorKey(c))}</option>)}
+                </select>
+                <button type="submit" class={rowBtn}>{t(lang, 'admin.form.save')}</button>
+              </form>
+            )}
+            {canManage && (
+              <form method="post" data-confirm={t(lang, 'admin.reg.lx.deleteTagConfirm')}>
+                <LxHidden action="tag_delete" back={back} tab={tab} />
+                <input type="hidden" name="tag_id" value={tag.id} />
+                <button type="submit" class={rowBtn}>{t(lang, 'admin.reg.lx.delete')}</button>
+              </form>
+            )}
+          </li>
+        ))}
+      </ul>
+    )}
+
+    {canManage && (
+      <form method="post" class="flex flex-wrap items-end gap-2" data-testid="lx-tag-create">
+        <LxHidden action="tag_create" back={back} tab={tab} />
+        <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.newTag')}</span><input name="label" maxlength="40" required class={tin} /></label>
+        <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.color')}</span>
+          <select name="color" class={tin}>{TAG_COLORS.map((c) => <option value={c}>{t(lang, tagColorKey(c))}</option>)}</select>
+        </label>
+        <button type="submit" class={btnSecondary}>{t(lang, 'admin.reg.bo.add')}</button>
+      </form>
+    )}
+
+    {canManage && board.tags.length > 0 && people.length > 0 && (
+      <form method="post" class="flex flex-wrap items-end gap-2" data-testid="lx-tag-person">
+        <LxHidden action="tag_set" back={back} tab={tab} />
+        <label class="block min-w-48 flex-1"><span class={lab}>{t(lang, 'admin.reg.lx.person')}</span>
+          <select name="attendee_id" class={tin} required>
+            <option value="">—</option>
+            {people.map((p) => <option value={p.attendeeId}>{p.name}{p.registrationName !== p.name ? ` (${p.registrationName})` : ''}</option>)}
+          </select>
+        </label>
+        <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.tag')}</span>
+          <select name="tag_id" class={tin} required>{board.tags.map((tag) => <option value={tag.id}>{tag.label}</option>)}</select>
+        </label>
+        <button type="submit" name="on" value="1" class={btnSecondary}>{t(lang, 'admin.reg.lx.addTag')}</button>
+        <button type="submit" name="on" value="0" class={btnSecondary}>{t(lang, 'admin.reg.lx.removeTag')}</button>
+      </form>
+    )}
+
+    {canManage && board.tags.length > 0 && questions.length > 0 && (
+      <form method="post" class="flex flex-wrap items-end gap-2" data-testid="lx-tag-answer">
+        <LxHidden action="tag_by_answer" back={back} tab={tab} />
+        <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.tagEveryone')}</span>
+          <select name="tag_id" class={tin} required>{board.tags.map((tag) => <option value={tag.id}>{tag.label}</option>)}</select>
+        </label>
+        <label class="block min-w-48 flex-1"><span class={lab}>{t(lang, 'admin.reg.lx.whoAnswered')}</span>
+          <select name="answer" class={tin} required>
+            <option value="">—</option>
+            {questions.map((q) => (
+              <optgroup label={q.label}>
+                {questionOptions(q, yes, no).map(([key, label]) => <option value={`${q.id}:${key}`}>{label}</option>)}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+        <button type="submit" class={btnSecondary}>{t(lang, 'admin.reg.lx.applyTag')}</button>
+      </form>
+    )}
+    {canManage && board.tags.length > 0 && questions.length > 0 && <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.lx.tagEveryoneHint')}</p>}
+  </div>
+</details>

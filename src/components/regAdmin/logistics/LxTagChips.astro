@@ -1,0 +1,10 @@
+---
+// A person's tags as small colored chips (design-token colors only).
+import type { RegTag } from '../../../lib/regLogistics';
+import { TAG_CHIP } from '../../../lib/regLogisticsView';
+
+interface Props { ids: number[]; tags: Map<number, RegTag> }
+const { ids, tags } = Astro.props;
+const shown = ids.map((id) => tags.get(id)).filter((tag): tag is RegTag => tag !== undefined);
+---
+{shown.map((tag) => <span class={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TAG_CHIP[tag.color]}`} data-tag={tag.id}>{tag.label}</span>)}

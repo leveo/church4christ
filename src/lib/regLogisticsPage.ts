@@ -11,18 +11,21 @@
 //   5. the data layer, which refuses any room, table, group, tag or person of another event ('not_found').
 // Refusals come back namespaced (`lx_<code>`) so their wording never borrows a Phase 4 message.
 import type { AppDb } from './appDb';
-import { decodeChoices, type RegQuestion } from './regDb';
+import type { Locale } from './locales';
+import { decodeChoices, listQuestions, listTicketTypes, type RegQuestion, type RegTicketType } from './regDb';
 import {
-  applyTagByAnswer, createTag, deleteTag, getLogisticsSettings, setTag, updateTag,
-  type BoardPerson, type LogisticsArea, type LogisticsFailure, type LogisticsSettingsInput,
+  applyTagByAnswer, createTag, deleteTag, getLogisticsSettings, listLogisticsPeople, listTags, setTag, updateTag,
+  type BoardPerson, type LogisticsArea, type LogisticsFailure, type LogisticsSettings, type LogisticsSettingsInput, type RegTag,
 } from './regLogistics';
 import {
-  addRooms, assignRoom, clearRoom, createRoomType, createVenue, deleteRoomType, deleteRooms, deleteVenue, setRoomLeader, setRoomsConfirmed,
-  swapRooms, unassignRoom, updateRoom, updateRoomType, updateVenue,
+  addRooms, assignRoom, clearRoom, createRoomType, createVenue, deleteRoomType, deleteRooms, deleteVenue, listHousing, setRoomLeader, setRoomsConfirmed,
+  swapRooms, unassignRoom, updateRoom, updateRoomType, updateVenue, type HousingVenue,
 } from './regHousing';
-import { addTables, applySeatingPlan, deleteTables, previewSeating, seatAtTable, setTableHost, unseat, updateTable } from './regSeating';
-import type { SeatingPlan, SeatingRules } from './regSeatPlanner';
-import { autoFillGroups, createGroup, deleteGroup, joinGroup, leaveGroup, setGroupLeader, updateGroup } from './regGroups';
+import {
+  addTables, applySeatingPlan, deleteTables, listSeating, previewSeating, seatAtTable, setTableHost, unseat, updateTable, type SeatingTable,
+} from './regSeating';
+import type { SeatingRules } from './regSeatPlanner';
+import { autoFillGroups, createGroup, deleteGroup, joinGroup, leaveGroup, listGroups, setGroupLeader, updateGroup, type EventGroup } from './regGroups';
 import type { ActionOutcome } from './regAdminPage';
 
 // ── The action table ─────────────────────────────────────────────────────────
@@ -543,4 +546,56 @@ export const personChoiceQuestions = (questions: readonly RegQuestion[], withYes
 export function questionOptions(q: RegQuestion, yes: string, no: string): Array<[string, string]> {
   if (q.type === 'yesno') return [['yes', yes], ['no', no]];
   return (q.options ?? []).map((key) => [key, q.option_labels[key] ?? key]);
+}
+
+// ── Board data ───────────────────────────────────────────────────────────────
+
+export interface LogisticsBoard {
+  settings: LogisticsSettings;
+  /** Everyone still on the event (see listLogisticsPeople), by attendee id too. */
+  people: BoardPerson[];
+  byId: Map<number, BoardPerson>;
+  /** The people the tab's list shows: eligible, not yet placed in this tab's area, matching the filters. */
+  waiting: BoardPerson[];
+  /** How many eligible people (filters aside) are not yet placed in this tab's area. */
+  waitingTotal: number;
+  /** For each person, how many others of their party are eligible and not yet placed (what "bring their party" adds). */
+  partyLeft: Map<number, number>;
+  tags: RegTag[];
+  types: RegTicketType[];
+  questions: RegQuestion[];
+  state: BoardState;
+  housing: HousingVenue[];
+  tables: SeatingTable[];
+  groups: EventGroup[];
+}
+
+const PLACED: Record<LogisticsTab, 'roomId' | 'tableId' | 'groupId'> = { housing: 'roomId', tables: 'tableId', groups: 'groupId' };
+
+/** Everything one logistics tab shows (only that tab's area is read). Null for an unknown event or a template. */
+export async function loadLogisticsBoard(db: AppDb, eventId: number, tab: LogisticsTab, locale: Locale, params: URLSearchParams): Promise<LogisticsBoard | null> {
+  const settings = await getLogisticsSettings(db, eventId);
+  if (!settings) return null;
+  const state = parseBoardState(params);
+  const [people, tags, types, questions, housing, tables, groups] = await Promise.all([
+    listLogisticsPeople(db, eventId),
+    listTags(db, eventId),
+    listTicketTypes(db, locale, eventId),
+    listQuestions(db, locale, eventId),
+    tab === 'housing' ? listHousing(db, eventId) : Promise.resolve([]),
+    tab === 'tables' ? listSeating(db, eventId) : Promise.resolve([]),
+    tab === 'groups' ? listGroups(db, eventId) : Promise.resolve([]),
+  ]);
+  const key = PLACED[tab];
+  const open = people.filter((p) => p.eligible && p[key] === null);
+  const answered = state.qid !== null && state.opt !== '' ? await peopleWithAnswer(db, eventId, state.qid, state.opt) : null;
+  const partyLeft = new Map<number, number>();
+  const perParty = new Map<number, number>();
+  const isOpen = new Set(open.map((p) => p.attendeeId));
+  for (const p of open) perParty.set(p.registrationId, (perParty.get(p.registrationId) ?? 0) + 1);
+  for (const p of people) partyLeft.set(p.attendeeId, (perParty.get(p.registrationId) ?? 0) - (isOpen.has(p.attendeeId) ? 1 : 0));
+  return {
+    settings, people, byId: new Map(people.map((p) => [p.attendeeId, p])), waiting: filterBoardPeople(open, state, answered), waitingTotal: open.length,
+    partyLeft, tags, types, questions, state, housing, tables, groups,
+  };
 }

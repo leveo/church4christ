@@ -1,0 +1,230 @@
+---
+// The Tables tab of the event page: add tables in bulk, the seating board (people not seated yet, then each table
+// with who sits there), and auto-seat: choose the options, Preview shows the planned tables and the rules it
+// could not meet, and Apply sends the same options with the preview's data stamp; the server plans again and
+// refuses when anything changed since the preview. A viewer sees the board without any form.
+import type { LogisticsBoard } from '../../../lib/regLogisticsPage';
+import { boardQuery } from '../../../lib/regLogisticsPage';
+import type { SeatingPlan } from '../../../lib/regSeatPlanner';
+import { tin, lab, btn, btnSecondary, rowBtn } from '../../../lib/adminUi';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+import LxHidden from './LxHidden.astro';
+import LxPeople from './LxPeople.astro';
+import LxTags from './LxTags.astro';
+
+interface Props {
+  board: LogisticsBoard;
+  lang: Locale;
+  eventId: number;
+  canManage: boolean;
+  /** The auto-seat preview the last POST answered with (null otherwise). */
+  preview: { stamp: string; plan: SeatingPlan; fields: Array<[string, string]> } | null;
+}
+const { board, lang, eventId, canManage, preview } = Astro.props;
+const base = `/admin/registration/${eventId}`;
+const back = boardQuery('tables', board.state);
+const tables = board.tables;
+const nameOf = (id: number) => board.byId.get(id)?.name ?? `#${id}`;
+const eligible = board.people.filter((p) => p.eligible).length;
+const seated = board.people.filter((p) => p.eligible && p.tableId !== null).length;
+const seats = tables.reduce((sum, tb) => sum + tb.seats, 0);
+// The options the preview was made with (to show them again in the form).
+const posted = new Map(preview?.fields ?? []);
+const opt = (name: string) => posted.get(name) ?? '';
+const changed = new Set(preview?.plan.changes.map((c) => c.attendeeId) ?? []);
+const planned = preview
+  ? tables.map((tb) => ({ table: tb, people: preview.plan.seats.filter((s) => s.tableId === tb.id).map((s) => s.attendeeId), host: preview.plan.hosts.find((h) => h.tableId === tb.id)?.attendeeId ?? tb.hostAttendeeId }))
+  : [];
+const v = preview?.plan.violations;
+---
+<section id="logistics" class="mt-6 scroll-mt-4" aria-labelledby="lx-tables-heading" data-testid="lx-tables">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
+    <div>
+      <h2 id="lx-tables-heading" class="font-display text-heading-sm font-bold">{t(lang, 'admin.reg.lx.tab.tables')}</h2>
+      <p class="text-sm text-ink-muted" data-testid="lx-progress">{t(lang, 'admin.reg.lx.tablesProgress', { placed: seated, people: eligible, tables: tables.length, seats })}</p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <a href={`${base}/table-list`} class={btnSecondary} target="_blank" rel="noopener">{t(lang, 'admin.reg.lx.print.tableList')}</a>
+      <a href={`${base}/table-cards`} class={btnSecondary} target="_blank" rel="noopener">{t(lang, 'admin.reg.lx.print.tableCards')}</a>
+    </div>
+  </div>
+
+  <LxTags board={board} tab="tables" lang={lang} back={back} canManage={canManage} />
+
+  {canManage && (
+    <details class="gathering-editor mt-4" open={tables.length === 0} data-testid="lx-tables-add">
+      <summary>{t(lang, 'admin.reg.lx.addTables')}</summary>
+      <form method="post" class="gathering-editor-inner flex flex-wrap items-end gap-2">
+        <LxHidden action="tables_add" back={back} tab="tables" />
+        <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.howMany')}</span><input name="count" type="number" min="1" max="200" value="10" required class={`${tin} w-24`} /></label>
+        <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.seatsEach')}</span><input name="seats" type="number" min="1" max="100" value="8" required class={`${tin} w-24`} /></label>
+        <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.tableNamePrefix')}</span><input name="prefix" value={t(lang, 'admin.reg.lx.tableWord')} maxlength="30" class={`${tin} w-32`} /></label>
+        <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.startAt')}</span><input name="from" type="number" min="0" max="100000" value={String(tables.length + 1)} class={`${tin} w-24`} /></label>
+        <button type="submit" class={btn}>{t(lang, 'admin.reg.lx.addTablesButton')}</button>
+      </form>
+    </details>
+  )}
+
+  {canManage && tables.length > 0 && (
+    <details class="gathering-editor mt-4" open={preview !== null} data-testid="lx-autoseat">
+      <summary>{t(lang, 'admin.reg.lx.autoSeat')}</summary>
+      <div class="gathering-editor-inner space-y-4">
+        <p class="text-sm text-ink-muted">{t(lang, 'admin.reg.lx.autoSeatHint')}</p>
+        <form method="post" class="space-y-3">
+          <LxHidden action="seat_preview" back={back} tab="tables" />
+          <fieldset class="flex flex-wrap gap-4">
+            <legend class={lab}>{t(lang, 'admin.reg.lx.existingSeats')}</legend>
+            <label class="flex min-h-11 items-center gap-2 text-sm"><input type="radio" name="start_over" value="0" checked={opt('start_over') !== '1'} /> {t(lang, 'admin.reg.lx.keepSeats')}</label>
+            <label class="flex min-h-11 items-center gap-2 text-sm"><input type="radio" name="start_over" value="1" checked={opt('start_over') === '1'} /> {t(lang, 'admin.reg.lx.startOver')}</label>
+          </fieldset>
+          {board.tags.length > 0 && (
+            <div class="flex flex-wrap items-end gap-2">
+              <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.spreadTag')}</span>
+                <select name="spread_tag" class={tin}>
+                  <option value="">{t(lang, 'admin.reg.lx.noRule')}</option>
+                  {board.tags.map((tag) => <option value={tag.id} selected={opt('spread_tag') === String(tag.id)}>{tag.label}</option>)}
+                </select>
+              </label>
+              <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.spreadMax')}</span><input name="spread_max" type="number" min="0" max="100" value={opt('spread_max') || '1'} class={`${tin} w-24`} /></label>
+            </div>
+          )}
+          {board.tags.length > 0 && (
+            <div class="flex flex-wrap items-end gap-2">
+              <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.hostFor')}</span>
+                <select name="host_for" class={tin}>
+                  <option value="">{t(lang, 'admin.reg.lx.noRule')}</option>
+                  {board.tags.map((tag) => <option value={tag.id} selected={opt('host_for') === String(tag.id)}>{tag.label}</option>)}
+                </select>
+              </label>
+              <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.hostTag')}</span>
+                <select name="host_tag" class={tin}>
+                  <option value="">{t(lang, 'admin.reg.lx.noRule')}</option>
+                  {board.tags.map((tag) => <option value={tag.id} selected={opt('host_tag') === String(tag.id)}>{tag.label}</option>)}
+                </select>
+              </label>
+            </div>
+          )}
+          {board.tags.length === 0 && <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.lx.rulesNeedTags')}</p>}
+          <button type="submit" class={btnSecondary}>{t(lang, 'admin.reg.lx.preview')}</button>
+        </form>
+
+        {preview && v && (
+          <div class="rounded-lg border border-primary p-4" data-testid="lx-seat-preview" data-stamp={preview.stamp}>
+            <h3 class="font-semibold">{t(lang, 'admin.reg.lx.previewTitle')}</h3>
+            <p class="mt-1 text-sm" data-testid="lx-preview-summary">{t(lang, 'admin.reg.lx.previewSummary', { n: preview.plan.changes.length, m: preview.plan.left.length })}</p>
+            <ul class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-muted" data-testid="lx-preview-unmet">
+              <li data-unmet="partySplit">{t(lang, 'admin.reg.lx.unmet.partySplit', { n: v.partySplit })}</li>
+              <li data-unmet="noRoom">{t(lang, 'admin.reg.lx.unmet.noRoom', { n: v.noRoom })}</li>
+              <li data-unmet="spread">{t(lang, 'admin.reg.lx.unmet.spread', { n: v.spread })}</li>
+              <li data-unmet="hostMissing">{t(lang, 'admin.reg.lx.unmet.hostMissing', { n: v.hostMissing })}</li>
+            </ul>
+            {preview.plan.unseated.length > 0 && <p class="mt-2 text-sm text-warn">{t(lang, 'admin.reg.lx.previewUnseated', { n: preview.plan.unseated.length })}</p>}
+            <ul class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {planned.map((p) => (
+                <li class="rounded-md border border-border bg-surface-raised p-3 text-sm" data-planned-table={p.table.id}>
+                  <p class="flex justify-between font-semibold"><span>{p.table.label}</span><span class="tabular-nums text-ink-muted">{p.people.length} / {p.table.seats}</span></p>
+                  <ul class="mt-1 space-y-0.5">
+                    {p.people.map((id) => <li class={changed.has(id) ? 'font-semibold text-primary' : ''} data-new={changed.has(id) ? '1' : undefined}>{nameOf(id)}{p.host === id && <span class="text-xs text-ink-muted"> · {t(lang, 'admin.reg.lx.host')}</span>}</li>)}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+            {preview.plan.left.length > 0 && <p class="mt-3 text-sm text-ink-muted" data-testid="lx-preview-left">{t(lang, 'admin.reg.lx.previewLeft')}: {preview.plan.left.map(nameOf).join(', ')}</p>}
+            <form method="post" class="mt-4">
+              {preview.fields.filter(([k]) => k !== 'action').map(([k, val]) => <input type="hidden" name={k} value={val} />)}
+              <input type="hidden" name="action" value="seat_apply" />
+              <input type="hidden" name="stamp" value={preview.stamp} />
+              <button type="submit" class={btn} data-testid="lx-seat-apply">{t(lang, 'admin.reg.lx.apply')}</button>
+            </form>
+          </div>
+        )}
+      </div>
+    </details>
+  )}
+
+  {tables.length === 0 && !canManage && <p class="mt-4 text-sm text-ink-muted">{t(lang, 'admin.reg.lx.noTables')}</p>}
+
+  {tables.length > 0 && (
+    <div class="mt-4 grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+      <div class="space-y-4">
+        <LxPeople board={board} tab="tables" lang={lang} eventId={eventId} formId={canManage ? 'lx-seat' : null} />
+        {canManage && board.waiting.length > 0 && (
+          <form id="lx-seat" method="post" class="gathering-panel space-y-3" data-testid="lx-seat">
+            <LxHidden action="table_seat" back={back} tab="tables" />
+            <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.table')}</span>
+              <select name="table_id" required class={tin}>
+                <option value="">—</option>
+                {tables.map((tb) => <option value={tb.id}>{tb.label} · {tb.occupants.length}/{tb.seats}</option>)}
+              </select>
+            </label>
+            <label class="flex min-h-11 items-center gap-2 text-sm">
+              <input type="hidden" name="party" value="0" />
+              <input type="checkbox" name="party" value="1" checked /> {t(lang, 'admin.reg.lx.seatParty')}
+            </label>
+            <button type="submit" class={btn}>{t(lang, 'admin.reg.lx.seat')}</button>
+          </form>
+        )}
+      </div>
+      <ul class="grid min-w-0 content-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {tables.map((tb) => {
+          const over = tb.occupants.length > tb.seats;
+          return (
+            <li class="rounded-lg border border-border bg-surface-raised p-3 text-sm" data-table={tb.id}>
+              <div class="flex items-start justify-between gap-2">
+                <span class="font-semibold">{tb.label}</span>
+                <span class={`tabular-nums ${over ? 'font-semibold text-danger' : 'text-ink-muted'}`} data-occupancy>{tb.occupants.length} / {tb.seats}</span>
+              </div>
+              <ul class="mt-2 space-y-1">
+                {tb.occupants.map((id) => (
+                  <li class="flex items-center justify-between gap-2">
+                    <span>{nameOf(id)}{tb.hostAttendeeId === id && <span class="ml-1 text-xs font-semibold text-primary" data-host>· {t(lang, 'admin.reg.lx.host')}</span>}</span>
+                    {canManage && (
+                      <form method="post">
+                        <LxHidden action="table_unseat" back={back} tab="tables" />
+                        <input type="hidden" name="attendee_id" value={id} />
+                        <button type="submit" class="min-h-9 px-2 text-xs font-semibold text-ink-muted hover:text-danger" aria-label={t(lang, 'admin.reg.lx.removeFrom', { name: nameOf(id), place: tb.label })}>{t(lang, 'admin.reg.lx.remove')}</button>
+                      </form>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {canManage && (
+                <details class="mt-2">
+                  <summary class="cursor-pointer text-xs font-semibold text-primary">{t(lang, 'admin.reg.lx.tableOptions')}</summary>
+                  <form method="post" class="mt-2 flex flex-wrap items-end gap-2">
+                    <LxHidden action="table_update" back={back} tab="tables" />
+                    <input type="hidden" name="table_id" value={tb.id} />
+                    <label class="block flex-1"><span class={lab}>{t(lang, 'admin.reg.lx.tableLabel')}</span><input name="label" value={tb.label} maxlength="40" required class={tin} /></label>
+                    <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.seats')}</span><input name="seats" type="number" min="1" max="100" value={tb.seats} required class={`${tin} w-20`} /></label>
+                    <button type="submit" class={rowBtn}>{t(lang, 'admin.form.save')}</button>
+                  </form>
+                  {tb.occupants.length > 0 && (
+                    <form method="post" class="mt-2 flex flex-wrap items-end gap-2">
+                      <LxHidden action="table_host" back={back} tab="tables" />
+                      <input type="hidden" name="table_id" value={tb.id} />
+                      <label class="block flex-1"><span class={lab}>{t(lang, 'admin.reg.lx.host')}</span>
+                        <select name="attendee_id" class={tin}>
+                          <option value="">{t(lang, 'admin.reg.lx.noHost')}</option>
+                          {tb.occupants.map((id) => <option value={id} selected={tb.hostAttendeeId === id}>{nameOf(id)}</option>)}
+                        </select>
+                      </label>
+                      <button type="submit" class={rowBtn}>{t(lang, 'admin.form.save')}</button>
+                    </form>
+                  )}
+                  {tb.occupants.length === 0 && (
+                    <form method="post" class="mt-2">
+                      <LxHidden action="tables_delete" back={back} tab="tables" />
+                      <input type="hidden" name="table_ids" value={tb.id} />
+                      <button type="submit" class={rowBtn}>{t(lang, 'admin.reg.lx.deleteTable')}</button>
+                    </form>
+                  )}
+                </details>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  )}
+</section>

@@ -1,0 +1,150 @@
+---
+// The Groups tab of the event page: small groups (name, optional capacity, leader, notes), the board (people in
+// no group yet, then each group with its members), and auto-fill from a per-person choice question (one group per
+// option; a group already named after an option is reused). Going over a capacity asks first. A viewer sees the
+// board without any form.
+import type { LogisticsBoard } from '../../../lib/regLogisticsPage';
+import { boardQuery, personChoiceQuestions } from '../../../lib/regLogisticsPage';
+import { tin, lab, btn, btnSecondary, rowBtn } from '../../../lib/adminUi';
+import { t } from '../../../lib/i18n';
+import type { Locale } from '../../../lib/locales';
+import LxHidden from './LxHidden.astro';
+import LxPeople from './LxPeople.astro';
+import LxTags from './LxTags.astro';
+
+interface Props { board: LogisticsBoard; lang: Locale; eventId: number; canManage: boolean }
+const { board, lang, eventId, canManage } = Astro.props;
+const base = `/admin/registration/${eventId}`;
+const back = boardQuery('groups', board.state);
+const groups = board.groups;
+const nameOf = (id: number) => board.byId.get(id)?.name ?? `#${id}`;
+const eligible = board.people.filter((p) => p.eligible).length;
+const placed = board.people.filter((p) => p.eligible && p.groupId !== null).length;
+const fillQuestions = personChoiceQuestions(board.questions);
+---
+<section id="logistics" class="mt-6 scroll-mt-4" aria-labelledby="lx-groups-heading" data-testid="lx-groups">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
+    <div>
+      <h2 id="lx-groups-heading" class="font-display text-heading-sm font-bold">{t(lang, 'admin.reg.lx.tab.groups')}</h2>
+      <p class="text-sm text-ink-muted" data-testid="lx-progress">{t(lang, 'admin.reg.lx.groupsProgress', { placed, people: eligible, groups: groups.length })}</p>
+    </div>
+    <a href={`${base}/group-list`} class={btnSecondary} target="_blank" rel="noopener">{t(lang, 'admin.reg.lx.print.groupList')}</a>
+  </div>
+
+  <LxTags board={board} tab="groups" lang={lang} back={back} canManage={canManage} />
+
+  {canManage && (
+    <details class="gathering-editor mt-4" open={groups.length === 0} data-testid="lx-groups-setup">
+      <summary>{t(lang, 'admin.reg.lx.groupsSetup')}</summary>
+      <div class="gathering-editor-inner space-y-4">
+        <form method="post" class="flex flex-wrap items-end gap-2" data-testid="lx-group-create">
+          <LxHidden action="group_create" back={back} tab="groups" />
+          <label class="block min-w-48 flex-1"><span class={lab}>{t(lang, 'admin.reg.lx.newGroup')}</span><input name="name" maxlength="80" required class={tin} /></label>
+          <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.capacity')}</span><input name="capacity" type="number" min="1" max="1000" class={`${tin} w-24`} /></label>
+          <label class="block min-w-48 flex-1"><span class={lab}>{t(lang, 'admin.reg.lx.notes')}</span><input name="notes" maxlength="1000" class={tin} /></label>
+          <button type="submit" class={btn}>{t(lang, 'admin.reg.lx.addGroup')}</button>
+        </form>
+        {fillQuestions.length > 0 ? (
+          <form method="post" class="space-y-2" data-testid="lx-autofill">
+            <LxHidden action="group_autofill" back={back} tab="groups" />
+            <div class="flex flex-wrap items-end gap-2">
+              <label class="block min-w-48 flex-1"><span class={lab}>{t(lang, 'admin.reg.lx.autoFillBy')}</span>
+                <select name="question_id" required class={tin}>{fillQuestions.map((q) => <option value={q.id}>{q.label}</option>)}</select>
+              </label>
+              <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.newGroupCapacity')}</span><input name="capacity" type="number" min="1" max="1000" class={`${tin} w-24`} /></label>
+              <button type="submit" class={btnSecondary}>{t(lang, 'admin.reg.lx.autoFill')}</button>
+            </div>
+            <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.lx.autoFillHint')}</p>
+          </form>
+        ) : (
+          <p class="text-xs text-ink-subtle">{t(lang, 'admin.reg.lx.autoFillNeedsQuestion')}</p>
+        )}
+      </div>
+    </details>
+  )}
+
+  {groups.length === 0 && !canManage && <p class="mt-4 text-sm text-ink-muted">{t(lang, 'admin.reg.lx.noGroups')}</p>}
+
+  {groups.length > 0 && (
+    <div class="mt-4 grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+      <div class="space-y-4">
+        <LxPeople board={board} tab="groups" lang={lang} eventId={eventId} formId={canManage ? 'lx-join' : null} />
+        {canManage && board.waiting.length > 0 && (
+          <form id="lx-join" method="post" class="gathering-panel space-y-3" data-testid="lx-join">
+            <LxHidden action="group_join" back={back} tab="groups" />
+            <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.group')}</span>
+              <select name="group_id" required class={tin}>
+                <option value="">—</option>
+                {groups.map((g) => <option value={g.id}>{g.name} · {g.members.length}{g.capacity !== null ? `/${g.capacity}` : ''}</option>)}
+              </select>
+            </label>
+            <button type="submit" class={btn}>{t(lang, 'admin.reg.lx.addToGroup')}</button>
+          </form>
+        )}
+      </div>
+      <ul class="grid min-w-0 content-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {groups.map((g) => {
+          const over = g.capacity !== null && g.members.length > g.capacity;
+          return (
+            <li class="rounded-lg border border-border bg-surface-raised p-3 text-sm" data-group={g.id}>
+              <div class="flex items-start justify-between gap-2">
+                <span class="font-semibold">{g.name}</span>
+                <span class={`tabular-nums ${over ? 'font-semibold text-danger' : 'text-ink-muted'}`} data-occupancy>{g.members.length}{g.capacity !== null ? ` / ${g.capacity}` : ''}</span>
+              </div>
+              {g.notes && <p class="mt-1 text-xs text-ink-muted">{g.notes}</p>}
+              <ul class="mt-2 space-y-1">
+                {g.members.map((id) => (
+                  <li class="flex items-center justify-between gap-2">
+                    <span>{nameOf(id)}{g.leaderAttendeeId === id && <span class="ml-1 text-xs font-semibold text-primary" data-leader>· {t(lang, 'admin.reg.lx.leader')}</span>}</span>
+                    {canManage && (
+                      <form method="post">
+                        <LxHidden action="group_leave" back={back} tab="groups" />
+                        <input type="hidden" name="attendee_id" value={id} />
+                        <button type="submit" class="min-h-9 px-2 text-xs font-semibold text-ink-muted hover:text-danger" aria-label={t(lang, 'admin.reg.lx.removeFrom', { name: nameOf(id), place: g.name })}>{t(lang, 'admin.reg.lx.remove')}</button>
+                      </form>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {canManage && (
+                <details class="mt-2">
+                  <summary class="cursor-pointer text-xs font-semibold text-primary">{t(lang, 'admin.reg.lx.groupOptions')}</summary>
+                  <form method="post" class="mt-2 space-y-2">
+                    <LxHidden action="group_update" back={back} tab="groups" />
+                    <input type="hidden" name="group_id" value={g.id} />
+                    <div class="flex flex-wrap items-end gap-2">
+                      <label class="block flex-1"><span class={lab}>{t(lang, 'admin.reg.lx.groupName')}</span><input name="name" value={g.name} maxlength="80" required class={tin} /></label>
+                      <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.capacity')}</span><input name="capacity" type="number" min="1" max="1000" value={g.capacity ?? ''} class={`${tin} w-20`} /></label>
+                    </div>
+                    <label class="block"><span class={lab}>{t(lang, 'admin.reg.lx.notes')}</span><input name="notes" value={g.notes ?? ''} maxlength="1000" class={tin} /></label>
+                    <button type="submit" class={rowBtn}>{t(lang, 'admin.form.save')}</button>
+                  </form>
+                  {g.members.length > 0 && (
+                    <form method="post" class="mt-2 flex flex-wrap items-end gap-2">
+                      <LxHidden action="group_leader" back={back} tab="groups" />
+                      <input type="hidden" name="group_id" value={g.id} />
+                      <label class="block flex-1"><span class={lab}>{t(lang, 'admin.reg.lx.groupLeader')}</span>
+                        <select name="attendee_id" class={tin}>
+                          <option value="">{t(lang, 'admin.reg.lx.noLeader')}</option>
+                          {g.members.map((id) => <option value={id} selected={g.leaderAttendeeId === id}>{nameOf(id)}</option>)}
+                        </select>
+                      </label>
+                      <button type="submit" class={rowBtn}>{t(lang, 'admin.form.save')}</button>
+                    </form>
+                  )}
+                  {g.members.length === 0 && (
+                    <form method="post" class="mt-2">
+                      <LxHidden action="group_delete" back={back} tab="groups" />
+                      <input type="hidden" name="group_id" value={g.id} />
+                      <button type="submit" class={rowBtn}>{t(lang, 'admin.reg.lx.deleteGroup')}</button>
+                    </form>
+                  )}
+                </details>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  )}
+</section>

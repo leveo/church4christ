@@ -18,6 +18,10 @@ import { listLogisticsPeople, saveLogisticsSettings, type LogisticsSettingsInput
 import { listHousing } from '../../src/lib/regHousing';
 import { listSeating } from '../../src/lib/regSeating';
 import { listGroups } from '../../src/lib/regGroups';
+import { TAG_COLORS } from '../../src/lib/regLogistics';
+import { ROOM_POLICIES, VENUE_KINDS } from '../../src/lib/regHousing';
+import { capacityRuleKey, roomPolicyKey, tagColorKey, venueKindKey } from '../../src/lib/regLogisticsView';
+import en from '../../src/i18n/en';
 import {
   LOGISTICS_ACTIONS, boardQuery, filterBoardPeople, logisticsSettingsFromForm, parseBoardState, peopleWithAnswer, seatingRulesFromForm,
 } from '../../src/lib/regLogisticsPage';
@@ -314,6 +318,24 @@ export function defineRegLogisticsUiCases(label: string, getDb: () => AppDb, bac
       expect(failureKey('too_many')).toBe('admin.reg.bo.e.tooManyRecipients');
       expect(failureKey('lx_something_new')).toBe('admin.reg.lx.e.invalid');
       expect(noticeKey('lx_rooms_added')).toBe('admin.reg.lx.n.roomsAdded');
+    });
+
+    it('every key the logistics wording can pick exists in the English dictionary', () => {
+      const dict = en as Record<string, string>;
+      const codes = ['disabled', 'not_found', 'invalid', 'duplicate', 'conflict', 'stale_seating', 'stale_groups', 'not_active', 'not_eligible', 'ROOM_FULL',
+        'room_unconfirmed', 'venue_occupied', 'in_use', 'not_occupant', 'not_seated', 'group_not_empty', 'not_member', 'too_many', 'labels_empty',
+        'labels_too_many', 'labels_reversed', 'labels_bad_range', 'labels_too_long', 'beds_required', 'question', 'rules', 'none_selected', 'no_person',
+        'no_target', 'no_tag'];
+      const notices = ['saved', 'deleted', 'rooms_added', 'rooms_confirmed', 'rooms_unconfirmed', 'rooms_deleted', 'assigned', 'removed', 'cleared', 'swapped',
+        'tables_added', 'tables_deleted', 'seated', 'seat_applied', 'group_filled', 'tagged', 'untagged'];
+      const keys = [
+        ...codes.map((c) => failureKey(`lx_${c}`)), ...notices.map((n) => noticeKey(`lx_${n}`)!),
+        ...['room_over_capacity', 'room_other_party', 'room_mixed_gender', 'gender_unknown', 'gender_question_missing', 'table_full', 'party_split', 'group_full'].map(reasonKey),
+        ...TAG_COLORS.map(tagColorKey), ...VENUE_KINDS.map(venueKindKey), ...ROOM_POLICIES.map(roomPolicyKey), ...(['hard', 'soft'] as const).map(capacityRuleKey),
+        ...['housing', 'tables', 'groups'].flatMap((tab) => [`admin.reg.lx.tab.${tab}`, `admin.reg.lx.waiting.${tab}`]),
+      ];
+      for (const code of codes) expect(failureKey(`lx_${code}`), code).not.toBe('register.manage.failed');
+      expect(keys.filter((k) => !(k in dict))).toEqual([]);
     });
   });
 }

@@ -5,6 +5,8 @@
 // operations, refunds. A viewer gets the read-only parts only. Every form carries the `version` it was read at, so
 // a stale form is refused ("someone else changed this registration").
 import type { RegistrationAdminDetail } from '../../lib/regAdmin';
+import type { AttendeeAssignments } from '../../lib/regLogistics';
+import { roomWithVenue } from '../../lib/regLogisticsView';
 import type { RegQuestion, RegTicketType } from '../../lib/regDb';
 import { activityDetailText, activityKey } from '../../lib/regAdminView';
 import { formatCents } from '../../lib/money';
@@ -27,8 +29,12 @@ interface Props {
   /** Stripe refunds exist on Postgres only. */
   isPg: boolean;
   requiresApproval: boolean;
+  /** Event logistics (module on and an area switched on): each person's room, table and group; null otherwise. */
+  assignments?: Map<number, AttendeeAssignments> | null;
 }
-const { detail, questions, types, lang, back, closeHref, canManage, canRefund, isPg, requiresApproval } = Astro.props;
+const { detail, questions, types, lang, eventId, back, closeHref, canManage, canRefund, isPg, requiresApproval, assignments = null } = Astro.props;
+const lxBase = `/admin/registration/${eventId}`;
+const notYet = t(lang, 'admin.reg.lx.notAssigned');
 const reg = detail.summary.registration;
 const currency = reg.currency;
 const people = detail.summary.attendees.filter((a) => a.status === 'active');
@@ -111,6 +117,16 @@ const box = 'mt-4 rounded-lg border border-border p-4';
             {p.ticket_label && <span class="text-ink-muted" data-ticket> · {p.ticket_label}</span>}
             {door && !door.checkedOutAt && <span class="ml-2 text-success" data-checked-in>✓ {door.checkedInAt.slice(11, 16)}</span>}
             {p.answers.length > 0 && <p class="text-xs text-ink-muted" data-person-answers>{p.answers.map((a) => `${a.label}: ${a.value}`).join('; ')}</p>}
+            {assignments?.get(p.id) && (() => {
+              const a = assignments.get(p.id)!;
+              return (
+                <p class="flex flex-wrap gap-x-3 text-xs text-ink-muted" data-person-logistics>
+                  {a.room !== undefined && <span data-lx="room">{t(lang, 'admin.reg.lx.room')}: <a class="text-primary hover:underline" href={`${lxBase}?tab=housing#logistics`}>{a.room ? roomWithVenue(a.room.label, a.room.venue) : notYet}</a></span>}
+                  {a.table !== undefined && <span data-lx="table">{t(lang, 'admin.reg.lx.table')}: <a class="text-primary hover:underline" href={`${lxBase}?tab=tables#logistics`}>{a.table ? a.table.label : notYet}</a></span>}
+                  {a.group !== undefined && <span data-lx="group">{t(lang, 'admin.reg.lx.group')}: <a class="text-primary hover:underline" href={`${lxBase}?tab=groups#logistics`}>{a.group ? a.group.name : notYet}</a></span>}
+                </p>
+              );
+            })()}
           </div>
           {editable && (
             <div class="flex flex-wrap items-center gap-2">
