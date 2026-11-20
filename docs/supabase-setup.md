@@ -399,6 +399,9 @@ permission appears as a 403 in the Stripe request log; add it and retry.
 - **Refund runbook.** Refund in the Stripe dashboard. The `charge.refunded` event records the
   refunded amount; a full refund marks the gift **Refunded**, a partial refund leaves it
   succeeded with the amount netted out of totals and statements. Nothing is done in the app.
+  A paid registration can be refunded either way: in the Stripe dashboard, or from the
+  registration's detail panel in the app (see [Registration](features/registration.md#refunds)).
+  Both are recorded once on the registration.
 - **Dispute runbook.** A `charge.dispute.created` event marks the gift **Disputed** (out of
   totals and statements) and Stripe emails you. Respond in Stripe. A won dispute returns the
   gift to succeeded; a lost one stays disputed. If a statement for that year was already

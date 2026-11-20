@@ -558,3 +558,39 @@ secret, binding, or cron trigger.
   Public pages are unchanged.
 - **Paid tickets** need Postgres (Supabase) and Stripe. On D1 ticket prices must be free.
 - No down migration. Restore the pre-upgrade backup as in section 5 if you must go back.
+
+### Registration back office
+
+This part adds the event page for staff (overview, roster, detail panel, approval, adding
+registrations by hand, duplicates, reminder and bulk emails), the check-in desk, badges and a
+sign-in sheet, refunds on Postgres, and access to one event. It adds one more migration on each
+database. There is no new secret, binding, or cron trigger.
+
+- **Apply the migrations** before deploying: D1 `migrations/0053_registration_back_office.sql`
+  (`npm run db:migrate:remote`) and Postgres
+  `migrations-supabase/0045_registration_back_office.sql` (`npm run db:migrate:supabase`). Back
+  up first. They add columns with defaults and four new tables (`reg_checkins`, `reg_activity`,
+  `reg_event_access`, `reg_outbox`). The one backfill sets `payment_method = 'stripe'` on every
+  registration that has a Stripe Checkout session. Existing events do not require approval and
+  send no reminders until you turn those on.
+- **Setup doctor** now also expects `reg_checkins`, `reg_activity`, `reg_event_access`, and
+  `reg_outbox`. Run the migration before running doctor.
+- **Existing cron jobs carry the new email.** The daily `0 13 * * *` job also sends event
+  reminders, up to 40 per run. The hourly `0 * * * *` job also sends queued bulk email, up to
+  60 per run. The rest wait for the next run.
+- **New dependency.** `jsqr` reads QR codes on the check-in desk when the browser has no
+  built-in reader. It loads only on the desk page. Run `npm ci` before building.
+- **Access to one event.** People given a role on one event can open
+  `/admin/registration/<id>` (with its CSV exports, badges, and sign-in sheet) or
+  `/admin/registration/<id>/checkin`, and nothing else in the admin area. The site checks the
+  role before the page runs. Per-event viewers and registrars can download their event's CSV.
+- **Identity merge.** A person who holds a role on one event is a hard conflict in the merge
+  tool, the same as an event admin. Remove the role first.
+- **CSV.** Both roster exports now start with a UTF-8 byte-order mark so Excel shows accents and
+  Chinese correctly. The columns of the existing export are unchanged. A script that reads the
+  first column header or value may need to strip the mark. A new **Export people (CSV)** gives
+  one row per person.
+- **Refunds.** On Postgres with Stripe, staff with payment operations can refund from the
+  registration's detail panel. Refunds made in the Stripe dashboard are recorded through the
+  `charge.refunded` event you already send. Nothing to configure.
+- No down migration. Restore the pre-upgrade backup as in section 5 if you must go back.

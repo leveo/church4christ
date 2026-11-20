@@ -60,9 +60,51 @@ than published to npm.
   (custom label; **View details** before sign-up opens). Hidden and template events render
   nothing. Events cards in **Admin → Events** have an optional **Link to a registration event**
   picker. See [docs/features/page-builder.md](docs/features/page-builder.md).
+- Registration back office. Each event has a page for staff with an overview (seats taken and
+  left, waitlist, sign-ups awaiting a decision, check-ins, people per ticket type, a tally for
+  every dropdown, checkbox and yes/no question, and money collected and refunded on events that
+  took payment) and a roster with search, status, ticket type, check-in and answer filters,
+  sorting, paging, and a per-registration or per-person view. A detail panel shows the history
+  of every change and lets staff edit the contact, people and answers, change a person's ticket
+  type, add or remove a person, move between the waitlist and confirmed, cancel, resend the
+  confirmation, and keep a staff note. If someone else changed the registration first, the save
+  is refused with "reload and try again"; going over a seat or ticket limit asks for a confirm.
+  **Requires approval** (free events only): new sign-ups wait **In review** and hold their seats
+  until staff press Accept, Waitlist or Decline, and each decision emails the registrant; on these
+  events the waitlist moves people up into review, not straight to confirmed. Staff can add
+  walk-in and phone registrations by hand (paid events record cash or check, or complimentary;
+  never a card charge), see possible duplicates, set a reminder email N days before the event,
+  and email everyone in a filtered group (plain text with `{name}`, `{event}` and
+  `{confirmation}`; the first 20 go at once, the rest hourly). A phone-first **check-in desk** at
+  `/admin/registration/<id>/checkin` finds people by search or by scanning the QR code in their
+  email, checks people in, undoes, checks out or checks in a whole group, asks for a ticked
+  confirm before checking in anyone not confirmed, keeps several desks in step every 10 seconds,
+  and shows only names, ticket types, the confirmation number and the status. Printable badges
+  and a sign-in sheet, and a new one-row-per-person CSV. On Postgres with Stripe, staff with
+  payment operations can refund all or part of a card payment (optionally cancelling), Stripe's
+  refund notices update the same running total without double counting, and offline refunds can
+  be recorded. Registration admins can give any member a **Viewer**, **Check-in desk** or
+  **Registrar** role on one event; the role is checked before the page runs and again for every
+  action. See [docs/features/registration.md](docs/features/registration.md).
 
 ### Changed
 
+- Operator impact for Registration back office (see [Upgrading](docs/upgrade.md#registration-back-office)):
+  - D1: apply `migrations/0053_registration_back_office.sql`. Postgres: apply
+    `migrations-supabase/0045_registration_back_office.sql`. Both add defaulted columns and the
+    tables `reg_checkins`, `reg_activity`, `reg_event_access` and `reg_outbox`, and backfill
+    `payment_method = 'stripe'` where a Stripe Checkout session exists. The setup doctor now
+    expects the four new tables.
+  - New npm dependency `jsqr`, loaded only on the check-in desk page.
+  - No new secrets, bindings, or cron triggers. The daily `0 13 * * *` job also sends event
+    reminders (up to 40 per run) and the hourly `0 * * * *` job also sends queued bulk email (up
+    to 60 per run).
+  - People with a role on one event reach only `/admin/registration/<id>` (with its exports,
+    badges and sign-in sheet) and `/admin/registration/<id>/checkin`. Per-event viewers and
+    registrars can now download that event's CSV.
+  - Identity merge: a person with a role on one event is a hard conflict, like an event admin.
+  - Both roster CSVs now start with a UTF-8 byte-order mark. Columns are unchanged, but a script
+    that reads the first column may need to strip the mark.
 - Operator impact for Registration form builder (see [Upgrading](docs/upgrade.md#registration-form-builder-ticket-types-and-templates)):
   - D1: apply `migrations/0052_registration_builder.sql`. Postgres: apply
     `migrations-supabase/0044_registration_builder.sql`. Existing option text becomes option keys
