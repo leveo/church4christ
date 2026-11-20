@@ -374,3 +374,99 @@ describe.skipIf(!hasPg)('Postgres registration party migration (0043) on existin
     expect(fk.def).toBe('FOREIGN KEY (locale) REFERENCES supported_locales(code)');
   });
 });
+
+// 0044 on a database that already holds v1 questions: every existing option string becomes its
+// own key and is copied into option_labels for each language that has a label row; a question
+// whose options text is not a JSON array of strings is left alone instead of aborting the
+// migration.
+describe.skipIf(!hasPg)('Postgres registration builder migration (0044) on existing data', () => {
+  const sql = hasPg ? pgClient() : (null as never);
+  const repo = resolve(process.cwd());
+  const scratch = hasPg ? mkdtempSync(join(tmpdir(), 'c4c-reg-builder-')) : '';
+  const run = () =>
+    execFileSync('node', [join(repo, 'scripts/db/migrate-supabase.mjs')], {
+      cwd: scratch,
+      env: { ...process.env, SUPABASE_DB_URL: DATABASE_URL },
+      encoding: 'utf8',
+    });
+
+  beforeAll(async () => {
+    await resetSchema(sql);
+    mkdirSync(join(scratch, 'migrations-supabase'));
+    for (const file of readdirSync(join(repo, 'migrations-supabase'))) {
+      if (file.endsWith('.sql') && file < '0044') cpSync(join(repo, 'migrations-supabase', file), join(scratch, 'migrations-supabase', file));
+    }
+    run();
+    await sql.unsafe(`
+      INSERT INTO reg_events (id, starts_at, capacity) VALUES (1001, '2026-08-01 09:00:00', 10);
+      INSERT INTO reg_questions (id, event_id, sort, type, required, options) VALUES
+        (2001, 1001, 0, 'select', 1, '["Small","Medium","Large (XL)"]'),
+        (2002, 1001, 1, 'text', 0, NULL),
+        (2003, 1001, 2, 'checkbox', 0, 'not json at all'),
+        (2004, 1001, 3, 'select', 0, '[1,2]'),
+        (2005, 1001, 4, 'select', 0, '{"a":"b"}');
+      INSERT INTO reg_question_i18n (question_id, locale, label) VALUES
+        (2001, 'en', 'Shirt size'), (2001, 'zh', '衬衫尺寸'),
+        (2002, 'en', 'Notes'), (2003, 'en', 'Broken'), (2004, 'en', 'Numbers'), (2005, 'en', 'Object');
+      INSERT INTO registrations (id, event_id, name, email, status, submission_key, confirmation_no)
+        VALUES (3001, 1001, 'Old', 'old@example.com', 'confirmed', 'legacy-3001', 'R26-0001');
+      INSERT INTO reg_attendees (registration_id, name) VALUES (3001, 'Old');
+      INSERT INTO reg_answers (registration_id, question_id, value) VALUES (3001, 2001, 'Large (XL)');
+    `);
+    cpSync(join(repo, 'migrations-supabase/0044_registration_builder.sql'), join(scratch, 'migrations-supabase/0044_registration_builder.sql'));
+    run();
+  });
+  afterAll(async () => {
+    await sql?.end();
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it('copies each option string into option_labels for every language row, keeping the stored answer valid', async () => {
+    const rows = await sql.unsafe('SELECT locale, option_labels, help, placeholder FROM reg_question_i18n WHERE question_id = 2001 ORDER BY locale');
+    expect(rows.map((r) => [r.locale, JSON.parse(r.option_labels), r.help, r.placeholder])).toEqual([
+      ['en', { Small: 'Small', Medium: 'Medium', 'Large (XL)': 'Large (XL)' }, null, null],
+      ['zh', { Small: 'Small', Medium: 'Medium', 'Large (XL)': 'Large (XL)' }, null, null],
+    ]);
+    const [question] = await sql.unsafe('SELECT options, scope, condition, max_length FROM reg_questions WHERE id = 2001');
+    expect(question).toEqual({ options: '["Small","Medium","Large (XL)"]', scope: 'registration', condition: null, max_length: null });
+    const [answer] = await sql.unsafe('SELECT value FROM reg_answers WHERE registration_id = 3001 AND question_id = 2001');
+    expect(answer.value).toBe('Large (XL)');
+  });
+
+  it('leaves non-option and malformed-options questions without labels instead of failing', async () => {
+    const rows = await sql.unsafe('SELECT question_id, option_labels FROM reg_question_i18n WHERE question_id IN (2002, 2003, 2004, 2005) ORDER BY question_id');
+    expect(rows.map((r) => [Number(r.question_id), r.option_labels])).toEqual([[2002, null], [2003, null], [2004, null], [2005, null]]);
+  });
+
+  it('defaults events to regular events and attendees to no ticket type', async () => {
+    const [event] = await sql.unsafe('SELECT is_template FROM reg_events WHERE id = 1001');
+    expect(event.is_template).toBe(0);
+    const [attendee] = await sql.unsafe('SELECT ticket_type_id FROM reg_attendees WHERE registration_id = 3001');
+    expect(attendee.ticket_type_id).toBeNull();
+  });
+
+  it('constrains scope, max_length, ticket prices and capacity, and cascades attendee answers', async () => {
+    await expect(sql.unsafe("UPDATE reg_questions SET scope = 'group' WHERE id = 2001")).rejects.toMatchObject({ code: '23514' });
+    await expect(sql.unsafe('UPDATE reg_questions SET max_length = 0 WHERE id = 2002')).rejects.toMatchObject({ code: '23514' });
+    await expect(sql.unsafe('UPDATE reg_questions SET max_length = 5001 WHERE id = 2002')).rejects.toMatchObject({ code: '23514' });
+    await sql.unsafe('UPDATE reg_questions SET max_length = 5000 WHERE id = 2002');
+    await expect(sql.unsafe('INSERT INTO reg_ticket_types (event_id, price_cents) VALUES (1001, -1)')).rejects.toMatchObject({ code: '23514' });
+    await expect(sql.unsafe('INSERT INTO reg_ticket_types (event_id, capacity) VALUES (1001, 0)')).rejects.toMatchObject({ code: '23514' });
+    const [type] = await sql.unsafe('INSERT INTO reg_ticket_types (event_id, price_cents, capacity) VALUES (1001, 500, 3) RETURNING id');
+    await expect(sql.unsafe("INSERT INTO reg_ticket_type_i18n (ticket_type_id, locale, label) VALUES ($1, 'xx', 'Bad')", [type.id])).rejects.toMatchObject({ code: '23503' });
+    await sql.unsafe("INSERT INTO reg_ticket_type_i18n (ticket_type_id, locale, label) VALUES ($1, 'en', 'Adult')", [type.id]);
+    const [attendee] = await sql.unsafe('SELECT id FROM reg_attendees WHERE registration_id = 3001');
+    await sql.unsafe('UPDATE reg_attendees SET ticket_type_id = $1 WHERE id = $2', [type.id, attendee.id]);
+    await sql.unsafe("INSERT INTO reg_attendee_answers (attendee_id, question_id, value) VALUES ($1, 2002, 'hi')", [attendee.id]);
+    await expect(
+      sql.unsafe("INSERT INTO reg_attendee_answers (attendee_id, question_id, value) VALUES ($1, 2002, 'dup')", [attendee.id]),
+    ).rejects.toMatchObject({ code: '23505' });
+    // Deleting a ticket type keeps the attendee (SET NULL); deleting the attendee drops its answers.
+    await sql.unsafe('DELETE FROM reg_ticket_types WHERE id = $1', [type.id]);
+    const [kept] = await sql.unsafe('SELECT ticket_type_id FROM reg_attendees WHERE id = $1', [attendee.id]);
+    expect(kept.ticket_type_id).toBeNull();
+    await sql.unsafe('DELETE FROM reg_attendees WHERE id = $1', [attendee.id]);
+    const left = await sql.unsafe('SELECT count(*)::int AS n FROM reg_attendee_answers WHERE attendee_id = $1', [attendee.id]);
+    expect(left[0].n).toBe(0);
+  });
+});

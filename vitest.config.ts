@@ -17,6 +17,7 @@ const NODE_ONLY = [
   'test/node/localeLookupMigration.test.ts',
   'test/node/portalMigrationDefault.test.ts',
   'test/node/registrationMigrationDefault.test.ts',
+  'test/node/registrationBuilderMigration.test.ts',
   'test/themeMeta.test.ts',
   'test/portalMediaSeed.test.ts',
   'test/node/screenshotValidation.test.ts',
