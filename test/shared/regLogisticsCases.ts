@@ -124,6 +124,9 @@ export function defineRegLogisticsCases(label: string, getDb: () => AppDb, backe
         const saved = ok(await saveLogisticsSettings(db(), eventId, { genderQuestionId: gender.id, showAssignments: true, seating: true }));
         expect(saved.settings).toMatchObject({ housing: true, seating: true, groups: false, showAssignments: true, genderQuestionId: gender.id });
         expect(await saveLogisticsSettings(db(), 999999, { housing: true })).toEqual({ ok: false, code: 'not_found' });
+        // deleting the question in the form builder clears it (ON DELETE SET NULL on both backends)
+        await mustForm(eventId, { questions: [{ id: shirt.id, type: 'select', labels: { en: 'Shirt' }, options: [{ key: 's', labels: { en: 'S' } }] }] });
+        expect((await getLogisticsSettings(db(), eventId))!.genderQuestionId).toBeNull();
         // an area that is off refuses writes
         expect(await createGroup(db(), eventId, { name: 'A' })).toEqual({ ok: false, code: 'disabled' });
         ok(await saveLogisticsSettings(db(), eventId, { housing: false }));
@@ -510,6 +513,12 @@ export function defineRegLogisticsCases(label: string, getDb: () => AppDb, backe
         await cancelRegistration(db(), self.reg.id);
         expect(await placement(self.reg.people[0])).toEqual([null, null, null]);
 
+        // an area switched off after people were placed still releases them
+        const off = await placed();
+        ok(await saveLogisticsSettings(db(), off.eventId, { housing: false, seating: false, groups: false }));
+        ok(await adminCancelRegistration(db(), off.reg.id, {}, actor));
+        for (const p of off.reg.people) expect(await placement(p)).toEqual([null, null, null]);
+
         const declined = await placed();
         await db().prepare(`UPDATE registrations SET status = 'review' WHERE id = ?1`).bind(declined.reg.id).run();
         ok(await decideRegistration(db(), declined.reg.id, 'decline', null));
@@ -567,11 +576,40 @@ export function defineRegLogisticsCases(label: string, getDb: () => AppDb, backe
       });
     });
 
+    // ── Scale ────────────────────────────────────────────────────────────────
+    describe('scale', () => {
+      it('adds 500 rooms in one call and auto-seats and auto-fills a few hundred people', async () => {
+        const eventId = await newEvent();
+        const venue = ok(await createVenue(db(), eventId, { name: 'Campus', kind: 'dorm' })).id;
+        const big = ok(await addRooms(db(), eventId, { venueId: venue, labels: `Hall ${'x'.repeat(28)} 1-500`, bedsOverride: 4 }));
+        expect(big.created).toHaveLength(500);
+        expect(await addRooms(db(), eventId, { venueId: venue, labels: '1-501', bedsOverride: 4 })).toMatchObject({ ok: false, code: 'too_many' });
+        await mustForm(eventId, { questions: [{ type: 'select', scope: 'attendee', labels: { en: 'Track' }, options: [{ key: 'a', labels: { en: `Track ${'a'.repeat(70)}` } }, { key: 'b', labels: { en: `Track ${'b'.repeat(70)}` } }] }] });
+        const [track] = await listQuestions(db(), 'en', eventId);
+        const regs = [];
+        for (let i = 0; i < 60; i++) {
+          regs.push(await register(eventId, Array.from({ length: 4 }, (_, j) => ({ name: `P${i}-${j}`, answers: [[track.id, j % 2 === 0 ? 'a' : 'b']] as Array<[number, string]> }))));
+        }
+        ok(await addTables(db(), eventId, { count: 30, seats: 8 }));
+        const preview = await previewSeating(db(), eventId, {});
+        if (!('stamp' in preview)) throw new Error('no preview');
+        expect(preview.plan.seats).toHaveLength(240);
+        ok(await applySeatingPlan(db(), eventId, { stamp: preview.stamp, rules: {} }, actor));
+        expect(await count(`SELECT COUNT(*) AS n FROM reg_table_seats x JOIN reg_tables t ON t.id = x.table_id WHERE t.event_id = ?1`, eventId)).toBe(240);
+        expect(await autoFillGroups(db(), eventId, { questionId: track.id }, actor)).toMatchObject({ ok: true, placed: 240, noAnswer: 0 });
+        expect((await listGroups(db(), eventId)).map((g) => g.members.length)).toEqual([120, 120]);
+        expect((await logisticsOverview(db(), eventId))!.seating.seated).toBe(240);
+      }, 120_000);
+    });
+
     // ── Cross-event refusal ──────────────────────────────────────────────────
     describe('cross-event ids', () => {
       it('refuses every room, table, group, tag and person of another event', async () => {
         const a = await housed();
         const b = await housed();
+        await mustForm(a.eventId, { questions: [{ type: 'yesno', scope: 'attendee', labels: { en: 'First' } }] });
+        const [questionA] = await listQuestions(db(), 'en', a.eventId);
+        const tagA = ok(await createTag(db(), a.eventId, { label: 'A' })).id;
         const tableB = ok(await addTables(db(), b.eventId, { count: 1, seats: 4 })).created[0].id;
         const groupB = ok(await createGroup(db(), b.eventId, { name: 'B' })).id;
         const tagB = ok(await createTag(db(), b.eventId, { label: 'B' })).id;
@@ -595,8 +633,29 @@ export function defineRegLogisticsCases(label: string, getDb: () => AppDb, backe
         expect(await setTag(db(), b.eventId, { tagId: tagB, attendeeIds: [personA], on: true }, actor)).toEqual(notFound);
         expect(await deleteTag(db(), a.eventId, tagB)).toEqual(notFound);
         expect(await unassignRoom(db(), b.eventId, { attendeeId: personA }, actor)).toEqual(notFound);
-        // nothing was written anywhere
-        expect([await roomOf(personA), await roomOf(personB), await tableOf(personA), await groupOf(personA)]).toEqual([null, null, null, null]);
+        ok(await assignRoom(db(), b.eventId, { attendeeId: personB, roomId: b.rooms[0] }, actor));
+        expect(await swapRooms(db(), a.eventId, { attendeeA: personA, attendeeB: personB }, actor)).toEqual(notFound);
+        expect(await updateRoom(db(), a.eventId, b.rooms[0], { label: 'X' })).toEqual(notFound);
+        expect(await updateVenue(db(), a.eventId, b.venue, { name: 'X' })).toEqual(notFound);
+        expect(await createRoomType(db(), a.eventId, { venueId: b.venue, name: 'X', beds: 1 })).toEqual(notFound);
+        expect(await addRooms(db(), a.eventId, { venueId: b.venue, labels: '9', bedsOverride: 1 })).toEqual(notFound);
+        expect(await deleteRoomType(db(), a.eventId, b.type)).toEqual(notFound);
+        expect(await updateTable(db(), a.eventId, tableB, { seats: 9 })).toEqual(notFound);
+        ok(await seatAtTable(db(), b.eventId, { attendeeId: personB, tableId: tableB }, actor));
+        expect(await unseat(db(), a.eventId, { attendeeId: personB }, actor)).toEqual(notFound);
+        ok(await joinGroup(db(), b.eventId, { attendeeId: personB, groupId: groupB }, actor));
+        expect(await updateGroup(db(), a.eventId, groupB, { name: 'X' })).toEqual(notFound);
+        expect(await leaveGroup(db(), a.eventId, { attendeeId: personB }, actor)).toEqual(notFound);
+        expect(await setGroupLeader(db(), a.eventId, { groupId: groupB, attendeeId: personB }, actor)).toEqual(notFound);
+        expect(await updateTag(db(), a.eventId, tagB, { label: 'X' })).toEqual(notFound);
+        expect(await applyTagByAnswer(db(), a.eventId, { tagId: tagB, questionId: questionA.id, option: 'yes' }, actor)).toEqual(notFound);
+        expect(await applyTagByAnswer(db(), b.eventId, { tagId: tagB, questionId: questionA.id, option: 'yes' }, actor)).toMatchObject({ ok: false, code: 'invalid' });
+        expect(await applyTagByAnswer(db(), b.eventId, { tagId: tagA, questionId: questionA.id, option: 'yes' }, actor)).toMatchObject({ ok: false, code: 'invalid' });
+        // event B's own placements are untouched
+        expect([await roomOf(personB), await tableOf(personB), await groupOf(personB)]).toEqual([b.rooms[0], tableB, groupB]);
+        expect((await listHousing(db(), b.eventId))[0].rooms[0].label).toBe('1');
+        // nothing was written for event A's person
+        expect([await roomOf(personA), await tableOf(personA), await groupOf(personA)]).toEqual([null, null, null]);
         expect(await count(`SELECT COUNT(*) AS n FROM reg_attendee_tags WHERE tag_id = ?1`, tagB)).toBe(0);
         expect((await listHousing(db(), b.eventId))[0].rooms.every((r) => r.confirmed)).toBe(true);
       });

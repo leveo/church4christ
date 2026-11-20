@@ -370,7 +370,10 @@ export async function applySeatingPlan(
   // Starting over clears every seat first, so every planned seat is written; otherwise only the differences.
   const writes = checked.startOver ? plan.seats : plan.changes;
   const changeIds = writes.map((c) => c.attendeeId);
-  const tableCase = writes.length ? `CASE a.id ${writes.map((c) => `WHEN ${intLit(c.attendeeId)} THEN ${intLit(c.tableId)}`).join(' ')} END` : 'NULL';
+  // One branch per table (not per person) keeps the statement short for large events (D1 caps statement length).
+  const byTable = new Map<number, number[]>();
+  for (const c of writes) (byTable.get(c.tableId) ?? byTable.set(c.tableId, []).get(c.tableId)!).push(c.attendeeId);
+  const tableCase = writes.length ? `CASE ${[...byTable].map(([t, ids]) => `WHEN ${inList('a.id', ids)} THEN ${intLit(t)}`).join(' ')} END` : 'NULL';
   const hostCase = plan.hosts.length ? `CASE id ${plan.hosts.map((h) => `WHEN ${intLit(h.tableId)} THEN ${h.attendeeId === null ? 'CAST(NULL AS INTEGER)' : intLit(h.attendeeId)}`).join(' ')} END` : 'NULL';
   const touched = [...new Set([...changeIds, ...plan.unseated].map((id) => data.registrations.get(id)).filter((id): id is number => id !== undefined))];
   const write = await logisticsWrite(db, eventId, 'seating', guard, (held) => [

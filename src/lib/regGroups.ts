@@ -321,7 +321,10 @@ export async function autoFillGroups(db: AppDb, eventId: number, input: AutoFill
 
   const E = intLit(eventId);
   const ids = placements.map((p) => p.attendeeId);
-  const nameCase = `CASE a.id ${placements.map((p) => `WHEN ${intLit(p.attendeeId)} THEN ${textLit(p.group)}`).join(' ')} END`;
+  // One branch per group (not per person) keeps the statement short for large events (D1 caps statement length).
+  const byGroup = new Map<string, number[]>();
+  for (const p of placements) (byGroup.get(p.group) ?? byGroup.set(p.group, []).get(p.group)!).push(p.attendeeId);
+  const nameCase = `CASE ${[...byGroup].map(([name, members]) => `WHEN ${inList('a.id', members)} THEN ${textLit(name)}`).join(' ')} END`;
   const write = await logisticsWrite(db, eventId, 'groups', `logistics_version = ${intLit(ctx.version)}`, (held) => [
     ...(toCreate.length
       ? [db

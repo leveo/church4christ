@@ -21,7 +21,7 @@ import { fallbackChain, getRuntimeDefaultLocale, isSupportedLocale } from './loc
 import type { DbBackend } from './dbProvider';
 import { eventPhase, type RegPhase } from './regPhase';
 import { parseCondition, validateConditions, type Condition, type ConditionScope, type DraftConditionQuestion } from './regConditions';
-import { releaseLogisticsStatements } from './regLogisticsRelease';
+import { logisticsReleaseNeeded, releaseLogisticsStatements } from './regLogisticsRelease';
 
 export type { RegPhase } from './regPhase';
 
@@ -1475,6 +1475,7 @@ export async function cancelRegistrationPromoting(
 ): Promise<{ cancelled: boolean; promoted: number[] }> {
   const event = await db.prepare(`SELECT event_id FROM registrations WHERE id = ?1`).bind(id).first<{ event_id: number }>();
   if (!event) return { cancelled: false, promoted: [] };
+  const release = await logisticsReleaseNeeded(db, id);
   const results = await db.batch([
     // Serializes with every other seat-changing batch on this event.
     db.prepare(`UPDATE reg_events SET updated_at = updated_at WHERE id = ?1`).bind(event.event_id),
@@ -1493,7 +1494,7 @@ export async function cancelRegistrationPromoting(
       )
       .bind(id),
     // Rooms, seats and groups (event logistics) are given up in the same batch.
-    ...releaseLogisticsStatements(db, id, null),
+    ...(release ? releaseLogisticsStatements(db, id, null) : []),
   ]);
   if (results[1].meta.changes === 0) return { cancelled: false, promoted: [] };
   return { cancelled: true, promoted: await promoteWaitlist(db, event.event_id) };

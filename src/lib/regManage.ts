@@ -36,7 +36,7 @@ import {
 } from './regDb';
 import { visibleQuestionIds, type ConditionQuestion } from './regConditions';
 import { eventPhase, type RegPhase } from './regPhase';
-import { releaseLogisticsStatements } from './regLogisticsRelease';
+import { logisticsReleaseNeeded, releaseLogisticsStatements } from './regLogisticsRelease';
 import { assignmentsForAttendees, type AttendeeAssignments } from './regLogistics';
 
 // ── Submission validation ────────────────────────────────────────────────────
@@ -750,6 +750,7 @@ export async function cancelAttendee(
   // The subqueries stay in WHERE clauses (never in SET): the campus SQL scoper adds its
   // predicate to the first WHERE after SET.
   const activeCount = `(SELECT COUNT(*) FROM reg_attendees a WHERE a.registration_id = ?1 AND a.status = 'active')`;
+  const release = await logisticsReleaseNeeded(db, registrationId);
   const results = await db.batch([
     // Serializes with every other seat-changing batch on this event.
     db.prepare(`UPDATE reg_events SET updated_at = updated_at WHERE id = ?1`).bind(row.event_id),
@@ -777,7 +778,7 @@ export async function cancelAttendee(
       )
       .bind(registrationId),
     // The cancelled person leaves their room, table and group (event logistics) in the same batch.
-    ...releaseLogisticsStatements(db, registrationId, null),
+    ...(release ? releaseLogisticsStatements(db, registrationId, null) : []),
   ]);
   if (results[1].meta.changes === 0) return { ok: false, reason: 'not_found' };
   return {
