@@ -122,7 +122,7 @@ export function defineRegBackOfficeUiCases(label: string, getDb: () => AppDb, ba
         for (const action of Object.keys(REG_ADMIN_ACTIONS)) {
           const need = REG_ADMIN_ACTIONS[action].need;
           const reg = await register(eventId);
-          const outcome = await run(registrar, eventId, request(action, reg.id, await attendeeOf(reg.id)), { portal: true });
+          const outcome = await run(registrar, eventId, request(action, reg.id, await attendeeOf(reg.id)), { portal: true, logistics: true });
           if (need === 'manage') expect(outcome.kind, action).not.toBe('denied');
           else expect(outcome, action).toEqual({ kind: 'denied', status: 403 });
         }
