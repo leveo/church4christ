@@ -40,9 +40,37 @@ than published to npm.
 - Event notes in every language, shown on the event page, the manage page and in emails.
 - The roster shows people and phone, and the CSV adds **People** and **Phone** as the last columns.
   See [docs/features/registration.md](docs/features/registration.md).
+- Registration form builder, ticket types and templates. On an event's admin page, build the
+  form with question cards you drag into order. Types: short and long text, dropdown,
+  checkboxes, yes/no, number, date, email, phone, section heading, and terms agreement.
+  Ask once per registration or for each person, mark questions required, add help text,
+  placeholders and a maximum length, translate labels and options into every site language,
+  and use "Show only if…" to show a question when an earlier answer matches. A question that
+  another depends on cannot be deleted, and a question with answers cannot switch between
+  per-registration and per-person. Ticket types (such as Adult and Child) have their own price,
+  optional limit and description; each person picks one, the event price is ignored when types
+  exist, and limits hold without overselling (the whole group joins the waitlist on a free
+  event). On D1 ticket prices must be free. The server records when a person agreed to the
+  terms. Save an event as a template, start a new event from a template, or delete templates;
+  templates never appear publicly. Public form, review, manage page, My events, emails and
+  roster show ticket types and per-person answers, and list pages show **Full** when every
+  ticket type is sold out. See [docs/features/registration.md](docs/features/registration.md).
+- Page builder **Registration** block: pick an event and show its title, date, place, optional
+  seats left, and the right state (opens on a date, full or waitlist, closed) with a button
+  (custom label; **View details** before sign-up opens). Hidden and template events render
+  nothing. Events cards in **Admin → Events** have an optional **Link to a registration event**
+  picker. See [docs/features/page-builder.md](docs/features/page-builder.md).
 
 ### Changed
 
+- Operator impact for Registration form builder (see [Upgrading](docs/upgrade.md#registration-form-builder-ticket-types-and-templates)):
+  - D1: apply `migrations/0052_registration_builder.sql`. Postgres: apply
+    `migrations-supabase/0044_registration_builder.sql`. Existing option text becomes option keys
+    with the labels copied; stored answers are not rewritten.
+  - No new secrets, bindings, or cron triggers.
+  - The roster CSV appends **Ticket types** (only for events with types) and per-person question
+    columns at the end. Earlier columns are unchanged.
+  - The admin question editor is now a React island (admin pages only). Public pages are unchanged.
 - Operator impact for Registration (see [Upgrading](docs/upgrade.md#upgrading-160-to-the-next-release-unreleased)):
   - D1: apply `migrations/0050_registration_d1.sql`. It creates the registration tables plus
     `group_reg_events` and `event_admins` (used by the Member Portal's event prayers and the
