@@ -8,6 +8,7 @@ import { PgAdapter } from '../../src/lib/pgAdapter';
 import { scopeDatabase } from '../../src/lib/campusScope';
 import type { AppDb } from '../../src/lib/appDb';
 import { createRegistration, saveEvent } from '../../src/lib/regDb';
+import { resolveRegistrationCheckoutRequest } from '../../src/lib/stripeCheckoutRequests';
 import { adminAddPerson, adminSetNote, adminUpdateRegistration, decideRegistration, listActivity } from '../../src/lib/regAdmin';
 import { checkIn, checkInParty } from '../../src/lib/regCheckin';
 import { claimOutbox, claimReminder, enqueueOutbox, recordRefund } from '../../src/lib/regOutbox';
@@ -137,5 +138,23 @@ describe.skipIf(!hasPg)('registration back office (Postgres)', () => {
     expect(outcomes.filter((o) => o.ok)).toHaveLength(2); // 400 + 400 fits, a third does not
     expect(outcomes.filter((o) => !o.ok)).toEqual(Array(4).fill({ ok: false, code: 'exceeds_paid' }));
     expect((await sql.unsafe('SELECT refunded_cents FROM registrations WHERE id = $1', [reg.id]))[0].refunded_cents).toBe(800);
+  });
+
+  it('the paid Checkout writer refuses an event that requires approval, before reserving anything', async () => {
+    const eventId = await saveEvent(db, { title_en: 'Approval', starts_at: tsAt(30 * DAY), active: 1, requires_approval: 1 });
+    await expect(resolveRegistrationCheckoutRequest(db, {
+      requestId: `00000000-0000-4000-8000-000000009999`, eventId, personId: null, name: 'Ada', email: 'ada@example.com',
+      amountCents: 2500, currency: 'usd', answers: [], eventTitle: 'Approval', locale: 'en', appOrigin: 'http://localhost:4321',
+    })).rejects.toThrow('approval_requires_free');
+    expect((await sql.unsafe('SELECT count(*)::int AS n FROM registrations WHERE event_id = $1', [eventId]))[0].n).toBe(0);
+  });
+
+  it('a card-paid registration is recorded as stripe once a Checkout session is attached', async () => {
+    const eventId = await saveEvent(db, { title_en: 'Paid', starts_at: tsAt(30 * DAY), active: 1, price_cents: 2500 });
+    const reg = await createRegistration(db, { eventId, personId: null, name: 'Ada', email: 'ada@example.com', status: 'pending', amountCents: 2500, currency: 'usd', answers: [] });
+    expect((await sql.unsafe('SELECT payment_method FROM registrations WHERE id = $1', [reg.id]))[0].payment_method).toBeNull();
+    const { attachCheckoutSession } = await import('../../src/lib/regDb');
+    await attachCheckoutSession(db, reg.id, `cs_test_${Date.now()}`);
+    expect((await sql.unsafe('SELECT payment_method FROM registrations WHERE id = $1', [reg.id]))[0].payment_method).toBe('stripe');
   });
 });
