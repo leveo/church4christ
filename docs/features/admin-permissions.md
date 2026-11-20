@@ -57,10 +57,10 @@ entry), and — on every member's profile page — a **Giving history** panel sh
 household's gifts and their total for the year. That panel deliberately shows the same
 household-level numbers a member sees on their own **My giving** page, not a more detailed
 breakdown — an admin with the Giving grant sees exactly what the giving family itself would
-see, just from the admin side. Note that **Giving** and **Registration** only work at all on
-a church that uses the optional Supabase database (see [Modules](modules.md)); on the
-default Cloudflare D1 setup, those two checkboxes are greyed out because there is nothing to
-grant access to yet.
+see, just from the admin side. Note that **Giving** only works on a church that uses the
+optional Supabase database (see [Modules](modules.md)); on the default Cloudflare D1 setup its
+checkbox is greyed out because there is nothing to grant access to yet. **Registration** works
+on both databases; only paid events need Supabase.
 
 **The service-attendance example.** The **Attendance** grant opens the aggregate
 `/admin/attendance` grid, correction forms, optional Children's check-in link editor, and

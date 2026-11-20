@@ -78,7 +78,7 @@ export default {
                   const scheduledAt = new Date(controller.scheduledTime).toISOString().slice(0, 19).replace('T', ' ');
                   await expireIdentityBusinessContinuations(db, { now: scheduledAt });
                 } finally {
-                  // Registration bulk email: up to 100 queued rows per run (no new cron).
+                  // Registration bulk email: up to CRON_DRAIN_LIMIT (60) queued rows per run (no new cron).
                   await sweepOutbox(vars, db);
                 }
               }
