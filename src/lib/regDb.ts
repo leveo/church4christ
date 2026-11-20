@@ -265,7 +265,8 @@ export async function listRegistrationsForPerson(
  *  and per-key option labels; options JSON-decoded to a string[] of keys (null for non-option types or
  *  unparseable) and the condition parsed (null when absent or malformed). */
 export async function listQuestions(db: AppDb, locale: Locale, eventId: number): Promise<RegQuestion[]> {
-  const { select, joins } = i18nJoin('reg_question_i18n', 'q', 'question_id', ['label', 'help', 'placeholder'], locale);
+  const { select: rawSelect, joins } = i18nJoin('reg_question_i18n', 'q', 'question_id', ['label', 'help', 'placeholder'], locale);
+  const select = blankLabelAsMissing(rawSelect);
   const chain = fallbackChain(locale);
   const aliases = ['q_l', 'q_d', 'q_e'].slice(0, chain.length === 1 ? 2 : Math.min(3, chain.length));
   const optionColumns = aliases.map((alias, i) => `${alias}.option_labels AS ol_${i}`).join(', ');
@@ -298,6 +299,12 @@ export async function listQuestions(db: AppDb, locale: Locale, eventId: number):
       help: r.help ?? null, placeholder: r.placeholder ?? null, option_labels,
     };
   });
+}
+
+/** A language row may carry only option labels (label ''): make the label fall through to the next language. */
+function blankLabelAsMissing(select: string): string {
+  return select.replace(/COALESCE\(([^)]*\.label[^)]*)\) AS label/u, (_m, inner: string) =>
+    `COALESCE(${inner.split(', ').map((ref) => `NULLIF(${ref}, '')`).join(', ')}) AS label`);
 }
 
 /** Decode a reg_question_i18n.option_labels TEXT (a JSON object of strings); anything else is {}. */
@@ -360,7 +367,7 @@ export async function listQuestionsAdmin(db: AppDb, eventId: number): Promise<Re
   for (const l of textRows) {
     if (!isSupportedLocale(l.locale)) continue;
     const m = byQuestion.get(l.question_id) ?? { labels: {}, help: {}, placeholder: {}, option_labels: {} };
-    m.labels[l.locale] = l.label;
+    if (l.label) m.labels[l.locale] = l.label;
     if (l.help) m.help[l.locale] = l.help;
     if (l.placeholder) m.placeholder[l.locale] = l.placeholder;
     const labels = parseLabelMap(l.option_labels);
@@ -2240,9 +2247,13 @@ export async function saveEventForm(
   // ── Questions
   let drafts: QuestionDraft[] | null = null;
   const ownedQuestions = new Map<number, string[] | null>();
+  const ownedScopes = new Map<number, RegQuestionScope>();
   {
-    const { results } = await db.prepare(`SELECT id, options FROM reg_questions WHERE event_id = ?1`).bind(eventId).all<{ id: number; options: string | null }>();
-    for (const row of results) ownedQuestions.set(row.id, parseOptions(row.options));
+    const { results } = await db.prepare(`SELECT id, options, scope FROM reg_questions WHERE event_id = ?1`).bind(eventId).all<{ id: number; options: string | null; scope: RegQuestionScope }>();
+    for (const row of results) {
+      ownedQuestions.set(row.id, parseOptions(row.options));
+      ownedScopes.set(row.id, row.scope);
+    }
   }
   if (payload.questions !== undefined) {
     if (!Array.isArray(payload.questions)) return { ok: false, errors: [{ path: 'questions', code: 'invalid' }] };
@@ -2343,7 +2354,9 @@ export async function saveEventForm(
       const touched = new Set<Locale>([...labels.keys(), ...help.keys(), ...placeholder.keys(), ...optionLabels.keys()]);
       for (const locale of touched) {
         const label = labels.get(locale) ?? '';
-        if (label === '' && labels.has(locale) === false && (help.get(locale) || placeholder.get(locale) || optionLabels.has(locale))) {
+        // Option labels may exist without a question label in that language (the fallback chain shows the
+        // question's default-language text); help and placeholder still need their own label.
+        if (label === '' && labels.has(locale) === false && (help.get(locale) || placeholder.get(locale))) {
           errors.push({ path: at(`labels.${locale}`), code: 'required' });
         }
         draft.texts.set(locale, {
@@ -2362,6 +2375,19 @@ export async function saveEventForm(
       }
       drafts!.push(draft);
     });
+
+    // A question that already has answers keeps its scope (its answers live in a different table per scope).
+    const changed = drafts.map((d, i) => ({ d, i })).filter(({ d }) => d.id !== null && ownedScopes.get(d.id) !== d.scope);
+    if (changed.length > 0) {
+      const ids = changed.map(({ d }) => d.id as number);
+      const marks = ids.map((_, k) => `?${k + 1}`).join(', ');
+      const { results: used } = await db
+        .prepare(`SELECT question_id AS id FROM reg_answers WHERE question_id IN (${marks}) UNION SELECT question_id AS id FROM reg_attendee_answers WHERE question_id IN (${marks})`)
+        .bind(...ids)
+        .all<{ id: number }>();
+      const inUse = new Set(used.map((r) => Number(r.id)));
+      for (const { d, i } of changed) if (inUse.has(d.id as number)) errors.push({ path: `questions.${i}.scope`, code: 'scope_in_use' });
+    }
 
     // Conditions: resolve each target (id or key) to a draft index, then run the shared validator.
     const indexById = new Map<number, number>();
@@ -2463,7 +2489,7 @@ export async function saveEventForm(
     }
     const upsertTexts = (questionId: number | null, d: QuestionDraft) => {
       for (const [locale, text] of d.texts) {
-        if (!text.label) {
+        if (!text.label && Object.keys(text.option_labels).length === 0) {
           if (questionId !== null) stmts.push(db.prepare(`DELETE FROM reg_question_i18n WHERE question_id = ?1 AND locale = ?2`).bind(questionId, locale));
           continue;
         }
@@ -2649,7 +2675,8 @@ export async function listRegistrations(
 ): Promise<Array<RosterRow & { people: string[]; answers: Array<{ label: string; value: string }> }>> {
   const { results: regs } = await db.prepare(ROSTER_SELECT).bind(eventId).all<RosterRow>();
 
-  const { select, joins } = i18nJoin('reg_question_i18n', 'q', 'question_id', ['label'], locale);
+  const { select: rawSelect, joins } = i18nJoin('reg_question_i18n', 'q', 'question_id', ['label'], locale);
+  const select = blankLabelAsMissing(rawSelect);
   const { results: answers } = await db
     .prepare(
       `SELECT a.registration_id AS registration_id, ${select}, a.value AS value

@@ -214,6 +214,40 @@ export function defineRegBuilderCases(label: string, getDb: () => AppDb, backend
       });
     });
 
+    describe('saveEventForm scope and option-only language rows', () => {
+      it('refuses to change the scope of a question that already has answers', async () => {
+        const id = await newEvent();
+        await mustSave(id, { questions: [{ type: 'text', labels: { en: 'Nick' } }, { type: 'text', labels: { en: 'Free' } }] });
+        const [nick, free] = await listQuestions(getDb(), 'en', id);
+        await register(id, [{ name: 'Ada' }], { answers: [[nick.id, 'ace']] });
+        expect(await errorsOf(id, {
+          questions: [{ id: nick.id, type: 'text', scope: 'attendee', labels: { en: 'Nick' } }, { id: free.id, type: 'text', labels: { en: 'Free' } }],
+        })).toEqual(['questions.0.scope:scope_in_use']);
+        // an unanswered question may change scope, and an unchanged scope is fine
+        await mustSave(id, {
+          questions: [{ id: nick.id, type: 'text', scope: 'registration', labels: { en: 'Nick' } }, { id: free.id, type: 'text', scope: 'attendee', labels: { en: 'Free' } }],
+        });
+        expect((await listQuestions(getDb(), 'en', id)).map((q) => q.scope)).toEqual(['registration', 'attendee']);
+      });
+
+      it('allows option labels in a language that has no question label, falling back for display', async () => {
+        const id = await newEvent();
+        await mustSave(id, {
+          questions: [{ type: 'select', labels: { en: 'Shirt' }, options: [{ key: 's', labels: { en: 'Small', zh: '小' } }] }],
+        });
+        const zh = await listQuestions(getDb(), 'zh', id);
+        expect(zh[0].label).toBe('Shirt');
+        expect(zh[0].option_labels).toEqual({ s: '小' });
+        const [admin] = await listQuestionsAdmin(getDb(), id);
+        expect(admin.labels).toEqual({ en: 'Shirt' });
+        expect(admin.option_labels).toEqual({ en: { s: 'Small' }, zh: { s: '小' } });
+        // help without a label in that language still needs the label
+        expect(await errorsOf(id, {
+          questions: [{ id: admin.id, type: 'text', labels: { en: 'Shirt' }, help: { zh: '提示' } }],
+        })).toEqual(['questions.0.labels.zh:required']);
+      });
+    });
+
     // ── saveEventForm: conditions ──────────────────────────────────────────────
     describe('saveEventForm conditions', () => {
       const base: EventFormPayload['questions'] = [
