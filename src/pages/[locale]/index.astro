@@ -14,6 +14,8 @@ import EventGrid from '../../components/EventGrid.astro';
 import SermonCard from '../../components/SermonCard.astro';
 import MinistryCard from '../../components/MinistryCard.astro';
 import PrayerForm from '../../components/PrayerForm.astro';
+import GatheringSurface from '../../components/gatherings/GatheringSurface.astro';
+import RegistrationEventCards from '../../components/gatherings/RegistrationEventCards.astro';
 import { localePath, parseLocale } from '../../lib/locales';
 import { t } from '../../lib/i18n';
 import { todayInTz } from '../../lib/dates';
@@ -27,6 +29,8 @@ import {
   type EventCardRow,
   type LatestSermonRow,
 } from '../../lib/publicDb';
+import { listPublicEvents, listTicketTypes, type RegPublicEvent } from '../../lib/regDb';
+import { seatState, type SeatState } from '../../lib/regPublic';
 
 // `[locale]` matches any single path segment, so `/foo` would otherwise render
 // the home page. Reject anything that is not a real locale so it 404s instead.
@@ -74,6 +78,22 @@ const ministriesPreview = ministries.slice(0, 6);
 // padding + background), so an omitted one simply drops out — no empty gap.
 const modules = Astro.locals.modules;
 
+// With the Events module off, Registration's public events take the upcoming-events spot, so a
+// church that runs Registration alone still shows what people can sign up for.
+const showRegistrationEvents = modules.has('registration') && !modules.has('events');
+let regEvents: RegPublicEvent[] = [];
+const regSeats = new Map<number, SeatState>();
+if (showRegistrationEvents) {
+  try {
+    regEvents = (await listPublicEvents(Astro.locals.db, locale)).slice(0, 4);
+    await Promise.all(regEvents.filter((e) => e.phase === 'open').map(async (e) => {
+      regSeats.set(e.id, seatState(e, await listTicketTypes(Astro.locals.db, locale, e.id, { activeOnly: true })));
+    }));
+  } catch (err) {
+    console.error('home: registration events load failed', err);
+  }
+}
+
 const rawPrayer = Astro.url.searchParams.get('prayer');
 const prayerStatus = rawPrayer === 'sent' || rawPrayer === 'error' ? rawPrayer : null;
 
@@ -113,6 +133,30 @@ const infoCards = [
                 {t(locale, 'home.eventsEmpty')}
               </p>
             )}
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  {
+    showRegistrationEvents && (
+      <section class="bg-surface-sunken py-16 md:py-20" data-home-registration>
+        <div class="container-content">
+          <SectionTitle eyebrow={t(locale, 'home.eventsEyebrow')} title={t(locale, 'home.upcomingEvents')} />
+          <div class="mt-10">
+            {regEvents.length > 0 ? (
+              <GatheringSurface mode="public"><RegistrationEventCards locale={locale} events={regEvents} seats={regSeats} /></GatheringSurface>
+            ) : (
+              <p class="rounded-md border border-border bg-surface-raised px-4 py-6 text-center text-ink-muted">
+                {t(locale, 'register.empty')}
+              </p>
+            )}
+          </div>
+          <div class="mt-8 text-center">
+            <a href={localePath(locale, '/register')} class="text-sm font-semibold text-accent hover:text-accent-hover">
+              {t(locale, 'register.title')} →
+            </a>
           </div>
         </div>
       </section>
