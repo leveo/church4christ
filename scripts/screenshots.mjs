@@ -438,6 +438,22 @@ const LEGACY_CAPTURE_ROWS = [
   { path: '/admin/registration/931', out: 'docs/images/registration/builder-options.png', admin: true, backend: 'd1', anchorSelector: '[data-testid="reg-form-builder"] ol > li:nth-child(4)', anchorMargin: 24, waitForSelector: '[data-testid="reg-form-builder"] ol > li', expectedText: 'T-shirt size',
     interact: [{ click: '[data-testid="reg-form-builder"] ol > li:nth-child(4) button[aria-expanded]' }] },
   { path: '/admin/registration/931', out: 'docs/images/registration/builder-tickets.png', admin: true, backend: 'd1', anchor: 'Ticket types', anchorMargin: 24, waitForSelector: '[data-testid="ticket-card"]', expectedText: 'Ticket types' },
+  // Registration back office (Phase 4). These rows need an approval event on a throwaway persist dir (a free camp
+  // with a registration question, per-person questions, two ticket types, a few registrations in review / waitlist /
+  // confirmed, a staff note, a decision, a queued bulk email and two per-event roles), built by posting to the real
+  // endpoints. The event is 931 on a freshly seeded D1; registration 1 is in review, registration 2 has history.
+  { path: '/admin/registration/931', out: 'docs/images/registration/backoffice-overview.png', admin: true, backend: 'd1', anchorSelector: '[data-testid="reg-overview"]', anchorMargin: 16, expectedText: 'Youth Summer Camp' },
+  { path: '/admin/registration/931?status=review', out: 'docs/images/registration/backoffice-roster.png', admin: true, backend: 'd1', anchorSelector: '#roster', anchorMargin: 16, expectedText: 'Youth Summer Camp' },
+  { path: '/admin/registration/931?reg=2', out: 'docs/images/registration/backoffice-drawer.png', admin: true, backend: 'd1', anchorSelector: '#reg-drawer', anchorMargin: 16, expectedText: 'Daniel Reyes' },
+  { path: '/admin/registration/931?reg=2', out: 'docs/images/registration/backoffice-history.png', admin: true, backend: 'd1', anchorSelector: '[data-testid="reg-history"]', anchorMargin: 24, expectedText: 'Daniel Reyes' },
+  { path: '/admin/registration/931?reg=1', out: 'docs/images/registration/backoffice-approval.png', admin: true, backend: 'd1', anchorSelector: '#reg-drawer', anchorMargin: 16, expectedText: 'Maya Okafor' },
+  { path: '/admin/registration/931?reg=1', out: 'docs/images/registration/backoffice-drawer-mobile.png', admin: true, backend: 'd1', viewport: MOBILE_VIEWPORT, anchorSelector: '#reg-drawer', anchorMargin: 8, expectedText: 'Maya Okafor' },
+  { path: '/admin/registration/931?tab=add', out: 'docs/images/registration/backoffice-manual-add.png', admin: true, backend: 'd1', anchorSelector: '#add', anchorMargin: 16, expectedText: 'Add a registration by hand' },
+  { path: '/admin/registration/931?tab=email', out: 'docs/images/registration/backoffice-bulk-email.png', admin: true, backend: 'd1', anchorSelector: '#email', anchorMargin: 16, expectedText: 'Email the registrants',
+    interact: [{ fill: { 'input[name="subject"]': 'Packing list for camp', 'textarea[name="body"]': 'Hi {name}, here is what to bring to {event}: a sleeping bag, a warm jacket and a water bottle.' } }] },
+  { path: '/admin/registration/931/badges', out: 'docs/images/registration/backoffice-badges.png', admin: true, backend: 'd1', expectedText: 'Youth Summer Camp', waitForSelector: '[data-badge]' },
+  { path: '/admin/registration/931?people=sarah', out: 'docs/images/registration/backoffice-access.png', admin: true, backend: 'd1', anchorSelector: '#access', anchorMargin: 16, expectedText: 'Access to this event' },
+  { path: '/admin/registration?edit=931', out: 'docs/images/registration/backoffice-settings.png', admin: true, backend: 'd1', anchorSelector: '[data-testid="back-office-settings"]', anchorMargin: 120, expectedText: 'Requires approval' },
   { path: '/admin/registration', out: 'docs/images/registration/admin-templates.png', admin: true, backend: 'd1', anchorSelector: '#reg-templates', anchorMargin: 24, expectedText: 'Save as template' },
   // Page-builder registration block (Phase 3). Needs a page with the block on a throwaway database: save a page
   // (slug "gatherings") through the builder's JSON POST with three registration blocks in columns (events 920, 930,
