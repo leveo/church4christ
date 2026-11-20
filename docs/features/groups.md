@@ -27,8 +27,9 @@ over.
 - **Special events ride on Registration.** For an event that is open to sign-ups beyond the
   group — a retreat, an outreach dinner — the group links or creates an event in the
   [Registration](registration.md) module instead of duplicating it, so sign-ups, questions,
-  capacity, and payment all work exactly as they do everywhere else. (Registration needs the
-  Supabase backend; on the default database this section simply does not appear.)
+  capacity, and payment all work exactly as they do everywhere else. (This section appears
+  when the Registration module is on. Free events work on the default database; paid events
+  need the Supabase backend and Stripe, as they do in Registration itself.)
 - **History on the profile.** A member's profile — their own view and the admin's person page —
   shows their group memberships, their attendance from tracked meetings, and their Registration
   sign-ups, so a pastor can see someone's involvement at a glance.
@@ -93,15 +94,16 @@ member's profile as activity history.
 
 - **Module:** `groups` in `src/lib/modules.ts` — public prefixes `/groups`, `/signup`,
   `/attendance`; admin prefix `/admin/groups` (site-admin route class); soft `uses` of
-  `people` and `registration`. Works on both backends; only the Registration link-up is
-  Supabase-gated (by the `registration` module's own backend requirement).
+  `people` and `registration`. Works on both backends, including the Registration link-up,
+  which appears only when the `registration` module is on.
 - **Schema:** `migrations/0006_groups.sql` and `migrations-supabase/0005_groups.sql` —
   `groups`, `group_members` (nullable `person_id` = name-only member, the household-dependents
   precedent), `group_join_requests` (partial unique index on pending), `group_events` +
   materialized `group_event_occurrences` (the `ensureWeeklyPlans` precedent, generalized to
   none/weekly/biweekly/monthly), `group_attendance`, and `group_attendance_tokens` (a
   dedicated token table because `tokens.purpose`'s CHECK cannot be altered in SQLite). The
-  Supabase file also carries the Supabase-only `group_reg_events` link table.
+  `group_reg_events` link table comes from `migrations-supabase/0005_groups.sql` on Postgres
+  and from `migrations/0050_registration_d1.sql` on D1.
 - **Data layer:** `src/lib/groupDb.ts` (groups, membership, join requests, people search,
   profile activity), `src/lib/groupEventDb.ts` (events + occurrence generation),
   `src/lib/groupAttendance.ts` (tokens, attendance upsert, the cron pass),
@@ -127,5 +129,6 @@ member's profile as activity history.
 - **Tests:** `test/groupDb.test.ts`, `test/groupEventDb.test.ts`, `test/groupAttendance.test.ts`,
   `test/groupForms.test.ts`, `test/groupEventForms.test.ts` (workers project),
   `test/pg/groupRegDb.test.ts` and the `groupDb`/`groupEventDb` blocks in
-  `test/pg/parity.test.ts` (Postgres), and `test/e2e/groups.e2e.test.ts` (built worker).
+  `test/pg/parity.test.ts` (Postgres), the group link-up cases in
+  `test/shared/regBuilderCases.ts` (D1 and Postgres), and `test/e2e/groups.e2e.test.ts` (built worker).
   See [Modules](modules.md) for the on/off behavior.

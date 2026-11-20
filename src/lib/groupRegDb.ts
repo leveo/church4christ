@@ -1,11 +1,11 @@
-// Group ↔ Registration bridge (Supabase-ONLY, like regDb.ts). The registration
-// module is Supabase-backed, so its tables (reg_events / reg_event_i18n /
-// registrations) and the link table group_reg_events (migrations-supabase/
-// 0005_groups.sql) exist ONLY on Postgres. Every caller gates on
-// `Astro.locals.modules.has('registration')`, so none of these functions is ever
-// reached on a D1 request — but the file must still typecheck against the AppDb
-// seam, so it is written the same portable way as regDb.ts. Tests run against real
-// Postgres in test/pg/groupRegDb.test.ts.
+// Group ↔ Registration bridge. Like regDb.ts it runs on both backends through the
+// AppDb seam: the registration tables (reg_events / reg_event_i18n / registrations)
+// and the link table group_reg_events come from migrations-supabase/0005_groups.sql
+// on Postgres and from migrations/0050_registration_d1.sql on D1. Every caller gates
+// on `Astro.locals.modules.has('registration')`, so these functions run only when the
+// Registration module is on. Events created here default to free; paid events still
+// need Postgres + Stripe (enforced by regDb). Tests: test/pg/groupRegDb.test.ts
+// (Postgres) and the shared cases in test/shared/regBuilderCases.ts (D1 and Postgres).
 //
 // Localized reads COALESCE the requested-locale reg_event_i18n row over the 'en'
 // row (the exact fallback regDb uses). Confirmed count is the settled subset of a
