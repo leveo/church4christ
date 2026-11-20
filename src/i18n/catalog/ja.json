@@ -117,6 +117,10 @@
     "small-groups": {
       "label": "小グループ",
       "description": "メンバー、イベント、出席を管理できる小グループと、フェローシップの一覧を備えています。"
+    },
+    "event-registration": {
+      "label": "イベント申込",
+      "description": "独自の質問、キャンセル待ち、スタッフ用の管理画面、受付デスクを備えたイベント申込です。"
     }
   },
   "readiness": {

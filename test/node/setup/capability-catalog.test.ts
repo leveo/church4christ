@@ -70,16 +70,25 @@ describe('canonical capability catalog', () => {
   test('defines single-feature presets that bring People along', () => {
     expect(Object.keys(CAPABILITY_CATALOG.presets)).toEqual([
       'website', 'website-community', 'full-church', 'checkin', 'volunteer-scheduling', 'small-groups',
+      'event-registration',
     ]);
     expect(CAPABILITY_CATALOG.presets.checkin.modules).toEqual(['people', 'children']);
     expect(CAPABILITY_CATALOG.presets['volunteer-scheduling'].modules).toEqual(['serve', 'gifts', 'people']);
     expect(CAPABILITY_CATALOG.presets['small-groups'].modules).toEqual(['fellowships', 'groups', 'people']);
-    for (const key of ['checkin', 'volunteer-scheduling', 'small-groups'] as const) {
+    for (const key of ['checkin', 'volunteer-scheduling', 'small-groups', 'event-registration'] as const) {
       // Every module stays on the default D1 backend, so these install without a hosted account.
       for (const module of CAPABILITY_CATALOG.presets[key].modules) {
         expect(CAPABILITIES[module as keyof typeof CAPABILITIES].requiresBackend).toBeUndefined();
       }
     }
+  });
+
+  test('keeps Event Registration to the Registration module alone', () => {
+    // Registration needs no People, Events, or Event Logistics module to sign people up,
+    // run the back office, or check them in; Event Logistics stays a later opt-in.
+    expect(CAPABILITY_CATALOG.presets['event-registration'].modules).toEqual(['registration']);
+    expect(CAPABILITIES.registration.dependsOn).toEqual([]);
+    expect(CAPABILITIES['event-logistics'].dependsOn).toEqual(['registration']);
   });
 
   test('registers Newcomers on both providers with People as a hard dependency', () => {

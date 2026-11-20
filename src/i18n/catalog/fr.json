@@ -30,7 +30,8 @@
     "full-church": { "label": "Église complète", "description": "Toutes les fonctionnalités de site web, de communauté, d'espace membre, de dons et d'inscriptions." },
     "checkin": { "label": "Enregistrement des enfants", "description": "Foyers, borne d'enregistrement en libre-service et console du ministère des enfants." },
     "volunteer-scheduling": { "label": "Planning des bénévoles", "description": "Ministères, équipes, plannings de service, rappels et questionnaire des dons spirituels." },
-    "small-groups": { "label": "Petits groupes", "description": "Petits groupes avec adhésions, événements et présence, plus un annuaire des communautés fraternelles." }
+    "small-groups": { "label": "Petits groupes", "description": "Petits groupes avec adhésions, événements et présence, plus un annuaire des communautés fraternelles." },
+    "event-registration": { "label": "Inscriptions aux événements", "description": "Inscriptions aux événements avec vos propres questions, liste d'attente, gestion pour l'équipe et accueil à l'entrée." }
   },
   "readiness": {
     "identity": { "title": "Identité de l'église", "description": "Confirmez le manifeste d'installation et l'identité publique de l'église.", "remediation": "Terminez la configuration et vérifiez les paramètres d'identité." },
