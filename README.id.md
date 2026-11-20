@@ -41,7 +41,7 @@ portal anggota dan alur kerja manajemen gereja lainnya. Proyek ini bertujuan men
 biaya awal dan biaya pemeliharaan berkelanjutan dari implementasi yang disesuaikan, sambil menjaga
 kode dan konfigurasi deployment tetap dapat diakses oleh para operatornya.
 
-**Rilis sumber saat ini adalah 1.6**. Church4Christ adalah fondasi sumber terbuka,
+**Rilis sumber saat ini adalah 1.7**. Church4Christ adalah fondasi sumber terbuka,
 bukan layanan terkelola yang siap pakai. Evaluasi lokal gratis, dan beberapa deployment
 dapat masuk dalam kuota gratis penyedia, tetapi hosting produksi, email, basis data, domain, cadangan, dan layanan lain
 dapat dikenai biaya tergantung konfigurasi dan penggunaan. Lihat [Profil penerapan dan biaya](#profil-penerapan-dan-biaya)
@@ -251,7 +251,8 @@ Setiap fitur memiliki panduan berbahasa sederhananya sendiri. Mulailah dengan sa
 | [![](docs/images/learning/genesis-1-en.png)](docs/features/learning.md) | **[Pembelajaran](docs/features/learning.md)** | Lanjutkan Sekolah Minggu dan pemuridan di antara pertemuan dengan video dwibahasa, berkas, tugas, kuis, dan status yang disinkronkan penyedia. |
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Pembuat halaman](docs/features/page-builder.md)** | Susun halaman kustom Anda sendiri dengan seret dan lepas — multibahasa, selalu sesuai tema, dan halaman yang diterbitkan dimuat tanpa JavaScript. Opsional; mematikannya tidak akan merusak halaman yang sudah Anda buat. |
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Pemberian](docs/features/giving.md)** | Sudah diimplementasikan: pemberian online lewat Stripe (mode uji secara bawaan, mode langsung setelah daftar periksa go-live), buku besar offline untuk cek dan uang tunai, serta laporan pemberian tahunan. |
-| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Pendaftaran](docs/features/registration.md)** | Sudah diimplementasikan: pendaftaran acara gratis, pertanyaan kustom, dan ekspor daftar peserta, plus checkout Stripe berbayar dalam mode Stripe yang sama dengan Pemberian (verifikasi dengan pendaftaran langsung kecil sebelum mengandalkannya). |
+| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Pendaftaran](docs/features/registration.md)** | Sudah diimplementasikan: pendaftaran acara gratis di D1 atau Supabase, pertanyaan kustom, daftar tunggu, tahapan acara, dan ekspor daftar peserta, plus checkout Stripe berbayar di Supabase dalam mode Stripe yang sama dengan Pemberian (verifikasi dengan pendaftaran langsung kecil sebelum mengandalkannya). |
+|  | **[Logistik acara](docs/features/event-logistics.md)** | Tambahan opsional untuk Pendaftaran: tempatkan orang di kamar, dudukkan mereka di meja dengan pratinjau Atur duduk otomatis, bagi mereka ke dalam kelompok kecil, dan cetak daftar kamar, papan nama pintu, serta kartu meja. |
 | [![](docs/images/portal/member-opportunities.png)](docs/features/member-portal.md) | **[Portal anggota](docs/features/member-portal.md)** | Satu hub setelah masuk untuk keterlibatan saat ini dan kesempatan yang terbuka, plus profil keluarga, acara, pelayanan, kalender, pemberian, dan doa yang dibatasi cakupannya. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Dua belas bahasa](docs/features/i18n.md)** | Pilih dari 12 bahasa antarmuka untuk setiap situs, dengan cadangan bahasa Inggris dan konversi satu klik dari Mandarin Sederhana ke Tradisional. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & otomatisasi](docs/features/email-automation.md)** | Tautan masuk, pengingat, dan rangkuman, dengan pencatatan log lokal dan konfigurasi produksi yang dapat berbayar. |
@@ -260,7 +261,7 @@ Setiap fitur memiliki panduan berbahasa sederhananya sendiri. Mulailah dengan sa
 **Pilih modul Anda.** Sebagian besar kemampuan domain yang opsional adalah **modul** yang dapat Anda matikan
 dari satu panel di Pengaturan — warta jemaat, khotbah, dinding doa, penjadwalan relawan,
 dan lainnya. Instalasi baru menulis setiap pengaturan modul secara eksplisit dari pilihan saat penyiapan;
-demo Full Church memilih ke-21 modulnya (Perencanaan Ibadah diaktifkan secara terpisah). Hanya pada instalasi lama, baris modul yang tidak ada mempertahankan
+demo Full Church memilih ke-21 modulnya (Perencanaan Ibadah dan Logistik Acara diaktifkan secara terpisah). Hanya pada instalasi lama, baris modul yang tidak ada mempertahankan
 perilaku warisan yaitu aktif secara bawaan. Gereja yang hanya menginginkan jadwal ibadah dan khotbah dapat
 menyembunyikan sisanya dengan satu klik: halaman, tautan, dan email modul itu hilang bersamaan, dan tidak ada
 yang dihapus. Lihat [**`docs/features/modules.md`**](docs/features/modules.md).
@@ -286,9 +287,10 @@ yang dihapus. Lihat [**`docs/features/modules.md`**](docs/features/modules.md).
 | `page-builder` | Page Builder | 页面编辑器 | Either |
 | `portal` | Member Portal | 会友平台 | Either |
 | `giving` | Giving | 奉献 | Supabase |
-| `registration` | Registration | 活动报名 | Supabase |
+| `registration` | Registration | 活动报名 | Either |
 | `learning` | Learning | 学习 | Either |
 | `planning` | Service Planning | 服事流程 | Either |
+| `event-logistics` | Event Logistics | 活动后勤 | Either |
 
 ### Manajemen komunitas dan alur kerja
 
@@ -343,7 +345,7 @@ terbatas pada seluruh area `/admin`.
 Portal ini berjalan di backend D1 bawaan maupun backend **Supabase (Postgres)** yang opsional.
 Keluarga, kelompok, berkas kelompok yang dilindungi, dan moderasi doa gereja/kelompok/privat
 berfungsi di D1. Doa lingkup acara, administrator acara, dan "Pendaftaran saya"
-memerlukan Pendaftaran, yang hanya tersedia di Supabase. Pelajari lebih lanjut di
+memerlukan Pendaftaran, yang berjalan di D1 untuk acara gratis setelah diaktifkan. Pelajari lebih lanjut di
 [**`docs/features/member-portal.md`**](docs/features/member-portal.md).
 
 ---
@@ -378,7 +380,7 @@ slogan, alamat, zona waktu, warna utama dan sekunder, logo PNG/JPEG/WebP yang op
 (hingga 2 MiB), bahasa, administrator pertama, dan pilihan konten demo. Centang hanya
 fitur yang Anda butuhkan.
 Pilihan yang direkomendasikan memakai D1 sebagai basis datanya; aplikasi tetap berjalan di
-Cloudflare Workers dan menyimpan media di R2. **Pemberian dan Pendaftaran**
+Cloudflare Workers dan menyimpan media di R2. **Pemberian dan Pendaftaran berbayar**
 adalah opsi lanjutan yang memerlukan peralihan eksplisit ke PostgreSQL yang kompatibel dengan Supabase.
 
 Menyimpan akan menulis `.church/preferences.json` dan logo yang diunggah di bawah `.church/`, yang
@@ -426,8 +428,8 @@ yang sudah ada dan tidak memulihkan akses yang telah dicabut. Jika penyiapan mel
 
 `npm run setup` khusus terminal tetap tersedia. Penyiapan menawarkan **Website** (8 modul
 penerbitan yang terfokus), **Website + Community** (18 modul; Portal Anggota dapat ditambahkan di D1), dan
-**Full Church** (21 modul; Perencanaan Ibadah diaktifkan secara terpisah). Pemberian dan
-Pendaftaran memilih Supabase secara otomatis; pilihan yang kompatibel dengan D1 memilih D1 kecuali Anda
+**Full Church** (21 modul; Perencanaan Ibadah diaktifkan secara terpisah). Pemberian
+memilih Supabase secara otomatis (Pendaftaran gratis berjalan di D1); pilihan yang kompatibel dengan D1 memilih D1 kecuali Anda
 menimpa backend secara eksplisit. Persyaratan akun bergantung pada mode Local atau Deploy,
 sebagaimana dirinci di bawah. Untuk otomatisasi, berikan semua jawaban dengan `--yes`; tambahkan `--json` untuk satu
 hasil yang dapat dibaca mesin. Untuk eksekusi noninteraktif yang dapat dibaca manusia, gunakan flag lengkap yang sama
@@ -452,7 +454,7 @@ sebelum deployment.
 | Profil | Cakupan yang disertakan | Catatan biaya dan kesiapan |
 |---|---|---|
 | **Evaluasi lokal** | Modul situs web atau komunitas dengan D1 lokal; modul lengkap dengan Postgres lokal yang kompatibel | Tidak ada biaya layanan ter-hosting untuk evaluasi D1 lokal. Anda tetap menyediakan komputer, waktu pengembangan, dan layanan eksternal opsional apa pun. |
-| **D1 situs web/komunitas** | Cloudflare Worker, D1, dan R2 untuk hingga 20 modul yang kompatibel dengan D1 | Deployment yang sederhana dapat masuk dalam kuota gratis Cloudflare. Lalu lintas, penyimpanan, operasi di atas kuota, domain, dan layanan lain dapat berbiaya; periksa [harga Workers](https://developers.cloudflare.com/workers/platform/pricing/). Email produksi terpisah. |
+| **D1 situs web/komunitas** | Cloudflare Worker, D1, dan R2 untuk hingga 22 modul yang kompatibel dengan D1 | Deployment yang sederhana dapat masuk dalam kuota gratis Cloudflare. Lalu lintas, penyimpanan, operasi di atas kuota, domain, dan layanan lain dapat berbiaya; periksa [harga Workers](https://developers.cloudflare.com/workers/platform/pricing/). Email produksi terpisah. |
 | **Email produksi** | Tautan masuk transaksional, pengingat, permintaan, dan rangkuman ke penerima mana pun | Repositori ini mendukung konfigurasi email Cloudflare yang dapat berbayar. Pengiriman ke penerima mana pun memerlukan Workers Paid, saat ini minimum **$5/bulan** termasuk **3.000 email**, lalu **$0,35 per 1.000 email**. Jumlah ini dapat berubah; periksa [harga Cloudflare Email Service](https://developers.cloudflare.com/email-service/platform/pricing/). |
 | **Supabase/modul lengkap** | Deployment Cloudflare plus Supabase/Postgres untuk 21 modul Full Church, termasuk Portal Anggota, Pemberian, dan Pendaftaran | Biaya Cloudflare tetap berlaku, dan [paket Supabase](https://supabase.com/pricing) yang dipilih dapat menambah biaya langganan atau penggunaan. Per Agustus 2026, Supabase Free tidak memiliki cadangan harian otomatis, dan proyek Free yang aktivitasnya rendah dapat [dijeda secara otomatis](https://supabase.com/docs/guides/platform/free-project-pausing) berdasarkan aktivitas selama periode tujuh hari. Untuk produksi, lakukan dump basis data di luar lokasi secara berkala dan latihan pemulihan, atau pilih paket berbayar yang [opsi cadangannya](https://supabase.com/docs/guides/platform/backups) memenuhi kebutuhan kesinambungan Anda. Harga dan kebijakan layanan dapat berubah. Stripe dimulai dalam mode uji; pembayaran langsung adalah pilihan eksplisit setelah daftar periksa go-live di [`docs/supabase-setup.md`](docs/supabase-setup.md). |
 
@@ -473,7 +475,7 @@ yang lengkap.
 
 Mulai dengan `npm run setup`, pilih **Deploy**, dan jawab pertanyaan tentang fitur dan gereja.
 Penyiapan membuat atau mengimpor sumber daya yang diperlukan, menulis konfigurasi hasil generate, menerapkan
-migrasi, mencatat semua 22 pengaturan modul, dan menyiapkan admin pertama. Setelah itu penyiapan menyerahkan
+migrasi, mencatat semua 23 pengaturan modul, dan menyiapkan admin pertama. Setelah itu penyiapan menyerahkan
 ke `npm run deploy`. Jalankan `npm run doctor` untuk laporan kesiapan schema-v2, dan gunakan
 daftar periksa `/admin/onboarding` yang selalu aktif untuk identitas pemeriksaan stabil yang sama.
 Pemberian, Pendaftaran, Kelompok, Tim, Pendatang Baru, impor, dan integrasi Planning
@@ -492,8 +494,8 @@ rahasia, berlatih di staging, dan meninjau [changelog `Unreleased`](CHANGELOG.md
 menerapkan migrasi maju. Maintainer yang menyiapkan rilis sebaiknya mengikuti
 [proses rilis](docs/release-process.md).
 
-**Memilih basis data Anda.** 20 modul yang kompatibel dengan D1 tidak mencakup
-**Pemberian** dan **Pendaftaran**, yang memerlukan Postgres. Persyaratan akun mengikuti
+**Memilih basis data Anda.** 22 modul yang kompatibel dengan D1 tidak mencakup
+**Pemberian**, yang memerlukan Postgres, dan **Pendaftaran berbayar**, yang juga memerlukannya. Persyaratan akun mengikuti
 mode: D1 lokal tidak memerlukan akun eksternal; D1 yang di-deploy memerlukan akun Cloudflare; Supabase
 lokal memerlukan akun Supabase atau basis data Postgres lokal yang kompatibel; Supabase yang di-deploy
 memerlukan Cloudflare dan Supabase. Belum ada migrasi konten otomatis D1↔Supabase,
@@ -502,8 +504,8 @@ jadi pilihlah basis data produksi sebelum memasukkan konten sungguhan. Lihat
 
 **Stripe dimulai dalam mode uji; mode langsung adalah pilihan eksplisit.** Stripe meng-hosting halaman pembayaran,
 tanda terima, Billing Portal, pengembalian dana, dan sengketa; aplikasi ini hanya menyimpan jumlah,
-dana, tanggal, status, dan id Stripe. Pemberian dan Pendaftaran hanya untuk Supabase; D1 tidak
-mendukung modul-modul tersebut. Saat penyiapan menanyakan salah satu modul itu, impor kunci `sk_test_…` dan
+dana, tanggal, status, dan id Stripe. Pemberian dan Pendaftaran berbayar hanya untuk Supabase; D1 tidak
+mendukungnya. Saat penyiapan menanyakan salah satu modul itu, impor kunci `sk_test_…` dan
 rahasia penandatanganan `whsec_…` dengan variabel lingkungan sekali pakai `CHURCH_SETUP_STRIPE_SECRET_KEY` dan
 `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET`; penyiapan menyimpan rahasia runtime
 dan menulis `STRIPE_MODE=test`. Untuk menerima donasi sungguhan, ikuti daftar periksa go-live di

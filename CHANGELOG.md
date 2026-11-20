@@ -10,6 +10,12 @@ than published to npm.
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-20
+
+Upgrading from 1.6.0: see [Upgrading 1.6.0 to 1.7.0](docs/upgrade.md#upgrading-160-to-170).
+This release is about event registration: free events on D1, household and group sign-up,
+an event builder, a back office with a phone check-in desk, and an optional event logistics module.
+
 ### Added
 
 - Registration now runs on Cloudflare D1 for free events. Paid events still need
@@ -151,7 +157,7 @@ than published to npm.
   - The roster CSV appends **Ticket types** (only for events with types) and per-person question
     columns at the end. Earlier columns are unchanged.
   - The admin question editor is now a React island (admin pages only). Public pages are unchanged.
-- Operator impact for Registration (see [Upgrading](docs/upgrade.md#upgrading-160-to-the-next-release-unreleased)):
+- Operator impact for Registration (see [Upgrading](docs/upgrade.md#upgrading-160-to-170)):
   - D1: apply `migrations/0050_registration_d1.sql`. It creates the registration tables plus
     `group_reg_events` and `event_admins` (used by the Member Portal's event prayers and the
     event-admins panel). Existing D1 installations keep Registration **off** after upgrading

@@ -12,8 +12,8 @@ authors:
 repository-code: "https://github.com/leveo/church4christ"
 url: "https://church4christ.org"
 license: GPL-3.0-only
-version: 1.6.0
-date-released: "2026-11-14"
+version: 1.7.0
+date-released: "2026-11-20"
 keywords:
   - church management software
   - church CMS

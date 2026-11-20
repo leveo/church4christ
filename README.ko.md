@@ -27,7 +27,7 @@
 
 Church4Christ는 다국어 공개 사이트와, 콘텐츠·기도 돌봄·봉사 일정·사람과 가정을 위한 관리 시스템을 하나로 합쳤습니다. 선택 모듈을 더하면 교인 포털과 그 밖의 교회 관리 업무 흐름을 쓸 수 있습니다. 이 프로젝트는 맞춤형 도입에 드는 초기 비용과 지속적인 유지 관리 비용을 낮추면서, 코드와 배포 설정은 운영하는 쪽에서 계속 가지고 있게 하는 것을 목표로 합니다.
 
-**현재 소스 릴리스는 1.6입니다**. Church4Christ는 오픈소스 기반일 뿐, 바로 쓸 수 있는 관리형 서비스가 아닙니다. 로컬에서 평가하는 것은 무료이고, 일부 배포는 제공업체의 무료 한도 안에서 운영할 수 있습니다. 하지만 운영 환경의 호스팅, 이메일, 데이터베이스, 도메인, 백업 등의 서비스는 구성과 사용량에 따라 요금이 청구될 수 있습니다. 운영 환경을 정하기 전에 [배포 유형과 비용](#배포-유형과-비용)을 확인하세요.
+**현재 소스 릴리스는 1.7입니다**. Church4Christ는 오픈소스 기반일 뿐, 바로 쓸 수 있는 관리형 서비스가 아닙니다. 로컬에서 평가하는 것은 무료이고, 일부 배포는 제공업체의 무료 한도 안에서 운영할 수 있습니다. 하지만 운영 환경의 호스팅, 이메일, 데이터베이스, 도메인, 백업 등의 서비스는 구성과 사용량에 따라 요금이 청구될 수 있습니다. 운영 환경을 정하기 전에 [배포 유형과 비용](#배포-유형과-비용)을 확인하세요.
 
 |  |  |  |
 |---|---|---|
@@ -162,13 +162,14 @@ Planning Center를 비롯해 위에서 언급한 다른 제품 이름은 각 소
 | [![](docs/images/learning/genesis-1-en.png)](docs/features/learning.md) | **[학습](docs/features/learning.md)** | 이중 언어 영상, 파일, 과제, 퀴즈, 제공업체와 동기화된 상태로 주일학교와 제자훈련을 모임과 모임 사이에도 이어 갑니다. |
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[페이지 빌더](docs/features/page-builder.md)** | 드래그 앤 드롭으로 나만의 사용자 지정 페이지를 만듭니다. 다국어를 지원하고, 늘 테마에 맞으며, 게시된 페이지는 JavaScript 없이 로드됩니다. 선택 사항이며, 끄더라도 이미 만든 페이지는 망가지지 않습니다. |
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[헌금](docs/features/giving.md)** | 구현됨: Stripe를 통한 온라인 헌금(기본은 테스트 모드이고, 서비스 시작 체크리스트를 마친 뒤 실제 모드), 수표와 현금을 위한 오프라인 장부, 연간 헌금 내역서. |
-| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[행사 등록](docs/features/registration.md)** | 구현됨: 무료 행사 신청, 사용자 지정 질문, 명단 내보내기, 그리고 헌금과 같은 Stripe 모드의 Stripe 유료 결제(의존하기 전에 소액으로 실제 등록을 해 보며 확인하세요). |
+| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[행사 등록](docs/features/registration.md)** | 구현됨: D1이나 Supabase에서 동작하는 무료 행사 신청, 사용자 지정 질문, 대기자 명단, 행사 단계, 명단 내보내기, 그리고 Supabase에서 헌금과 같은 Stripe 모드를 쓰는 Stripe 유료 결제(의존하기 전에 소액으로 실제 등록을 해 보며 확인하세요). |
+|  | **[행사 배정](docs/features/event-logistics.md)** | 행사 등록의 선택 추가 기능: 사람들을 방에 배정하고, "자동 좌석 배정" 미리 보기로 테이블 좌석을 정하고, 소그룹으로 나누고, 방 명단, 문 안내판, 테이블 카드를 인쇄합니다. |
 | [![](docs/images/portal/member-opportunities.png)](docs/features/member-portal.md) | **[교인 포털](docs/features/member-portal.md)** | 현재 참여 중인 활동과 참여할 수 있는 기회를 한곳에 모은 로그인 허브이며, 가정 프로필, 행사, 봉사, 캘린더, 헌금, 범위가 제한된 기도도 함께 제공합니다. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[열두 개 언어](docs/features/i18n.md)** | 사이트마다 12개 화면 언어 중에서 고를 수 있고, 영어로 대체되며, 중국어 간체를 번체로 바꾸는 원클릭 변환도 있습니다. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[이메일과 자동화](docs/features/email-automation.md)** | 로그인 링크, 알림, 요약 메일을 제공하며, 로컬에서는 기록만 남기고 유료 서비스도 쓸 수 있는 운영 환경 구성을 갖췄습니다. |
 | [![](docs/images/admin/settings-modules.png)](docs/features/modules.md) | **[모듈](docs/features/modules.md)** | 쓰지 않는 기능은 끕니다. 아무것도 삭제되지 않으며 언제든 다시 켤 수 있습니다. |
 
-**모듈을 고르세요.** 선택 가능한 업무 영역 대부분은 설정의 한 패널에서 끌 수 있는 **모듈**입니다. 주보, 설교, 기도 게시판, 봉사 일정 등이 그렇습니다. 새로 설치하면 설치할 때 고른 내용에 따라 모든 모듈 설정이 명시적으로 기록됩니다. Full Church 데모는 그중 21개를 선택합니다(예배 흐름은 따로 켭니다). 오래된 설치에서만, 빠져 있는 모듈 행은 예전처럼 기본으로 켜진 상태가 유지됩니다. 예배 시간과 설교만 필요한 교회는 클릭 한 번으로 나머지를 숨길 수 있습니다. 해당 모듈의 페이지, 링크, 이메일이 함께 사라지며, 아무것도 삭제되지 않습니다. [**`docs/features/modules.md`**](docs/features/modules.md)를 참고하세요.
+**모듈을 고르세요.** 선택 가능한 업무 영역 대부분은 설정의 한 패널에서 끌 수 있는 **모듈**입니다. 주보, 설교, 기도 게시판, 봉사 일정 등이 그렇습니다. 새로 설치하면 설치할 때 고른 내용에 따라 모든 모듈 설정이 명시적으로 기록됩니다. Full Church 데모는 그중 21개를 선택합니다(예배 흐름과 행사 배정은 따로 켭니다). 오래된 설치에서만, 빠져 있는 모듈 행은 예전처럼 기본으로 켜진 상태가 유지됩니다. 예배 시간과 설교만 필요한 교회는 클릭 한 번으로 나머지를 숨길 수 있습니다. 해당 모듈의 페이지, 링크, 이메일이 함께 사라지며, 아무것도 삭제되지 않습니다. [**`docs/features/modules.md`**](docs/features/modules.md)를 참고하세요.
 
 | Key | English | 中文 | Required database |
 |---|---|---|---|
@@ -191,9 +192,10 @@ Planning Center를 비롯해 위에서 언급한 다른 제품 이름은 각 소
 | `page-builder` | Page Builder | 页面编辑器 | Either |
 | `portal` | Member Portal | 会友平台 | Either |
 | `giving` | Giving | 奉献 | Supabase |
-| `registration` | Registration | 活动报名 | Supabase |
+| `registration` | Registration | 活动报名 | Either |
 | `learning` | Learning | 学习 | Either |
 | `planning` | Service Planning | 服事流程 | Either |
+| `event-logistics` | Event Logistics | 活动后勤 | Either |
 
 ### 공동체 관리와 업무 흐름
 
@@ -225,7 +227,7 @@ Planning Center를 비롯해 위에서 언급한 다른 제품 이름은 각 소
 
 ![교인의 기회 탐색과 리소스 범위가 제한된 리더 관리 업무 흐름](docs/images/diagrams/member-opportunity-workflow.png)
 
-포털은 기본 D1 백엔드와 선택 사항인 **Supabase(Postgres)** 백엔드 모두에서 실행됩니다. 가정, 그룹, 보호된 그룹 파일, 교회·그룹·비공개 기도의 중재는 D1에서 동작합니다. 행사 단위 기도, 행사 관리자, "내 등록"에는 Supabase 전용인 행사 등록이 필요합니다. 자세한 내용은 [**`docs/features/member-portal.md`**](docs/features/member-portal.md)를 참고하세요.
+포털은 기본 D1 백엔드와 선택 사항인 **Supabase(Postgres)** 백엔드 모두에서 실행됩니다. 가정, 그룹, 보호된 그룹 파일, 교회·그룹·비공개 기도의 중재는 D1에서 동작합니다. 행사 단위 기도, 행사 관리자, "내 등록"에는 행사 등록이 필요하며, 행사 등록을 켜면 무료 행사는 D1에서 동작합니다. 자세한 내용은 [**`docs/features/member-portal.md`**](docs/features/member-portal.md)를 참고하세요.
 
 ---
 
@@ -252,7 +254,7 @@ node scripts/setup/index.mjs --preferences .church/preferences.json --yes --json
 npm run dev
 ```
 
-양식은 교회인지, 비영리 단체인지, 캠퍼스인지 묻고, 이름, 한 줄 소개, 주소, 시간대, 대표 색상과 보조 색상, 선택 사항인 PNG/JPEG/WebP 로고(최대 2 MiB), 언어, 첫 번째 관리자, 데모 콘텐츠 선택을 받습니다. 필요한 기능에만 체크하세요. 권장 선택은 데이터베이스로 D1을 씁니다. 애플리케이션은 계속 Cloudflare Workers에서 실행되고 미디어는 R2에 저장됩니다. **헌금과 행사 등록**은 고급 옵션으로, Supabase 호환 PostgreSQL로 명시적으로 전환해야 합니다.
+양식은 교회인지, 비영리 단체인지, 캠퍼스인지 묻고, 이름, 한 줄 소개, 주소, 시간대, 대표 색상과 보조 색상, 선택 사항인 PNG/JPEG/WebP 로고(최대 2 MiB), 언어, 첫 번째 관리자, 데모 콘텐츠 선택을 받습니다. 필요한 기능에만 체크하세요. 권장 선택은 데이터베이스로 D1을 씁니다. 애플리케이션은 계속 Cloudflare Workers에서 실행되고 미디어는 R2에 저장됩니다. **헌금과 유료 행사 등록**은 고급 옵션으로, Supabase 호환 PostgreSQL로 명시적으로 전환해야 합니다.
 
 저장하면 `.church/preferences.json`과 업로드한 로고가 `.church/` 아래에 기록되며, Git은 이 폴더를 무시합니다. 데이터베이스를 만들거나 사이트를 배포하지는 않습니다. `npm run onboard`를 다시 실행하면 저장된 설정을 불러와 수정할 수 있습니다. 양식을 작성하는 동안 터미널을 계속 켜 두고, 끝나면 Ctrl+C로 멈추세요. 출력된 URL을 직접 열려면 `npm run onboard -- --no-open`을 쓰고, 포트를 고르려면 `--port 4310`을 덧붙입니다. 직접 진입점은 `node scripts/onboard/index.mjs`입니다. 설치 프로그램이 무엇을 적용하는지, 그리고 에이전트가 나머지 설정을 어떻게 쓰는지는 [설치 안내](docs/setup.md)를 참고하세요.
 
@@ -270,7 +272,7 @@ npm run dev
 
 두 콘텐츠 모드 모두에서 설치 프로그램은 새 관리자와 감사 대상이 되는 로그인 신원을 함께 만듭니다. 다시 실행해도 기존 연락처 소유 관계는 유지되며, 기존 이메일을 인증하거나 취소된 접근 권한을 되살리지는 않습니다. 설치 프로그램이 신원 문제를 알려 오면, 다시 실행하기 전에 [신원 검토 또는 복구 절차](docs/features/member-identity.md)를 마치세요.
 
-터미널 전용 `npm run setup`도 계속 쓸 수 있습니다. 설치에서는 **Website**(게시에 집중한 8개 모듈), **Website + Community**(18개 모듈. D1에서는 교인 포털을 추가할 수 있음), **Full Church**(21개 모듈. 예배 흐름은 따로 켬)를 고를 수 있습니다. 헌금과 행사 등록을 고르면 Supabase가 자동으로 선택되고, D1 호환 선택은 백엔드를 명시적으로 바꾸지 않는 한 D1을 택합니다. 필요한 계정은 로컬 모드인지 배포 모드인지에 따라 다르며, 아래에서 자세히 설명합니다. 자동화하려면 `--yes`로 모든 답변을 전달하고, 기계가 읽을 수 있는 결과를 하나 받으려면 `--json`을 덧붙이세요. 사람이 읽을 수 있는 형태로 비대화형 실행을 하려면 같은 전체 플래그에 `npm run setup -- ... --yes`를 쓰고 `--json`은 생략하세요. npm을 거치면서도 stdout을 엄격한 JSON으로 유지하려면 조용한 형식을 쓰세요.
+터미널 전용 `npm run setup`도 계속 쓸 수 있습니다. 설치에서는 **Website**(게시에 집중한 8개 모듈), **Website + Community**(18개 모듈. D1에서는 교인 포털을 추가할 수 있음), **Full Church**(21개 모듈. 예배 흐름은 따로 켬)를 고를 수 있습니다. 헌금을 고르면 Supabase가 자동으로 선택되고(무료 행사 등록은 D1에서 동작합니다), D1 호환 선택은 백엔드를 명시적으로 바꾸지 않는 한 D1을 택합니다. 필요한 계정은 로컬 모드인지 배포 모드인지에 따라 다르며, 아래에서 자세히 설명합니다. 자동화하려면 `--yes`로 모든 답변을 전달하고, 기계가 읽을 수 있는 결과를 하나 받으려면 `--json`을 덧붙이세요. 사람이 읽을 수 있는 형태로 비대화형 실행을 하려면 같은 전체 플래그에 `npm run setup -- ... --yes`를 쓰고 `--json`은 생략하세요. npm을 거치면서도 stdout을 엄격한 JSON으로 유지하려면 조용한 형식을 쓰세요.
 
 ```bash
 npm run --silent setup -- --mode local --preset website --site-slug my-church \
@@ -288,7 +290,7 @@ npm run --silent setup -- --mode local --preset website --site-slug my-church \
 | 유형 | 포함 범위 | 비용과 준비 상태 메모 |
 |---|---|---|
 | **로컬 평가** | 로컬 D1을 쓰는 웹사이트 또는 공동체 모듈, 호환되는 로컬 Postgres를 쓰는 전체 모듈 | 로컬 D1 평가에는 호스팅 서비스 요금이 필요하지 않습니다. 컴퓨터, 개발 시간, 선택적인 외부 서비스는 직접 준비해야 합니다. |
-| **D1 웹사이트/공동체** | D1 호환 모듈 최대 20개를 위한 Cloudflare Worker, D1, R2 | 소규모 배포는 Cloudflare 무료 한도 안에 들어갈 수 있습니다. 트래픽, 저장 공간, 한도를 넘는 작업, 도메인, 그 밖의 서비스에는 비용이 들 수 있으니 [Workers 가격](https://developers.cloudflare.com/workers/platform/pricing/)을 확인하세요. 운영 환경 이메일은 별도입니다. |
+| **D1 웹사이트/공동체** | D1 호환 모듈 최대 22개를 위한 Cloudflare Worker, D1, R2 | 소규모 배포는 Cloudflare 무료 한도 안에 들어갈 수 있습니다. 트래픽, 저장 공간, 한도를 넘는 작업, 도메인, 그 밖의 서비스에는 비용이 들 수 있으니 [Workers 가격](https://developers.cloudflare.com/workers/platform/pricing/)을 확인하세요. 운영 환경 이메일은 별도입니다. |
 | **운영 환경 이메일** | 임의의 수신자에게 보내는 로그인 링크, 알림, 요청, 요약 메일 같은 거래성 메일 | 이 저장소는 유료 서비스도 쓸 수 있는 Cloudflare 이메일 구성을 지원합니다. 임의의 수신자에게 보내려면 Workers Paid가 필요하며, 현재 최소 **월 $5**에 **3,000통**이 포함되고, 그 이후에는 **1,000통당 $0.35**입니다. 이 금액은 바뀔 수 있으니 [Cloudflare Email Service 가격](https://developers.cloudflare.com/email-service/platform/pricing/)을 확인하세요. |
 | **Supabase/전체 모듈** | 교인 포털, 헌금, 행사 등록을 포함한 Full Church 모듈 21개를 위한 Cloudflare 배포와 Supabase/Postgres | Cloudflare 비용은 그대로 들며, 선택한 [Supabase 요금제](https://supabase.com/pricing)에 따라 구독료나 사용료가 더해질 수 있습니다. 2026년 8월 기준으로 Supabase Free에는 자동 일일 백업이 없고, 활동이 적은 Free 프로젝트는 7일간의 활동에 따라 [자동으로 일시 중지](https://supabase.com/docs/guides/platform/free-project-pausing)될 수 있습니다. 운영 환경에서는 정기적으로 외부에 데이터베이스 덤프를 보관하고 복원 훈련을 하거나, [백업 옵션](https://supabase.com/docs/guides/platform/backups)이 업무 연속성 요건을 충족하는 유료 요금제를 고르세요. 가격과 서비스 정책은 바뀔 수 있습니다. Stripe는 테스트 모드로 시작하며, 실제 결제는 [`docs/supabase-setup.md`](docs/supabase-setup.md)의 서비스 시작 체크리스트를 마친 뒤 명시적으로 선택해서 켭니다. |
 
@@ -300,13 +302,13 @@ npm run --silent setup -- --mode local --preset website --site-slug my-church \
 
 처음이라면 [**`docs/cloudflare-setup.md`**](docs/cloudflare-setup.md)부터 시작하세요. Cloudflare가 무엇인지, 비용 구조는 어떤지, 온라인에 올리는 두 가지 방법(AI 어시스턴트에게 맡기는 방법 포함)을 쉬운 말로 설명한 안내서입니다. 정확한 명령어가 필요할 때는 [**`docs/deploy.md`**](docs/deploy.md)에 전체 단계별 안내가 있습니다.
 
-먼저 `npm run setup`을 실행하고 **Deploy**를 고른 다음, 기능과 교회에 관한 질문에 답하세요. 필요한 리소스를 만들거나 가져오고, 생성된 설정을 쓰고, 마이그레이션을 적용하고, 22개 모듈 설정을 모두 기록하고, 첫 번째 관리자를 만듭니다. 그런 다음 `npm run deploy`로 넘어갑니다. `npm run doctor`를 실행하면 schema-v2 준비 상태 보고서를 볼 수 있고, 항상 켜져 있는 `/admin/onboarding` 체크리스트에서도 같은 고정 점검 식별자를 확인할 수 있습니다. 헌금, 행사 등록, 그룹, 팀, 새가족, 가져오기, 그리고 선택 사항인 읽기 전용 Planning Center 연동은 증빙에 기반해 검토를 우선하는 신원 게이트웨이를 함께 씁니다. 이름이나 확인되지 않은 연락처만으로 사람을 자동으로 합치는 일은 결코 없습니다. 업무 흐름, 사기 방지 장치, 현재의 마이그레이션 경계, 제공업체 검증의 공백은 [교인 신원](docs/features/member-identity.md)을 참고하세요. 시크릿 설정과 교체 규칙은 여전히 [배포 런북](docs/deploy.md#stable-identity-source-key)에 있습니다. 배포는 일부러 수동으로 하도록 했습니다. 저장소의 자동화는 변경 사항을 테스트할 뿐, 게시하거나 운영 데이터를 대신 마이그레이션하지 않습니다.
+먼저 `npm run setup`을 실행하고 **Deploy**를 고른 다음, 기능과 교회에 관한 질문에 답하세요. 필요한 리소스를 만들거나 가져오고, 생성된 설정을 쓰고, 마이그레이션을 적용하고, 23개 모듈 설정을 모두 기록하고, 첫 번째 관리자를 만듭니다. 그런 다음 `npm run deploy`로 넘어갑니다. `npm run doctor`를 실행하면 schema-v2 준비 상태 보고서를 볼 수 있고, 항상 켜져 있는 `/admin/onboarding` 체크리스트에서도 같은 고정 점검 식별자를 확인할 수 있습니다. 헌금, 행사 등록, 그룹, 팀, 새가족, 가져오기, 그리고 선택 사항인 읽기 전용 Planning Center 연동은 증빙에 기반해 검토를 우선하는 신원 게이트웨이를 함께 씁니다. 이름이나 확인되지 않은 연락처만으로 사람을 자동으로 합치는 일은 결코 없습니다. 업무 흐름, 사기 방지 장치, 현재의 마이그레이션 경계, 제공업체 검증의 공백은 [교인 신원](docs/features/member-identity.md)을 참고하세요. 시크릿 설정과 교체 규칙은 여전히 [배포 런북](docs/deploy.md#stable-identity-source-key)에 있습니다. 배포는 일부러 수동으로 하도록 했습니다. 저장소의 자동화는 변경 사항을 테스트할 뿐, 게시하거나 운영 데이터를 대신 마이그레이션하지 않습니다.
 
 **첫 배포와 업그레이드는 서로 다른 작업입니다.** 안내형 설치는 리소스를 만들거나 가져오고, 검토를 거친 설치를 구성합니다. 이미 교회 데이터가 있는 사이트를 무인으로 한 번에 업그레이드하는 방법이 아닙니다. 기존 운영자는 먼저 [업그레이드 런북](docs/upgrade.md)을 읽고, 데이터베이스, R2 미디어, 설정, 시크릿 목록을 백업하고, 스테이징 환경에서 리허설을 한 다음, 순방향 마이그레이션을 적용하기 전에 [`Unreleased` 변경 기록](CHANGELOG.md)을 살펴보세요. 릴리스를 준비하는 유지 관리자는 [릴리스 절차](docs/release-process.md)를 따르세요.
 
-**데이터베이스 고르기.** D1 호환 모듈 20개에는 Postgres가 필요한 **헌금**과 **행사 등록**이 포함되지 않습니다. 필요한 계정은 모드에 따라 달라집니다. 로컬 D1은 외부 계정이 필요 없고, 배포한 D1은 Cloudflare 계정이 필요하며, 로컬 Supabase는 Supabase 계정이나 호환되는 로컬 Postgres 데이터베이스가 필요하고, 배포한 Supabase는 Cloudflare와 Supabase가 모두 필요합니다. D1과 Supabase 사이에서 콘텐츠를 자동 이전하는 기능은 아직 없으므로, 실제 콘텐츠를 입력하기 전에 운영 환경의 데이터베이스를 정하세요. [**`docs/supabase-setup.md`**](docs/supabase-setup.md)를 참고하세요.
+**데이터베이스 고르기.** D1 호환 모듈 22개에는 둘 다 Postgres가 필요한 **헌금**과 **유료 행사 등록**이 포함되지 않습니다. 필요한 계정은 모드에 따라 달라집니다. 로컬 D1은 외부 계정이 필요 없고, 배포한 D1은 Cloudflare 계정이 필요하며, 로컬 Supabase는 Supabase 계정이나 호환되는 로컬 Postgres 데이터베이스가 필요하고, 배포한 Supabase는 Cloudflare와 Supabase가 모두 필요합니다. D1과 Supabase 사이에서 콘텐츠를 자동 이전하는 기능은 아직 없으므로, 실제 콘텐츠를 입력하기 전에 운영 환경의 데이터베이스를 정하세요. [**`docs/supabase-setup.md`**](docs/supabase-setup.md)를 참고하세요.
 
-**Stripe는 테스트 모드로 시작하며, 실제 모드는 명시적으로 선택해야 합니다.** Stripe가 결제 페이지, 영수증, Billing Portal, 환불, 분쟁을 호스팅하고, 이 애플리케이션은 금액, 헌금 항목, 날짜, 상태, Stripe ID만 저장합니다. 헌금과 행사 등록은 Supabase 전용이며, D1은 이 모듈들을 지원하지 않습니다. 설치 프로그램이 이 두 모듈 중 하나를 물어 오면, 일회성 환경 변수 `CHURCH_SETUP_STRIPE_SECRET_KEY`와 `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET`으로 `sk_test_…` 키와 `whsec_…` 서명 시크릿을 가져옵니다. 설치 프로그램이 런타임 시크릿을 저장하고 `STRIPE_MODE=test`를 기록합니다. 실제 후원을 받으려면 Supabase 안내서의 서비스 시작 체크리스트(실제 키, API 버전 `2025-03-31.basil`의 webhook, `STRIPE_MODE=live`와 `STRIPE_LIVE_CONFIRMED=1`)를 따르세요. 설정된 모드와 맞지 않는 이벤트는 거부되며, Supabase를 쓰는 Worker는 5분마다 지속적인 복구를 실행합니다. 로컬 테스트로는 Stripe의 실제 전달이 되는지 증명할 수 없습니다.
+**Stripe는 테스트 모드로 시작하며, 실제 모드는 명시적으로 선택해야 합니다.** Stripe가 결제 페이지, 영수증, Billing Portal, 환불, 분쟁을 호스팅하고, 이 애플리케이션은 금액, 헌금 항목, 날짜, 상태, Stripe ID만 저장합니다. 헌금과 유료 행사 등록은 Supabase 전용이며, D1은 이를 지원하지 않습니다. 설치 프로그램이 이 두 모듈 중 하나를 물어 오면, 일회성 환경 변수 `CHURCH_SETUP_STRIPE_SECRET_KEY`와 `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET`으로 `sk_test_…` 키와 `whsec_…` 서명 시크릿을 가져옵니다. 설치 프로그램이 런타임 시크릿을 저장하고 `STRIPE_MODE=test`를 기록합니다. 실제 후원을 받으려면 Supabase 안내서의 서비스 시작 체크리스트(실제 키, API 버전 `2025-03-31.basil`의 webhook, `STRIPE_MODE=live`와 `STRIPE_LIVE_CONFIRMED=1`)를 따르세요. 설정된 모드와 맞지 않는 이벤트는 거부되며, Supabase를 쓰는 Worker는 5분마다 지속적인 복구를 실행합니다. 로컬 테스트로는 Stripe의 실제 전달이 되는지 증명할 수 없습니다.
 
 ---
 

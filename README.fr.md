@@ -41,7 +41,7 @@ portail des membres et d'autres processus de gestion d'église. Le projet vise �
 coût de démarrage et de maintenance continue d'une mise en œuvre personnalisée, tout en laissant le
 code et la configuration de déploiement à la disposition de ceux qui l'exploitent.
 
-La **version source actuelle est la 1.6**. Church4Christ est une base libre,
+La **version source actuelle est la 1.7**. Church4Christ est une base libre,
 et non un service géré clés en main. L'évaluation en local est gratuite et certains déploiements
 peuvent tenir dans les quotas gratuits des fournisseurs, mais l'hébergement de production,
 la messagerie, les bases de données, les noms de domaine, les sauvegardes et d'autres services peuvent être facturés selon la
@@ -253,7 +253,8 @@ Chaque fonctionnalité a son propre guide en langage simple. Commencez par l'un 
 | [![](docs/images/learning/genesis-1-en.png)](docs/features/learning.md) | **[Formation](docs/features/learning.md)** | Poursuivez l'école du dimanche et le discipulat entre les rencontres avec des vidéos bilingues, des fichiers, des devoirs, des quiz et un statut synchronisé avec le fournisseur. |
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Éditeur de pages](docs/features/page-builder.md)** | Assemblez vos propres pages personnalisées par glisser-déposer — multilingues, toujours fidèles au thème, et les pages publiées se chargent sans aucun JavaScript. Optionnel ; le désactiver ne casse jamais une page déjà créée. |
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Dons](docs/features/giving.md)** | Implémenté : dons en ligne via Stripe (mode test par défaut, mode réel après la liste de contrôle de mise en production), registre hors ligne pour les chèques et les espèces, et relevés annuels de dons. |
-| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Inscriptions](docs/features/registration.md)** | Implémenté : inscription gratuite aux événements, questions personnalisées et export de la liste des participants, ainsi que paiement Stripe dans le même mode Stripe que Dons (vérifiez avec une petite inscription réelle avant de vous y fier). |
+| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Inscriptions](docs/features/registration.md)** | Implémenté : inscription gratuite aux événements sur D1 ou Supabase, questions personnalisées, liste d'attente, étapes de l'événement et export de la liste des participants, ainsi que paiement Stripe sur Supabase dans le même mode Stripe que Dons (vérifiez avec une petite inscription réelle avant de vous y fier). |
+|  | **[Logistique des événements](docs/features/event-logistics.md)** | Complément facultatif d'Inscriptions : répartissez les participants dans des chambres, placez-les à table avec un aperçu du Placement automatique, répartissez-les en petits groupes et imprimez les listes de chambres, les affichettes de porte et les cartons de table. |
 | [![](docs/images/portal/member-opportunities.png)](docs/features/member-portal.md) | **[Portail des membres](docs/features/member-portal.md)** | Un espace unique après connexion pour la participation en cours et les occasions ouvertes, avec les fiches de foyer, les événements, le service, le calendrier, les dons et la prière à périmètre limité. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Douze langues](docs/features/i18n.md)** | Choisissez parmi 12 langues d'interface par site, avec l'anglais en repli et la conversion en un clic du chinois simplifié vers le chinois traditionnel. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[E-mail et automatisation](docs/features/email-automation.md)** | Liens de connexion, rappels et synthèses, avec journalisation locale et une configuration de production compatible avec les offres payantes. |
@@ -262,7 +263,7 @@ Chaque fonctionnalité a son propre guide en langage simple. Commencez par l'un 
 **Choisissez vos modules.** La plupart des fonctionnalités métier optionnelles sont des **modules** que vous pouvez désactiver
 depuis un seul panneau des Paramètres — bulletins, prédications, mur de prière, planning des bénévoles
 et plus encore. Les nouvelles installations écrivent explicitement chaque paramètre de module à partir de la sélection d'installation ;
-la démo Full Church sélectionne ses 21 modules (Service Planning s'active séparément). Sur les anciennes installations uniquement, les lignes de module manquantes conservent
+la démo Full Church sélectionne ses 21 modules (Service Planning et Event Logistics s'activent séparément). Sur les anciennes installations uniquement, les lignes de module manquantes conservent
 l'ancien comportement d'activation par défaut. Une église qui ne veut que les horaires des cultes et les prédications peut masquer
 le reste en un clic : les pages, les liens et les e-mails du module disparaissent ensemble, et rien
 n'est supprimé. Consultez [**`docs/features/modules.md`**](docs/features/modules.md).
@@ -288,9 +289,10 @@ n'est supprimé. Consultez [**`docs/features/modules.md`**](docs/features/module
 | `page-builder` | Page Builder | 页面编辑器 | Either |
 | `portal` | Member Portal | 会友平台 | Either |
 | `giving` | Giving | 奉献 | Supabase |
-| `registration` | Registration | 活动报名 | Supabase |
+| `registration` | Registration | 活动报名 | Either |
 | `learning` | Learning | 学习 | Either |
 | `planning` | Service Planning | 服事流程 | Either |
+| `event-logistics` | Event Logistics | 活动后勤 | Either |
 
 ### Gestion de la communauté et processus
 
@@ -344,7 +346,7 @@ limité à l'ensemble de l'espace `/admin`.
 Le portail fonctionne à la fois sur le back-end D1 par défaut et sur le back-end optionnel **Supabase (Postgres)**.
 Les foyers, les groupes, les fichiers protégés de groupe et la modération des prières d'église, de groupe et privées
 fonctionnent sur D1. Les prières liées à un événement, les administrateurs d'événements et « Mes inscriptions »
-nécessitent Inscriptions, qui n'existe que sur Supabase. Pour en savoir plus, consultez
+nécessitent Inscriptions, qui fonctionne sur D1 pour les événements gratuits une fois activé. Pour en savoir plus, consultez
 [**`docs/features/member-portal.md`**](docs/features/member-portal.md).
 
 ---
@@ -379,7 +381,7 @@ le slogan, l'adresse, le fuseau horaire, les couleurs principale et secondaire, 
 (jusqu'à 2 Mio), la langue, le premier administrateur et le choix du contenu de démonstration. Ne cochez que les
 fonctionnalités dont vous avez besoin.
 La sélection recommandée utilise D1 comme base de données ; l'application tourne toujours sur
-Cloudflare Workers et stocke les médias sur R2. **Dons et Inscriptions**
+Cloudflare Workers et stocke les médias sur R2. **Dons et Inscriptions payantes**
 sont des options avancées qui exigent de passer explicitement à PostgreSQL compatible Supabase.
 
 L'enregistrement écrit `.church/preferences.json` et tout logo téléversé dans `.church/`, que
@@ -427,8 +429,8 @@ le [processus de revue ou de récupération d'identité](docs/features/member-id
 
 La commande `npm run setup`, en terminal uniquement, reste disponible. L'installation propose **Website** (8 modules de
 publication ciblés), **Website + Community** (18 modules ; le Portail des membres peut être ajouté sur D1) et
-**Full Church** (21 modules ; Service Planning s'active séparément). Dons et
-Inscriptions sélectionnent Supabase automatiquement ; les sélections compatibles D1 choisissent D1, sauf si vous
+**Full Church** (21 modules ; Service Planning s'active séparément). Dons
+sélectionne Supabase automatiquement (les Inscriptions gratuites fonctionnent sur D1) ; les sélections compatibles D1 choisissent D1, sauf si vous
 remplacez explicitement le back-end. Les comptes requis dépendent du mode Local ou Deploy,
 comme détaillé plus bas. Pour l'automatisation, passez toutes les réponses avec `--yes` ; ajoutez `--json` pour obtenir un unique résultat
 lisible par une machine. Pour une exécution non interactive lisible par un humain, utilisez les mêmes options complètes
@@ -452,7 +454,7 @@ Ce sont des profils de planification, non des garanties de prix. Les tarifs ci-d
 | Profil | Périmètre inclus | Notes sur les coûts et la préparation |
 |---|---|---|
 | **Évaluation locale** | Modules de site web ou de communauté avec D1 en local ; modules complets avec Postgres local compatible | Aucun frais de service hébergé n'est requis pour une évaluation avec D1 en local. Vous fournissez toujours l'ordinateur, le temps de développement et les éventuels services externes optionnels. |
-| **D1 site web/communauté** | Worker Cloudflare, D1 et R2 pour jusqu'à 20 modules compatibles D1 | Un déploiement modeste peut tenir dans les quotas gratuits de Cloudflare. Le trafic, le stockage, les opérations au-delà des quotas, un nom de domaine et d'autres services peuvent coûter de l'argent ; consultez les [tarifs de Workers](https://developers.cloudflare.com/workers/platform/pricing/). La messagerie de production est à part. |
+| **D1 site web/communauté** | Worker Cloudflare, D1 et R2 pour jusqu'à 22 modules compatibles D1 | Un déploiement modeste peut tenir dans les quotas gratuits de Cloudflare. Le trafic, le stockage, les opérations au-delà des quotas, un nom de domaine et d'autres services peuvent coûter de l'argent ; consultez les [tarifs de Workers](https://developers.cloudflare.com/workers/platform/pricing/). La messagerie de production est à part. |
 | **Messagerie de production** | Liens de connexion, rappels, demandes et synthèses transactionnels vers des destinataires quelconques | Le dépôt prend en charge une configuration de messagerie Cloudflare compatible avec les offres payantes. L'envoi à des destinataires quelconques exige Workers Paid, actuellement au minimum **5 $/mois**, comprenant **3 000 e-mails**, puis **0,35 $ par 1 000 e-mails**. Ces montants sont susceptibles de changer ; consultez les [tarifs de Cloudflare Email Service](https://developers.cloudflare.com/email-service/platform/pricing/). |
 | **Supabase/modules complets** | Déploiement Cloudflare plus Supabase/Postgres pour les 21 modules de Full Church, dont le Portail des membres, Dons et Inscriptions | Les coûts Cloudflare s'appliquent toujours, et le [plan Supabase](https://supabase.com/pricing) choisi peut ajouter un abonnement ou des frais d'usage. En août 2026, Supabase Free n'offre pas de sauvegardes quotidiennes automatiques, et les projets Free peu actifs peuvent être [mis en pause automatiquement](https://supabase.com/docs/guides/platform/free-project-pausing) selon l'activité sur une période de sept jours. En production, effectuez des sauvegardes régulières de la base de données hors site et des exercices de restauration, ou choisissez un plan payant dont les [options de sauvegarde](https://supabase.com/docs/guides/platform/backups) répondent à vos exigences de continuité. Les tarifs et les politiques de service sont susceptibles de changer. Stripe démarre en mode test ; les paiements réels sont un choix explicite à faire après la liste de contrôle de mise en production de [`docs/supabase-setup.md`](docs/supabase-setup.md). |
 
@@ -473,7 +475,7 @@ complet.
 
 Commencez par `npm run setup`, choisissez **Deploy** et répondez aux questions sur les fonctionnalités et sur l'église.
 Il crée ou importe les ressources nécessaires, écrit la configuration générée, applique les
-migrations, enregistre les 22 paramètres de module et initialise le premier administrateur. Il passe ensuite
+migrations, enregistre les 23 paramètres de module et initialise le premier administrateur. Il passe ensuite
 la main à `npm run deploy`. Lancez `npm run doctor` pour obtenir le rapport de préparation schema-v2, et utilisez
 la liste de contrôle toujours disponible à `/admin/onboarding` pour les mêmes identifiants de contrôle stables.
 Dons, Inscriptions, Groupes, Équipes, Nouveaux venus, les imports et l'intégration optionnelle en lecture seule de Planning
@@ -492,8 +494,8 @@ secrets, répéter l'opération en préproduction et relire le [journal des modi
 d'appliquer les migrations vers l'avant. Les mainteneurs qui préparent une version doivent suivre
 le [processus de publication](docs/release-process.md).
 
-**Choisir votre base de données.** Les 20 modules compatibles D1 excluent
-**Dons** et **Inscriptions**, qui exigent Postgres. Les comptes requis suivent le
+**Choisir votre base de données.** Les 22 modules compatibles D1 excluent
+**Dons**, qui exige Postgres, ainsi que les **Inscriptions payantes**, qui l'exigent aussi. Les comptes requis suivent le
 mode : D1 en local ne nécessite aucun compte externe ; D1 déployé nécessite un compte Cloudflare ; Supabase
 en local nécessite un compte Supabase ou une base Postgres locale compatible ; Supabase déployé
 nécessite à la fois Cloudflare et Supabase. Il n'existe pas encore de migration automatisée de contenu entre D1 et Supabase,
@@ -502,8 +504,8 @@ choisissez donc la base de données de production avant de saisir du contenu ré
 
 **Stripe démarre en mode test ; le mode réel est un choix explicite.** Stripe héberge les pages de paiement,
 les reçus, le Billing Portal, les remboursements et les litiges ; cette application ne conserve que les montants,
-les fonds, les dates, les statuts et les identifiants Stripe. Dons et Inscriptions n'existent que sur Supabase ; D1 ne
-prend pas en charge ces modules. Lorsque l'installation demande l'un de ces modules, importez une clé `sk_test_…` et
+les fonds, les dates, les statuts et les identifiants Stripe. Dons et les Inscriptions payantes n'existent que sur Supabase ; D1 ne
+les prend pas en charge. Lorsque l'installation demande l'un de ces modules, importez une clé `sk_test_…` et
 un secret de signature `whsec_…` avec les variables d'environnement à usage unique `CHURCH_SETUP_STRIPE_SECRET_KEY` et
 `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET` ; l'installation conserve les secrets d'exécution
 et écrit `STRIPE_MODE=test`. Pour recevoir de vrais dons, suivez la liste de contrôle de mise en production du

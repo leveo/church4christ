@@ -27,7 +27,7 @@
 
 Church4Christ 把多语言的公开网站与后台管理系统结合起来，涵盖内容、祷告关怀、服事排班、会友和家庭。可选模块还提供会友平台及其他教会管理流程。本项目希望降低定制化实施的启动成本和长期维护成本，同时让运营者始终掌握代码和部署配置。
 
-**当前源码版本为 1.6**。Church4Christ 是一个开源的基础框架，而不是开箱即用的托管服务。本地试用免费，部分部署可以落在服务商的免费额度之内，但正式环境的托管、邮件、数据库、域名、备份及其他服务可能会按配置和用量收费。在选择正式环境的部署方式之前，请先查看[部署方案与费用](#部署方案与费用)。
+**当前源码版本为 1.7**。Church4Christ 是一个开源的基础框架，而不是开箱即用的托管服务。本地试用免费，部分部署可以落在服务商的免费额度之内，但正式环境的托管、邮件、数据库、域名、备份及其他服务可能会按配置和用量收费。在选择正式环境的部署方式之前，请先查看[部署方案与费用](#部署方案与费用)。
 
 |  |  |  |
 |---|---|---|
@@ -162,13 +162,14 @@ Planning Center 及上文提到的其他产品名称均为其各自所有者的�
 | [![](docs/images/learning/genesis-1-en.png)](docs/features/learning.md) | **[学习](docs/features/learning.md)** | 通过双语视频、文件、作业、测验以及与服务商同步的状态，让主日学和门徒训练在聚会之间延续。 |
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[页面编辑器](docs/features/page-builder.md)** | 用拖放方式拼出你自己的自定义页面，支持多语言，始终贴合主题，发布后的页面零 JavaScript。可选功能；关闭它不会破坏你已经建好的页面。 |
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[奉献](docs/features/giving.md)** | 已实现：通过 Stripe 的线上奉献（默认为测试模式，完成上线清单后切换为正式模式）、记录支票和现金的线下账本，以及年度奉献报表。 |
-| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[活动报名](docs/features/registration.md)** | 已实现：免费活动报名、自定义问题和名单导出，另有 Stripe 付费结账，与奉献使用相同的 Stripe 模式（正式依赖它之前，请先用一笔小额的正式报名验证）。 |
+| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[活动报名](docs/features/registration.md)** | 已实现：可在 D1 或 Supabase 上运行的免费活动报名、自定义问题、候补名单、活动阶段和名单导出，另有在 Supabase 上运行的 Stripe 付费结账，与奉献使用相同的 Stripe 模式（正式依赖它之前，请先用一笔小额的正式报名验证）。 |
+|  | **[活动后勤](docs/features/event-logistics.md)** | 活动报名的可选附加功能：为参加者分配房间，借助“自动排座”预览安排餐桌座位，把人分进小组，并打印房间名单、门牌和桌卡。 |
 | [![](docs/images/portal/member-opportunities.png)](docs/features/member-portal.md) | **[会友平台](docs/features/member-portal.md)** | 一个登录后的入口，集中显示目前的参与情况和开放的机会，另有家庭资料、活动、服事、日历、奉献，以及限定范围的祷告。 |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[十二种语言](docs/features/i18n.md)** | 每个站点可从 12 种界面语言中选择，缺失时回退到英文，并支持一键简体转繁体中文。 |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[邮件与自动化](docs/features/email-automation.md)** | 登录链接、提醒和摘要，本地环境记录日志，并提供可使用付费服务的正式配置。 |
 | [![](docs/images/admin/settings-modules.png)](docs/features/modules.md) | **[功能模块](docs/features/modules.md)** | 关闭用不到的功能；不会删除任何内容，随时可以重新开启。 |
 
-**选择你的模块。** 大部分可选的功能领域都是**模块**，可以在设置的同一个面板里关闭，包括周报、讲道、祷告墙、服事排班等等。新安装会根据安装时的选择，明确写入每个模块的设置；Full Church 演示选用其中 21 个（服事流程需要另外开启）。只有旧版安装中，缺失的模块记录才会保持以前默认开启的行为。如果某间教会只想要崇拜时间和讲道，一键就能隐藏其余功能：该模块的页面、链接和邮件会一并消失，也不会删除任何内容。请参阅 [**`docs/features/modules.md`**](docs/features/modules.md)。
+**选择你的模块。** 大部分可选的功能领域都是**模块**，可以在设置的同一个面板里关闭，包括周报、讲道、祷告墙、服事排班等等。新安装会根据安装时的选择，明确写入每个模块的设置；Full Church 演示选用其中 21 个（服事流程和活动后勤需要另外开启）。只有旧版安装中，缺失的模块记录才会保持以前默认开启的行为。如果某间教会只想要崇拜时间和讲道，一键就能隐藏其余功能：该模块的页面、链接和邮件会一并消失，也不会删除任何内容。请参阅 [**`docs/features/modules.md`**](docs/features/modules.md)。
 
 | Key | English | 中文 | Required database |
 |---|---|---|---|
@@ -191,9 +192,10 @@ Planning Center 及上文提到的其他产品名称均为其各自所有者的�
 | `page-builder` | Page Builder | 页面编辑器 | Either |
 | `portal` | Member Portal | 会友平台 | Either |
 | `giving` | Giving | 奉献 | Supabase |
-| `registration` | Registration | 活动报名 | Supabase |
+| `registration` | Registration | 活动报名 | Either |
 | `learning` | Learning | 学习 | Either |
 | `planning` | Service Planning | 服事流程 | Either |
+| `event-logistics` | Event Logistics | 活动后勤 | Either |
 
 ### 社群管理与工作流程
 
@@ -225,7 +227,7 @@ Planning Center 及上文提到的其他产品名称均为其各自所有者的�
 
 ![会友发现机会，以及限定资源范围的负责人管理流程](docs/images/diagrams/member-opportunity-workflow.png)
 
-会友平台既可以运行在默认的 D1 后端上，也可以运行在可选的 **Supabase（Postgres）**后端上。家庭、小组、受保护的小组文件，以及教会、小组和私人祷告的审核，都可以在 D1 上使用。活动范围的祷告、活动管理员和“我的报名”需要活动报名模块，而它只能用于 Supabase。详情请参阅 [**`docs/features/member-portal.md`**](docs/features/member-portal.md)。
+会友平台既可以运行在默认的 D1 后端上，也可以运行在可选的 **Supabase（Postgres）**后端上。家庭、小组、受保护的小组文件，以及教会、小组和私人祷告的审核，都可以在 D1 上使用。活动范围的祷告、活动管理员和“我的报名”需要活动报名模块；启用之后，免费活动的报名可以在 D1 上运行。详情请参阅 [**`docs/features/member-portal.md`**](docs/features/member-portal.md)。
 
 ---
 
@@ -252,7 +254,7 @@ node scripts/setup/index.mjs --preferences .church/preferences.json --yes --json
 npm run dev
 ```
 
-表单会询问这是教会、非营利组织还是堂点，并收集名称、标语、地址、时区、主色和辅色、可选的 PNG/JPEG/WebP 标志（最大 2 MiB）、语言、第一位管理员，以及是否使用演示内容。只勾选你需要的功能。推荐的选择使用 D1 作为数据库；应用仍然运行在 Cloudflare Workers 上，媒体文件存放在 R2 中。**奉献和活动报名**是进阶选项，需要明确切换到兼容 Supabase 的 PostgreSQL。
+表单会询问这是教会、非营利组织还是堂点，并收集名称、标语、地址、时区、主色和辅色、可选的 PNG/JPEG/WebP 标志（最大 2 MiB）、语言、第一位管理员，以及是否使用演示内容。只勾选你需要的功能。推荐的选择使用 D1 作为数据库；应用仍然运行在 Cloudflare Workers 上，媒体文件存放在 R2 中。**奉献和付费活动报名**是进阶选项，需要明确切换到兼容 Supabase 的 PostgreSQL。
 
 保存时会把 `.church/preferences.json` 和上传的标志写入 `.church/`，Git 会忽略这个目录。保存不会创建数据库，也不会部署网站。再次运行 `npm run onboard` 可以重新载入并编辑已保存的偏好。填写表单期间请让终端保持运行，完成后按 Ctrl+C 停止。若想自己打开终端打印出的网址，请使用 `npm run onboard -- --no-open`；要指定端口，请加上 `--port 4310`。直接入口是 `node scripts/onboard/index.mjs`。安装程序会应用哪些设置，以及代理如何使用其余的偏好，请参阅[安装指南](docs/setup.md)。
 
@@ -270,7 +272,7 @@ npm run dev
 
 两种内容模式下，安装程序都会同时创建一位新的管理员及其有审计记录的登录身份。重复执行会保留现有的联系人归属；它们不会验证已有的邮箱，也不会恢复已被撤销的权限。如果安装程序报告身份方面的问题，请先完成[身份审核或恢复流程](docs/features/member-identity.md)，再重新执行。
 
-仅限终端的 `npm run setup` 依然可用。安装程序提供 **Website**（8 个专注于发布的模块）、**Website + Community**（18 个模块；在 D1 上可加入会友平台）和 **Full Church**（21 个模块；服事流程需要另外开启）。奉献和活动报名会自动选择 Supabase；与 D1 兼容的选择会选用 D1，除非你明确覆盖后端。所需的账号取决于本地还是部署模式，详见下文。若要自动化，请用 `--yes` 传入所有答案；再加上 `--json` 可得到一份机器可读的结果。若要以人类可读的方式进行非交互式运行，请使用同样完整的参数，执行 `npm run setup -- ... --yes` 并省略 `--json`。若要让 npm 输出的 stdout 保持严格的 JSON，请使用静默形式：
+仅限终端的 `npm run setup` 依然可用。安装程序提供 **Website**（8 个专注于发布的模块）、**Website + Community**（18 个模块；在 D1 上可加入会友平台）和 **Full Church**（21 个模块；服事流程需要另外开启）。奉献会自动选择 Supabase（免费活动报名可在 D1 上运行）；与 D1 兼容的选择会选用 D1，除非你明确覆盖后端。所需的账号取决于本地还是部署模式，详见下文。若要自动化，请用 `--yes` 传入所有答案；再加上 `--json` 可得到一份机器可读的结果。若要以人类可读的方式进行非交互式运行，请使用同样完整的参数，执行 `npm run setup -- ... --yes` 并省略 `--json`。若要让 npm 输出的 stdout 保持严格的 JSON，请使用静默形式：
 
 ```bash
 npm run --silent setup -- --mode local --preset website --site-slug my-church \
@@ -288,7 +290,7 @@ npm run --silent setup -- --mode local --preset website --site-slug my-church \
 | 方案 | 包含范围 | 费用与就绪说明 |
 |---|---|---|
 | **本地试用** | 使用本地 D1 的网站或社群模块；使用兼容的本地 Postgres 的全部模块 | 本地 D1 试用不需要支付任何托管服务费用。你仍需自备电脑、开发时间和任何可选的外部服务。 |
-| **D1 网站/社群** | Cloudflare Worker、D1 和 R2，最多 20 个与 D1 兼容的模块 | 小规模的部署可以落在 Cloudflare 的免费额度之内。流量、存储、超出额度的操作、域名和其他服务可能产生费用，请查看 [Workers 定价](https://developers.cloudflare.com/workers/platform/pricing/)。正式环境的邮件另行计算。 |
+| **D1 网站/社群** | Cloudflare Worker、D1 和 R2，最多 22 个与 D1 兼容的模块 | 小规模的部署可以落在 Cloudflare 的免费额度之内。流量、存储、超出额度的操作、域名和其他服务可能产生费用，请查看 [Workers 定价](https://developers.cloudflare.com/workers/platform/pricing/)。正式环境的邮件另行计算。 |
 | **正式环境邮件** | 向任意收件人发送事务性的登录链接、提醒、申请和摘要 | 本仓库支持可使用付费服务的 Cloudflare 邮件配置。向任意收件人发送需要 Workers Paid，目前最低 **每月 5 美元**，包含 **3,000 封邮件**，超出部分为 **每 1,000 封 0.35 美元**。这些金额可能变动，请查看 [Cloudflare Email Service 定价](https://developers.cloudflare.com/email-service/platform/pricing/)。 |
 | **Supabase/全部模块** | Cloudflare 部署，加上 Supabase/Postgres，用于 21 个 Full Church 模块，包括会友平台、奉献和活动报名 | Cloudflare 的费用依然适用，所选的 [Supabase 方案](https://supabase.com/pricing)可能增加订阅费或用量费。截至 2026 年 8 月，Supabase Free 没有自动的每日备份，活动量低的 Free 项目可能会根据七天内的活动情况被[自动暂停](https://supabase.com/docs/guides/platform/free-project-pausing)。正式环境请定期做异地的数据库转储并演练还原，或者选择[备份选项](https://supabase.com/docs/guides/platform/backups)能满足你业务连续性要求的付费方案。定价和服务政策可能变动。Stripe 从测试模式开始；正式收款需要在完成 [`docs/supabase-setup.md`](docs/supabase-setup.md) 中的上线清单之后，明确选择启用。 |
 
@@ -300,13 +302,13 @@ npm run --silent setup -- --mode local --preset website --site-slug my-church \
 
 刚接触？请先看 [**`docs/cloudflare-setup.md`**](docs/cloudflare-setup.md)，这份白话指南会说明 Cloudflare 是什么、费用模式，以及上线的两种方式（包括让 AI 助手代劳）。需要具体命令时，[**`docs/deploy.md`**](docs/deploy.md) 提供完整的分步说明。
 
-先运行 `npm run setup`，选择 **Deploy**，回答功能和教会方面的问题。它会创建或导入所需的资源，写入生成的配置，应用迁移，记录全部 22 项模块设置，并建立第一位管理员。然后交接给 `npm run deploy`。运行 `npm run doctor` 可得到 schema-v2 的就绪报告，也可以使用始终开启的 `/admin/onboarding` 清单，它使用同样稳定的检查标识。奉献、活动报名、小组、团队、新朋友、导入，以及可选的只读 Planning Center 集成，共用一个有凭证绑定、先审核再合并的身份网关。它绝不会仅凭姓名或未验证的联系方式自动合并会友。工作流程、防欺诈控制、目前的迁移边界和服务商验证方面的缺口，请参阅[会友身份](docs/features/member-identity.md)；密钥的设置和轮换规则仍记录在[部署手册](docs/deploy.md#stable-identity-source-key)中。部署刻意设计为手动操作：仓库的自动化只会测试改动，不会替你发布改动，也不会迁移正式环境的数据。
+先运行 `npm run setup`，选择 **Deploy**，回答功能和教会方面的问题。它会创建或导入所需的资源，写入生成的配置，应用迁移，记录全部 23 项模块设置，并建立第一位管理员。然后交接给 `npm run deploy`。运行 `npm run doctor` 可得到 schema-v2 的就绪报告，也可以使用始终开启的 `/admin/onboarding` 清单，它使用同样稳定的检查标识。奉献、活动报名、小组、团队、新朋友、导入，以及可选的只读 Planning Center 集成，共用一个有凭证绑定、先审核再合并的身份网关。它绝不会仅凭姓名或未验证的联系方式自动合并会友。工作流程、防欺诈控制、目前的迁移边界和服务商验证方面的缺口，请参阅[会友身份](docs/features/member-identity.md)；密钥的设置和轮换规则仍记录在[部署手册](docs/deploy.md#stable-identity-source-key)中。部署刻意设计为手动操作：仓库的自动化只会测试改动，不会替你发布改动，也不会迁移正式环境的数据。
 
 **首次部署和升级是两种不同的操作。** 引导式安装会创建或导入资源，并建立一个经过审核的安装。对于已存有教会数据的站点，它并不是无人值守的一键升级。现有的运营者应当先阅读[升级手册](docs/upgrade.md)，备份数据库、R2 媒体、配置和密钥清单，在预发布环境中演练，并在应用向前迁移之前查看 [`Unreleased` 更新日志](CHANGELOG.md)。准备发布版本的维护者，请遵循[发布流程](docs/release-process.md)。
 
-**选择你的数据库。** 20 个与 D1 兼容的模块不包含**奉献**和**活动报名**，这两个模块需要 Postgres。所需的账号取决于模式：本地 D1 不需要任何外部账号；部署 D1 需要 Cloudflare 账号；本地 Supabase 需要 Supabase 账号或兼容的本地 Postgres 数据库；部署 Supabase 则需要 Cloudflare 和 Supabase 两者。目前还没有自动的 D1 与 Supabase 之间的内容迁移，所以请在输入真实内容之前，先选定正式环境的数据库。请参阅 [**`docs/supabase-setup.md`**](docs/supabase-setup.md)。
+**选择你的数据库。** 22 个与 D1 兼容的模块不包含**奉献**和**付费活动报名**，两者都需要 Postgres。所需的账号取决于模式：本地 D1 不需要任何外部账号；部署 D1 需要 Cloudflare 账号；本地 Supabase 需要 Supabase 账号或兼容的本地 Postgres 数据库；部署 Supabase 则需要 Cloudflare 和 Supabase 两者。目前还没有自动的 D1 与 Supabase 之间的内容迁移，所以请在输入真实内容之前，先选定正式环境的数据库。请参阅 [**`docs/supabase-setup.md`**](docs/supabase-setup.md)。
 
-**Stripe 从测试模式开始；切换到正式模式需要明确选择启用。** Stripe 负责托管付款页面、收据、Billing Portal、退款和争议；本应用只保存金额、奉献项目、日期、状态和 Stripe 的 id。奉献和活动报名只能用于 Supabase；D1 不支持这些模块。当安装程序询问这两个模块之一时，请用一次性的 `CHURCH_SETUP_STRIPE_SECRET_KEY` 和 `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET` 环境变量导入 `sk_test_…` 密钥和 `whsec_…` 签名密钥；安装程序会保存运行时的密钥，并写入 `STRIPE_MODE=test`。要接收真实的奉献，请遵循 Supabase 指南中的上线清单（正式密钥、API 版本为 `2025-03-31.basil` 的 webhook、`STRIPE_MODE=live` 加上 `STRIPE_LIVE_CONFIRMED=1`）。模式与所配置的模式不符的事件会被拒绝，由 Supabase 支撑的 Worker 每五分钟执行一次持久化恢复。本地测试并不能证明 Stripe 的正式投递能够成功。
+**Stripe 从测试模式开始；切换到正式模式需要明确选择启用。** Stripe 负责托管付款页面、收据、Billing Portal、退款和争议；本应用只保存金额、奉献项目、日期、状态和 Stripe 的 id。奉献和付费活动报名只能用于 Supabase；D1 不支持它们。当安装程序询问这两个模块之一时，请用一次性的 `CHURCH_SETUP_STRIPE_SECRET_KEY` 和 `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET` 环境变量导入 `sk_test_…` 密钥和 `whsec_…` 签名密钥；安装程序会保存运行时的密钥，并写入 `STRIPE_MODE=test`。要接收真实的奉献，请遵循 Supabase 指南中的上线清单（正式密钥、API 版本为 `2025-03-31.basil` 的 webhook、`STRIPE_MODE=live` 加上 `STRIPE_LIVE_CONFIRMED=1`）。模式与所配置的模式不符的事件会被拒绝，由 Supabase 支撑的 Worker 每五分钟执行一次持久化恢复。本地测试并不能证明 Stripe 的正式投递能够成功。
 
 ---
 

@@ -41,7 +41,7 @@ cổng thông tin thành viên và những quy trình quản lý Hội Thánh kh
 khởi đầu và bảo trì lâu dài của một hệ thống được tùy biến riêng, đồng thời để mã nguồn và
 cấu hình triển khai luôn nằm trong tay người vận hành.
 
-**Bản phát hành mã nguồn hiện tại là 1.6**. Church4Christ là một nền tảng mã nguồn mở,
+**Bản phát hành mã nguồn hiện tại là 1.7**. Church4Christ là một nền tảng mã nguồn mở,
 không phải một dịch vụ được vận hành trọn gói. Việc dùng thử trên máy cục bộ là miễn phí, và một số cấu hình triển khai
 có thể nằm trong hạn mức miễn phí của nhà cung cấp, nhưng khi chạy thật, máy chủ,
 email, cơ sở dữ liệu, tên miền, sao lưu và các dịch vụ khác có thể tính phí tùy theo
@@ -255,7 +255,8 @@ Mỗi tính năng đều có một hướng dẫn riêng bằng ngôn ngữ đơ
 | [![](docs/images/learning/genesis-1-en.png)](docs/features/learning.md) | **[Học tập](docs/features/learning.md)** | Tiếp tục Trường Chúa Nhật và việc môn đệ hóa giữa các buổi nhóm với video, tệp, bài tập, bài kiểm tra song ngữ và trạng thái được đồng bộ từ nhà cung cấp. |
 | [![](docs/images/admin/page-builder.png)](docs/features/page-builder.md) | **[Trình dựng trang](docs/features/page-builder.md)** | Kéo thả để tự dựng các trang tùy chỉnh — đa ngôn ngữ, luôn hợp giao diện, và các trang đã đăng tải không cần JavaScript. Tùy chọn; tắt đi không làm hỏng trang bạn đã dựng. |
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Dâng hiến](docs/features/giving.md)** | Đã triển khai: dâng hiến trực tuyến qua Stripe (mặc định ở chế độ thử nghiệm, chạy thật sau khi hoàn tất danh sách kiểm tra đưa vào hoạt động), sổ cái ngoại tuyến cho séc và tiền mặt, và bản kê dâng hiến hằng năm. |
-| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Đăng ký](docs/features/registration.md)** | Đã triển khai: đăng ký sự kiện miễn phí, câu hỏi tùy chỉnh và xuất danh sách, cùng thanh toán Stripe có thu phí dùng chung chế độ Stripe với Giving (hãy kiểm tra bằng một lượt đăng ký thật nhỏ trước khi tin cậy dùng). |
+| [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Đăng ký](docs/features/registration.md)** | Đã triển khai: đăng ký sự kiện miễn phí trên D1 hoặc Supabase, câu hỏi tùy chỉnh, danh sách chờ, các giai đoạn sự kiện và xuất danh sách, cùng thanh toán Stripe có thu phí trên Supabase dùng chung chế độ Stripe với Giving (hãy kiểm tra bằng một lượt đăng ký thật nhỏ trước khi tin cậy dùng). |
+|  | **[Hậu cần sự kiện](docs/features/event-logistics.md)** | Phần bổ sung tùy chọn cho Registration: xếp người vào phòng, xếp chỗ ngồi theo bàn với bản xem trước Xếp chỗ tự động, chia người vào các nhóm nhỏ, và in danh sách phòng, biển cửa và thẻ bàn. |
 | [![](docs/images/portal/member-opportunities.png)](docs/features/member-portal.md) | **[Cổng thông tin thành viên](docs/features/member-portal.md)** | Một trung tâm đăng nhập duy nhất cho việc tham gia hiện tại và các cơ hội đang mở, cùng hồ sơ gia đình, sự kiện, hầu việc, lịch, dâng hiến và cầu nguyện theo phạm vi. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Mười hai ngôn ngữ](docs/features/i18n.md)** | Chọn trong 12 ngôn ngữ giao diện cho từng website, có dự phòng tiếng Anh và chuyển đổi một cú nhấp từ tiếng Trung giản thể sang phồn thể. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & tự động hóa](docs/features/email-automation.md)** | Liên kết đăng nhập, lời nhắc và bản tóm tắt, với ghi nhật ký cục bộ và cấu hình chạy thật có thể dùng gói trả phí. |
@@ -264,7 +265,7 @@ Mỗi tính năng đều có một hướng dẫn riêng bằng ngôn ngữ đơ
 **Chọn các mô-đun của bạn.** Hầu hết các khả năng nghiệp vụ tùy chọn là **mô-đun** mà bạn có thể tắt
 từ một bảng điều khiển trong Settings — bản tin, bài giảng, bảng cầu nguyện, xếp lịch tình nguyện viên,
 và nhiều mục khác. Các bản cài đặt mới ghi rõ từng thiết lập mô-đun dựa trên lựa chọn khi cài đặt;
-bản demo Full Church chọn cả 21 mô-đun (Service Planning được bật riêng). Chỉ với các bản cài đặt cũ, những dòng mô-đun còn thiếu giữ
+bản demo Full Church chọn cả 21 mô-đun (Service Planning và Event Logistics được bật riêng). Chỉ với các bản cài đặt cũ, những dòng mô-đun còn thiếu giữ
 hành vi mặc định là bật như trước. Một Hội Thánh chỉ muốn giờ thờ phượng và bài giảng có thể ẩn
 phần còn lại chỉ với một cú nhấp: các trang, liên kết và email của mô-đun biến mất cùng lúc, và không có gì
 bị xóa. Xem [**`docs/features/modules.md`**](docs/features/modules.md).
@@ -290,9 +291,10 @@ bị xóa. Xem [**`docs/features/modules.md`**](docs/features/modules.md).
 | `page-builder` | Page Builder | 页面编辑器 | Either |
 | `portal` | Member Portal | 会友平台 | Either |
 | `giving` | Giving | 奉献 | Supabase |
-| `registration` | Registration | 活动报名 | Supabase |
+| `registration` | Registration | 活动报名 | Either |
 | `learning` | Learning | 学习 | Either |
 | `planning` | Service Planning | 服事流程 | Either |
+| `event-logistics` | Event Logistics | 活动后勤 | Either |
 
 ### Quản lý cộng đồng và quy trình
 
@@ -347,7 +349,7 @@ giới hạn ở khu vực `/admin` đầy đủ.
 Cổng thông tin chạy được trên cả hệ thống D1 mặc định và hệ thống tùy chọn **Supabase (Postgres)**.
 Gia đình, nhóm, tệp nhóm được bảo vệ, và việc kiểm duyệt cầu nguyện cấp Hội Thánh/nhóm/riêng tư
 hoạt động trên D1. Các lời cầu nguyện theo phạm vi sự kiện, quản trị viên sự kiện và "Các lượt đăng ký của tôi"
-cần Registration, vốn chỉ chạy trên Supabase. Xem thêm tại
+cần Registration, mô-đun này chạy trên D1 cho các sự kiện miễn phí sau khi được bật. Xem thêm tại
 [**`docs/features/member-portal.md`**](docs/features/member-portal.md).
 
 ---
@@ -382,7 +384,7 @@ khẩu hiệu, địa chỉ, múi giờ, màu chính và màu phụ, logo PNG/JP
 (tối đa 2 MiB), ngôn ngữ, quản trị viên đầu tiên và lựa chọn về nội dung demo. Chỉ đánh dấu
 những tính năng bạn cần.
 Lựa chọn được khuyến nghị dùng D1 làm cơ sở dữ liệu; ứng dụng vẫn chạy trên
-Cloudflare Workers và lưu phương tiện trong R2. **Giving và Registration**
+Cloudflare Workers và lưu phương tiện trong R2. **Giving và Registration có thu phí**
 là các tùy chọn nâng cao, đòi hỏi phải chủ động chuyển sang PostgreSQL tương thích Supabase.
 
 Việc lưu sẽ ghi `.church/preferences.json` và mọi logo đã tải lên vào `.church/`, thư mục
@@ -430,8 +432,8 @@ email đã có hay khôi phục quyền truy cập bị thu hồi. Nếu quá tr
 
 Lệnh `npm run setup` chỉ dùng terminal vẫn còn. Quá trình cài đặt cung cấp **Website** (8 mô-đun
 xuất bản tập trung), **Website + Community** (18 mô-đun; có thể thêm Cổng thông tin thành viên trên D1) và
-**Full Church** (21 mô-đun; Service Planning được bật riêng). Giving và
-Registration tự động chọn Supabase; các lựa chọn tương thích D1 chọn D1 trừ khi bạn
+**Full Church** (21 mô-đun; Service Planning được bật riêng). Giving
+tự động chọn Supabase (Registration miễn phí chạy trên D1); các lựa chọn tương thích D1 chọn D1 trừ khi bạn
 chủ động ghi đè hệ thống lưu trữ. Yêu cầu về tài khoản phụ thuộc vào chế độ Local hay Deploy,
 như trình bày chi tiết bên dưới. Để tự động hóa, hãy truyền mọi câu trả lời cùng `--yes`; thêm `--json` để có một
 kết quả máy đọc được. Với lần chạy không tương tác mà người đọc được, dùng cùng các
@@ -456,7 +458,7 @@ trước khi triển khai.
 | Mô hình | Phạm vi bao gồm | Ghi chú về chi phí và mức độ sẵn sàng |
 |---|---|---|
 | **Đánh giá cục bộ** | Các mô-đun website hoặc cộng đồng với D1 cục bộ; đầy đủ mô-đun với Postgres cục bộ tương thích | Không phát sinh phí dịch vụ trực tuyến khi đánh giá với D1 cục bộ. Bạn vẫn tự lo máy tính, thời gian phát triển và các dịch vụ bên ngoài tùy chọn. |
-| **D1 website/cộng đồng** | Cloudflare Worker, D1 và R2 cho tối đa 20 mô-đun tương thích D1 | Một bản triển khai khiêm tốn có thể nằm trong hạn mức miễn phí của Cloudflare. Lưu lượng, dung lượng lưu trữ, các thao tác vượt hạn mức, tên miền và dịch vụ khác có thể phát sinh chi phí; xem [giá Workers](https://developers.cloudflare.com/workers/platform/pricing/). Email khi chạy thật được tính riêng. |
+| **D1 website/cộng đồng** | Cloudflare Worker, D1 và R2 cho tối đa 22 mô-đun tương thích D1 | Một bản triển khai khiêm tốn có thể nằm trong hạn mức miễn phí của Cloudflare. Lưu lượng, dung lượng lưu trữ, các thao tác vượt hạn mức, tên miền và dịch vụ khác có thể phát sinh chi phí; xem [giá Workers](https://developers.cloudflare.com/workers/platform/pricing/). Email khi chạy thật được tính riêng. |
 | **Email khi chạy thật** | Liên kết đăng nhập, lời nhắc, yêu cầu và bản tóm tắt dạng giao dịch gửi đến người nhận bất kỳ | Kho mã hỗ trợ một cấu hình email Cloudflare có thể dùng gói trả phí. Việc gửi đến người nhận bất kỳ đòi hỏi Workers Paid, hiện tối thiểu **$5/tháng** gồm **3.000 email**, sau đó **$0,35 cho mỗi 1.000 email**. Các mức này có thể thay đổi; xem [giá Cloudflare Email Service](https://developers.cloudflare.com/email-service/platform/pricing/). |
 | **Supabase/đầy đủ mô-đun** | Triển khai Cloudflare cùng Supabase/Postgres cho 21 mô-đun Full Church, gồm Cổng thông tin thành viên, Giving và Registration | Chi phí Cloudflare vẫn áp dụng, và [gói Supabase](https://supabase.com/pricing) được chọn có thể phát sinh phí đăng ký hoặc phí theo mức sử dụng. Tính đến tháng 8 năm 2026, Supabase Free không có sao lưu hằng ngày tự động, và các dự án Free ít hoạt động có thể [bị tự động tạm dừng](https://supabase.com/docs/guides/platform/free-project-pausing) dựa trên hoạt động trong khoảng bảy ngày. Khi chạy thật, hãy thường xuyên xuất bản sao cơ sở dữ liệu lưu ngoài hệ thống và thực hành khôi phục, hoặc chọn một gói trả phí có [tùy chọn sao lưu](https://supabase.com/docs/guides/platform/backups) đáp ứng yêu cầu về tính liên tục của bạn. Giá và chính sách dịch vụ có thể thay đổi. Stripe bắt đầu ở chế độ thử nghiệm; thanh toán thật là lựa chọn chủ động sau danh sách kiểm tra đưa vào hoạt động trong [`docs/supabase-setup.md`](docs/supabase-setup.md). |
 
@@ -476,7 +478,7 @@ các lệnh cụ thể, [**`docs/deploy.md`**](docs/deploy.md) là hướng dẫ
 
 Hãy bắt đầu với `npm run setup`, chọn **Deploy**, và trả lời các câu hỏi về tính năng và Hội Thánh.
 Nó tạo hoặc nhập các tài nguyên cần thiết, ghi cấu hình được tạo ra, áp dụng các
-migration, ghi lại cả 22 thiết lập mô-đun, và khởi tạo quản trị viên đầu tiên. Sau đó nó bàn giao
+migration, ghi lại cả 23 thiết lập mô-đun, và khởi tạo quản trị viên đầu tiên. Sau đó nó bàn giao
 cho `npm run deploy`. Chạy `npm run doctor` để có báo cáo sẵn sàng schema-v2, và dùng
 danh sách kiểm tra `/admin/onboarding` luôn bật cho cùng các mã định danh kiểm tra ổn định.
 Giving, Registration, Groups, Teams, Newcomer, các lần nhập dữ liệu và tích hợp Planning
@@ -495,8 +497,8 @@ bí mật, diễn tập trên môi trường staging, và xem lại [changelog `
 áp dụng các migration tiến. Những người bảo trì chuẩn bị một bản phát hành nên làm theo
 [quy trình phát hành](docs/release-process.md).
 
-**Chọn cơ sở dữ liệu của bạn.** 20 mô-đun tương thích D1 không bao gồm
-**Giving** và **Registration**, hai mô-đun yêu cầu Postgres. Yêu cầu về tài khoản đi theo
+**Chọn cơ sở dữ liệu của bạn.** 22 mô-đun tương thích D1 không bao gồm
+**Giving**, vốn yêu cầu Postgres, và **Registration có thu phí**, cũng yêu cầu Postgres. Yêu cầu về tài khoản đi theo
 chế độ: D1 cục bộ không cần tài khoản bên ngoài; D1 khi triển khai cần tài khoản Cloudflare; Supabase
 cục bộ cần tài khoản Supabase hoặc một cơ sở dữ liệu Postgres cục bộ tương thích; Supabase khi triển khai
 cần cả Cloudflare và Supabase. Hiện chưa có công cụ tự động chuyển nội dung D1↔Supabase,
@@ -505,8 +507,8 @@ vì vậy hãy chọn cơ sở dữ liệu chạy thật trước khi nhập n�
 
 **Stripe bắt đầu ở chế độ thử nghiệm; chế độ thật là lựa chọn chủ động.** Stripe lưu trữ các trang thanh toán,
 biên nhận, Billing Portal, hoàn tiền và tranh chấp; ứng dụng này chỉ lưu số tiền,
-quỹ, ngày tháng, trạng thái và các mã định danh Stripe. Giving và Registration chỉ chạy trên Supabase; D1 không
-hỗ trợ các mô-đun đó. Khi quá trình cài đặt hỏi về một trong hai mô-đun, hãy nhập khóa `sk_test_…` và
+quỹ, ngày tháng, trạng thái và các mã định danh Stripe. Giving và Registration có thu phí chỉ chạy trên Supabase; D1 không
+hỗ trợ chúng. Khi quá trình cài đặt hỏi về một trong hai mô-đun, hãy nhập khóa `sk_test_…` và
 khóa bí mật ký `whsec_…` bằng các biến môi trường dùng-một-lần `CHURCH_SETUP_STRIPE_SECRET_KEY` và
 `CHURCH_SETUP_STRIPE_WEBHOOK_SECRET`; quá trình cài đặt lưu các bí mật thời gian chạy
 và ghi `STRIPE_MODE=test`. Để nhận dâng hiến thật, hãy làm theo danh sách kiểm tra đưa vào hoạt động trong
