@@ -356,6 +356,17 @@ const LEGACY_CAPTURE_ROWS = [
     ],
   },
   { path: '/admin/registration?edit=920', out: 'docs/images/registration/admin-editor-party.png', admin: true, backend: 'd1', anchorSelector: 'input[name="max_party_size"]', anchorMargin: 120, expectedText: 'Max people per registration' },
+  // Registration form builder (Phase 3). These rows need a sample event with several questions (one with a
+  // show-if condition, per-person ones with options), ticket types and two templates. Build them on a throwaway
+  // persist dir by posting to the real endpoints (see the Phase 3 plan): create "Family Camp Weekend", save its
+  // form with the builder's JSON POST, then "Save as template" on it and on the seeded potluck. The event id is
+  // 931 on a freshly seeded D1; the rows use #reg-form-heading so they follow the page, not the id.
+  { path: '/admin/registration/931', out: 'docs/images/registration/builder-questions.png', admin: true, backend: 'd1', anchorSelector: '[data-testid="reg-form-builder"] ol > li:nth-child(2)', anchorMargin: 24, waitForSelector: '[data-testid="reg-form-builder"] ol > li', expectedText: 'Registration form',
+    interact: [{ click: '[data-testid="reg-form-builder"] ol > li:nth-child(3) button[aria-expanded]' }] },
+  { path: '/admin/registration/931', out: 'docs/images/registration/builder-options.png', admin: true, backend: 'd1', anchorSelector: '[data-testid="reg-form-builder"] ol > li:nth-child(4)', anchorMargin: 24, waitForSelector: '[data-testid="reg-form-builder"] ol > li', expectedText: 'T-shirt size',
+    interact: [{ click: '[data-testid="reg-form-builder"] ol > li:nth-child(4) button[aria-expanded]' }] },
+  { path: '/admin/registration/931', out: 'docs/images/registration/builder-tickets.png', admin: true, backend: 'd1', anchor: 'Ticket types', anchorMargin: 24, waitForSelector: '[data-testid="ticket-card"]', expectedText: 'Ticket types' },
+  { path: '/admin/registration', out: 'docs/images/registration/admin-templates.png', admin: true, backend: 'd1', anchorSelector: '#reg-templates', anchorMargin: 24, expectedText: 'Save as template' },
   // Children's check-in (Task 8). The kiosk needs no session — the token in
   // the URL is the gate — so it captures in the same admin-bypass pass. The
   // dev seed fixes the kiosk token and gives Chen Family two children, which

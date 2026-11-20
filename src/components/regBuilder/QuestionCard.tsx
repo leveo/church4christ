@@ -239,7 +239,7 @@ export default function QuestionCard(p: QuestionCardProps) {
       data-testid="question-card" data-drop={p.dropMark ?? undefined} data-dragging={p.dragging ? 'true' : undefined}
       onDragOver={p.onDragOver} onDrop={p.onDrop}
     >
-      <div className="flex flex-wrap items-center gap-2 p-3">
+      <div className="flex items-center gap-2 p-3">
         <span
           className="rb-handle inline-flex min-h-9 min-w-9 items-center justify-center rounded-md border border-border bg-surface text-ink-subtle"
           draggable role="img" aria-label={t('card.drag')} title={t('card.drag')} onDragStart={p.onDragStart} onDragEnd={p.onDragEnd}
@@ -249,7 +249,7 @@ export default function QuestionCard(p: QuestionCardProps) {
         <span className="text-sm font-semibold tabular-nums text-ink-subtle">{index + 1}.</span>
         <button
           type="button" id={`rq-${q.cid}-toggle`} aria-expanded={p.open} aria-controls={`rq-${q.cid}-body`}
-          className="min-w-40 grow rounded-md px-2 py-1 text-left hover:bg-surface-sunken" onClick={p.onToggle}
+          className="min-w-0 flex-1 break-words rounded-md px-2 py-1 text-left hover:bg-surface-sunken" onClick={p.onToggle}
         >
           <span className={`block font-semibold ${q.labels[defaultLocale]?.trim() ? '' : 'text-ink-subtle'}`}>{summary}</span>
           <span className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-ink-muted">
