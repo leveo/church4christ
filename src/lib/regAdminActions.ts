@@ -6,7 +6,7 @@ import type { AppDb } from './appDb';
 import type { DbBackend } from './dbProvider';
 import { datetimeLocalToUtc } from './dates';
 import { parseRegEventForm } from './regForms';
-import { cloneEvent, saveEvent, setEventLifecycle, type RegLifecycleAction } from './regDb';
+import { cloneEvent, createFromTemplate, deleteTemplate, saveAsTemplate, saveEvent, setEventLifecycle, type RegLifecycleAction } from './regDb';
 
 /** A stored poster is always an uploaded media key; anything else is dropped. */
 const POSTER_KEY = /^uploads\/[a-z0-9][a-z0-9.-]*$/;
@@ -41,12 +41,12 @@ export async function saveEventFromForm(
 const LIFECYCLE_ACTIONS: readonly RegLifecycleAction[] = ['open_now', 'close_now', 'hide', 'show'];
 
 export type EventActionResult =
-  | { ok: true; notice: 'updated' | 'duplicated'; id: number }
+  | { ok: true; notice: 'updated' | 'duplicated' | 'template_saved' | 'template_created' | 'template_deleted'; id: number }
   | { ok: false; error: 'close_required' | 'invalid' | 'not_found'; id: number | null };
 
 /**
  * Apply one list button. Form fields: `id`, `op` (open_now | close_now | hide | show |
- * duplicate) and, for open_now on an event whose closing time has passed, `closes_at`
+ * duplicate | save_template | from_template | delete_template) and, for open_now on an event whose closing time has passed, `closes_at`
  * (datetime-local). Duplicate returns the new (inactive) event's id.
  */
 export async function applyEventAction(db: AppDb, fd: FormData): Promise<EventActionResult> {
@@ -56,6 +56,13 @@ export async function applyEventAction(db: AppDb, fd: FormData): Promise<EventAc
   const op = String(fd.get('op') ?? '');
   try {
     if (op === 'duplicate') return { ok: true, notice: 'duplicated', id: await cloneEvent(db, id) };
+    // Templates: "Save as template" copies an event (never a template) into one; "New event from
+    // template" copies a template into a regular, inactive event; only a template can be deleted.
+    if (op === 'save_template') return { ok: true, notice: 'template_saved', id: await saveAsTemplate(db, id) };
+    if (op === 'from_template') return { ok: true, notice: 'template_created', id: await createFromTemplate(db, id) };
+    if (op === 'delete_template') {
+      return (await deleteTemplate(db, id)) ? { ok: true, notice: 'template_deleted', id } : { ok: false, error: 'not_found', id };
+    }
     if (!LIFECYCLE_ACTIONS.includes(op as RegLifecycleAction)) return { ok: false, error: 'invalid', id };
     const closesRaw = String(fd.get('closes_at') ?? '').trim();
     let closesAt: string | null = null;
@@ -68,7 +75,9 @@ export async function applyEventAction(db: AppDb, fd: FormData): Promise<EventAc
   } catch (error) {
     const message = (error as Error).message;
     if (message === 'close_required') return { ok: false, error: 'close_required', id };
-    if (message === 'event_not_found') return { ok: false, error: 'not_found', id };
+    if (message === 'event_not_found' || message === 'template_not_found') return { ok: false, error: 'not_found', id };
+    // a lifecycle button aimed at a template: refused like any invalid button
+    if (message === 'template_not_allowed') return { ok: false, error: 'invalid', id };
     throw error;
   }
 }

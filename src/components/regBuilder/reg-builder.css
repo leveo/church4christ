@@ -1,0 +1,9 @@
+.reg-builder { margin-top: 1.5rem; }
+.reg-builder .rb-bar { position: sticky; top: 0; z-index: 20; }
+.reg-builder .rb-card[data-drop="before"] { box-shadow: 0 -3px 0 0 var(--color-primary); }
+.reg-builder .rb-card[data-drop="after"] { box-shadow: 0 3px 0 0 var(--color-primary); }
+.reg-builder .rb-card[data-dragging="true"] { opacity: .5; }
+.reg-builder .rb-handle { cursor: grab; touch-action: none; }
+.reg-builder .rb-handle:active { cursor: grabbing; }
+.reg-builder .rb-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: .5rem; }
+.reg-builder button:focus-visible, .reg-builder input:focus-visible, .reg-builder select:focus-visible, .reg-builder textarea:focus-visible, .reg-builder summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }

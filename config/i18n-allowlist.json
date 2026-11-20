@@ -50,7 +50,8 @@
         "learning.kind.material",
         "my.giving.total",
         "planning.rs.min",
-        "register.no"
+        "register.no",
+        "admin.regBuilder.no"
       ],
       "values": []
     },
@@ -179,7 +180,16 @@
         "profile.groups.absent",
         "profile.groups.colDate",
         "serve.plans.date",
-        "serve.teams.contact"
+        "serve.teams.contact",
+        "admin.regBuilder.cond.operator",
+        "admin.regBuilder.cond.question",
+        "admin.regBuilder.field.options",
+        "admin.regBuilder.field.type",
+        "admin.regBuilder.option.label",
+        "admin.regBuilder.option.labelIn",
+        "admin.regBuilder.option.unnamed",
+        "admin.regBuilder.questions",
+        "admin.regBuilder.type.date"
       ],
       "values": []
     },
@@ -259,7 +269,12 @@
         "profile.household.dependentName",
         "register.name",
         "sermons.yearLabel",
-        "site.name"
+        "site.name",
+        "admin.regBuilder.option.label",
+        "admin.regBuilder.option.labelIn",
+        "admin.regBuilder.ticket.limit",
+        "admin.regBuilder.ticket.name",
+        "admin.regBuilder.type.select"
       ],
       "values": []
     },

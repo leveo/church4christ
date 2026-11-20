@@ -3,25 +3,25 @@ import GatheringSurface from '../../../components/gatherings/GatheringSurface.as
 import { gatheringsCopy } from '../../../i18n/designGatherings';
 import AvatarInitials from '../../../components/AvatarInitials.astro';
 import DateBadge from '../../../components/gatherings/DateBadge.astro';
+import RegFormBuilder from '../../../components/regBuilder/RegFormBuilder';
+import en from '../../../i18n/en';
 
-// One event's question builder + registration roster (console class — re-checks
-// editor∪admin). The builder is a repeat-row form submitting indexed fields
-// (q[0][type]…) parsed by parseQuestionsForm into saveQuestions (replace-all;
-// surviving question ids keep their collected answers). Reorder by editing the
-// per-row Order numbers — no drag-drop. Progressive enhancement (vanilla JS, the
-// ministry-wizard pattern): add/remove rows + show the Options box only for
-// select/checkbox; with JS off the server-rendered rows still submit and the
-// options box is simply always visible. The roster lists each registration with
-// its answers in per-question columns, an admin cancel button, and a CSV link.
+// One event's registration form builder + registration roster (console class — re-checks
+// editor∪admin). The form builder is a client:only React island (the same pattern as the page
+// builder): GET mounts it with the stored questions and ticket types as JSON; the island saves with
+// a same-page JSON POST (application/json) handled by saveFormRequest (validated in one batch,
+// field-path errors come back for inline display; the CSRF middleware checks Origin on every
+// non-GET). The roster lists each registration with its answers in per-question columns, an admin
+// cancel button, and a CSV link. A template (is_template) opens the same builder but has no roster.
 import Admin from '../../../layouts/Admin.astro';
 import { t } from '../../../lib/i18n';
-import { parseQuestionsForm } from '../../../lib/regForms';
-import { getEventAdmin, listQuestions, listQuestionsAdmin, listRegistrations, saveQuestions, type RegQuestionAdmin } from '../../../lib/regDb';
+import { getEventAdmin, listQuestions, listQuestionsAdmin, listRegistrations, listTicketTypesAdmin } from '../../../lib/regDb';
+import { saveFormRequest } from '../../../lib/regFormSave';
 import { cancelAndNotify, type RegNotifyEnv } from '../../../lib/regNotify';
 import { env } from 'cloudflare:workers';
 import { listEventAdmins, addEventAdmin, removeEventAdmin, listPeopleWithAccount } from '../../../lib/prayerDb';
 import { formatCents } from '../../../lib/money';
-import { tin, lab, card, btn, btnSecondary, rowBtn, th, td, noticeOk, noticeErr } from '../../../lib/adminUi';
+import { tin, lab, card, btnSecondary, rowBtn, th, td, noticeOk } from '../../../lib/adminUi';
 import { SUPPORTED_LOCALES, localeMeta, type Locale } from '../../../lib/locales';
 import { hasAreaAccess } from '../../../lib/adminAreas';
 
@@ -38,9 +38,15 @@ const eventId = Number(rawId);
 const event = await getEventAdmin(db, eventId);
 if (!event) return new Response(null, { status: 404 });
 
-let qError: string | null = null; // i18n key when the question form is rejected
-
 if (Astro.request.method === 'POST') {
+  // The form builder island saves with application/json.
+  if ((Astro.request.headers.get('content-type') ?? '').includes('application/json')) {
+    const saved = await saveFormRequest(db, eventId, await Astro.request.text(), {
+      backend: Astro.locals.dbBackend,
+      defaultLocale: Astro.locals.locales.default,
+    });
+    return new Response(JSON.stringify(saved.body), { status: saved.status, headers: { 'content-type': 'application/json' } });
+  }
   const fd = await Astro.request.formData();
   const action = String(fd.get('action') ?? '');
   if (action === 'cancel') {
@@ -59,28 +65,21 @@ if (Astro.request.method === 'POST') {
     }
     return Astro.redirect(`/admin/registration/${eventId}?saved=1`, 303);
   }
-  if (action === 'saveQuestions') {
-    const parsed = parseQuestionsForm(fd);
-    if (!parsed.ok) {
-      qError = parsed.error === 'bad_type' ? 'admin.reg.qErrorType' : 'admin.reg.qErrorLabelDefault';
-    } else {
-      await saveQuestions(db, eventId, parsed.questions);
-      return Astro.redirect(`/admin/registration/${eventId}?saved=1`, 303);
-    }
-  }
 }
 
-const questions = await listQuestionsAdmin(db, eventId);
-const roster = await listRegistrations(db, lang, eventId);
+const isTemplate = event.is_template === 1;
+const [questions, tickets] = await Promise.all([listQuestionsAdmin(db, eventId), listTicketTypesAdmin(db, eventId)]);
+// A template is only ever copied: it has no registrations, roster or event admins.
+const roster = isTemplate ? [] : await listRegistrations(db, lang, eventId);
 // Roster column headers use the same localized labels the answers carry (so each
 // answer lines up with its column even when two questions share a label).
-const rosterQuestions = await listQuestions(db, lang, eventId);
+const rosterQuestions = isTemplate ? [] : await listQuestions(db, lang, eventId);
 const saved = Astro.url.searchParams.get('saved') === '1';
 const cancelled = Astro.url.searchParams.get('cancelled') === '1';
 
 let eventAdmins: Awaited<ReturnType<typeof listEventAdmins>> = [];
 let adminCandidates: Awaited<ReturnType<typeof listPeopleWithAccount>> = [];
-if (hasPortal) {
+if (hasPortal && !isTemplate) {
   [eventAdmins, adminCandidates] = await Promise.all([listEventAdmins(db, eventId), listPeopleWithAccount(db)]);
 }
 
@@ -88,15 +87,17 @@ if (hasPortal) {
 // and aligning each answer to its column — the CSV keys by id, the HTML by label).
 const defaultLocale = Astro.locals.locales.default;
 const eventTitle = event.titles[lang] || event.titles[defaultLocale] || event.title_en || `#${eventId}`;
-// Question labels are editable in every enabled site language (default first, required);
-// the rest sit under a "other languages" fold. A disabled language is left out of the
-// form, which the server reads as "leave that language's text as it is".
+// The form is editable in every enabled site language (default first, required); the island
+// folds the others. A disabled language is left out of the payload, which the writer reads as
+// "leave that language's text as it is".
 const { enabled } = Astro.locals.locales;
-const labelLocales: Locale[] = [defaultLocale, ...enabled.filter((code) => code !== defaultLocale)].filter((code) => SUPPORTED_LOCALES.includes(code));
-const otherLocales = labelLocales.filter((code) => code !== defaultLocale);
-
-const types: RegQuestionAdmin['type'][] = ['text', 'textarea', 'select', 'checkbox', 'yesno'];
-const needsOptions = (type: string) => type === 'select' || type === 'checkbox';
+const formLocales: Locale[] = [defaultLocale, ...enabled.filter((code) => code !== defaultLocale)].filter((code) => SUPPORTED_LOCALES.includes(code));
+const builderLocales = formLocales.map((code) => ({ code, label: localeMeta(code).nativeName }));
+// The island gets pre-translated copy (every admin.regBuilder.* key) and never touches the dictionaries.
+const BUILDER_PREFIX = 'admin.regBuilder.';
+const builderStrings = Object.fromEntries(
+  Object.keys(en).filter((key) => key.startsWith(BUILDER_PREFIX)).map((key) => [key.slice(BUILDER_PREFIX.length), t(lang, key)]),
+);
 const copy = gatheringsCopy(lang);
 const heading = t(lang, 'admin.reg.title');
 const h2 = 'font-display text-heading-sm font-bold';
@@ -105,12 +106,14 @@ const h2 = 'font-display text-heading-sm font-bold';
 <Admin title={`${eventTitle} · ${heading}`}>
   <GatheringSurface>
   <div class="gathering-heading">
-    <div><p class="gathering-eyebrow">{copy.eyebrow}</p><h1>{eventTitle}</h1><p class="gathering-intro">{copy.rosterIntro}</p></div>
+    <div><p class="gathering-eyebrow">{copy.eyebrow}</p><h1>{eventTitle}{isTemplate && <span class="ml-3 align-middle rounded-full bg-surface-sunken px-3 py-1 text-xs font-medium text-ink-muted">{t(lang, 'admin.reg.templateBadge')}</span>}</h1><p class="gathering-intro">{isTemplate ? t(lang, 'admin.reg.templateIntroDetail') : copy.rosterIntro}</p></div>
     <a href="/admin/registration" class="text-sm text-primary hover:underline">{t(lang, 'admin.reg.backToList')}</a>
   </div>
   {saved && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.form.saved')}</p>}
   {cancelled && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'admin.reg.cancelled')}</p>}
 
+  {!isTemplate && (
+  <>
   <div class="gathering-section-heading">
     <div class="gathering-actions"><DateBadge date={event.starts_at} locale={lang} /><div><h2 class={h2}>{t(lang, 'admin.reg.registrations')}</h2><p class="mt-1 text-xs text-ink-muted">{roster.length} {copy.recordsShown}</p></div></div>
     <a href={`/admin/registration/${eventId}/export.csv`} class={btnSecondary}>{t(lang, 'admin.reg.exportCsv')}</a>
@@ -174,119 +177,24 @@ const h2 = 'font-display text-heading-sm font-bold';
       </tbody>
     </table>
   </div>
+  </>
+  )}
 
-  <details class="gathering-editor" open={!!qError || questions.length === 0}><summary>{t(lang, 'admin.reg.questions')}</summary><div class="gathering-editor-inner">
-  <form method="post" class="mt-4 max-w-3xl" data-q-form>
-    <input type="hidden" name="action" value="saveQuestions" />
-    {qError && <p class={`mb-4 ${noticeErr}`}>{t(lang, qError)}</p>}
-
-    <div class="space-y-3" data-q-list>
-      {
-        questions.map((q, i) => (
-          <div class={`${card} space-y-3`} data-q-row>
-            <input type="hidden" data-qname="id" name={`q[${i}][id]`} value={q.id} />
-            <div class="flex flex-wrap items-end gap-3">
-              <label class="w-20">
-                <span class={lab}>{t(lang, 'admin.reg.sort')}</span>
-                <input data-qname="sort" name={`q[${i}][sort]`} value={q.sort} inputmode="numeric" class={tin} />
-              </label>
-              <label class="min-w-40">
-                <span class={lab}>{t(lang, 'admin.reg.qType')}</span>
-                <select data-qname="type" name={`q[${i}][type]`} data-q-type class={tin}>
-                  {types.map((tp) => (
-                    <option value={tp} selected={q.type === tp}>
-                      {t(lang, `admin.reg.qType.${tp}`)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label class="flex items-center gap-2 pb-2 text-sm">
-                <input type="checkbox" data-qname="required" name={`q[${i}][required]`} value="1" checked={q.required === 1} />
-                {t(lang, 'admin.reg.required')}
-              </label>
-              <button type="button" data-q-remove class={`${rowBtn} ml-auto`}>
-                {t(lang, 'admin.reg.removeQuestion')}
-              </button>
-            </div>
-            <label class="block">
-              <span class={lab}>{t(lang, 'admin.reg.questionLabel')} · {localeMeta(defaultLocale).nativeName}</span>
-              <input data-qname={`label_${defaultLocale}`} name={`q[${i}][label_${defaultLocale}]`} value={q.labels[defaultLocale] ?? ''} lang={localeMeta(defaultLocale).bcp47} class={tin} />
-            </label>
-            {otherLocales.length > 0 && (
-              <details class="rounded-md border border-border px-3 py-2">
-                <summary class="min-h-11 cursor-pointer py-2 text-sm font-semibold text-ink-muted">{t(lang, 'admin.reg.translations')}</summary>
-                <div class="grid gap-3 pb-2 sm:grid-cols-2">
-                  {otherLocales.map((code) => (
-                    <label class="block">
-                      <span class={lab}>{localeMeta(code).nativeName}</span>
-                      <input data-qname={`label_${code}`} name={`q[${i}][label_${code}]`} value={q.labels[code] ?? ''} lang={localeMeta(code).bcp47} class={tin} />
-                    </label>
-                  ))}
-                </div>
-              </details>
-            )}
-            <label class="block" data-q-options hidden={!needsOptions(q.type)}>
-              <span class={lab}>{t(lang, 'admin.reg.options')}</span>
-              <textarea data-qname="options" name={`q[${i}][options]`} rows="3" class={tin}>{(q.options ?? []).join('\n')}</textarea>
-            </label>
-          </div>
-        ))
-      }
-    </div>
-
-    <template data-q-template>
-      <div class={`${card} space-y-3`} data-q-row>
-        <input type="hidden" data-qname="id" name="q[0][id]" value="" />
-        <div class="flex flex-wrap items-end gap-3">
-          <label class="w-20">
-            <span class={lab}>{t(lang, 'admin.reg.sort')}</span>
-            <input data-qname="sort" name="q[0][sort]" value="" inputmode="numeric" class={tin} />
-          </label>
-          <label class="min-w-40">
-            <span class={lab}>{t(lang, 'admin.reg.qType')}</span>
-            <select data-qname="type" name="q[0][type]" data-q-type class={tin}>
-              {types.map((tp) => <option value={tp}>{t(lang, `admin.reg.qType.${tp}`)}</option>)}
-            </select>
-          </label>
-          <label class="flex items-center gap-2 pb-2 text-sm">
-            <input type="checkbox" data-qname="required" name="q[0][required]" value="1" />
-            {t(lang, 'admin.reg.required')}
-          </label>
-          <button type="button" data-q-remove class={`${rowBtn} ml-auto`}>{t(lang, 'admin.reg.removeQuestion')}</button>
-        </div>
-        <label class="block">
-          <span class={lab}>{t(lang, 'admin.reg.questionLabel')} · {localeMeta(defaultLocale).nativeName}</span>
-          <input data-qname={`label_${defaultLocale}`} name={`q[0][label_${defaultLocale}]`} value="" lang={localeMeta(defaultLocale).bcp47} class={tin} />
-        </label>
-        {otherLocales.length > 0 && (
-          <details class="rounded-md border border-border px-3 py-2">
-            <summary class="min-h-11 cursor-pointer py-2 text-sm font-semibold text-ink-muted">{t(lang, 'admin.reg.translations')}</summary>
-            <div class="grid gap-3 pb-2 sm:grid-cols-2">
-              {otherLocales.map((code) => (
-                <label class="block">
-                  <span class={lab}>{localeMeta(code).nativeName}</span>
-                  <input data-qname={`label_${code}`} name={`q[0][label_${code}]`} value="" lang={localeMeta(code).bcp47} class={tin} />
-                </label>
-              ))}
-            </div>
-          </details>
-        )}
-        <label class="block" data-q-options hidden>
-          <span class={lab}>{t(lang, 'admin.reg.options')}</span>
-          <textarea data-qname="options" name="q[0][options]" rows="3" class={tin} />
-        </label>
-      </div>
-    </template>
-
-    <div class="mt-4 flex items-center gap-3">
-      <button type="button" data-q-add class={btnSecondary}>{t(lang, 'admin.reg.addQuestion')}</button>
-      <button type="submit" class={btn}>{t(lang, 'admin.reg.saveQuestions')}</button>
-    </div>
-  </form>
-
-  </div></details>
+  <section class={isTemplate ? 'mt-6' : 'mt-10'} aria-labelledby="reg-form-heading">
+    <h2 id="reg-form-heading" class={h2}>{t(lang, 'admin.regBuilder.title')}</h2>
+    <p class="mt-1 max-w-2xl text-sm text-ink-muted">{t(lang, isTemplate ? 'admin.reg.templateBuilderIntro' : 'admin.regBuilder.intro')}</p>
+    <RegFormBuilder
+      client:only="react"
+      questions={questions}
+      tickets={tickets}
+      locales={builderLocales}
+      defaultLocale={defaultLocale}
+      isD1={Astro.locals.dbBackend === 'd1'}
+      strings={builderStrings}
+    />
+  </section>
   {
-    hasPortal && (
+    hasPortal && !isTemplate && (
       <section class={`mt-10 ${card} max-w-2xl`}>
         <h2 class="font-semibold">{t(lang, 'admin.reg.eventAdmins.title')}</h2>
         <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.reg.eventAdmins.hint')}</p>
@@ -332,47 +240,6 @@ const h2 = 'font-display text-heading-sm font-bold';
       </section>
     )
   }
-  {!hasPortal && <p class="mt-10 max-w-2xl text-sm text-ink-muted">{t(lang, 'admin.reg.eventAdmins.portalOff')}</p>}
+  {!hasPortal && !isTemplate && <p class="mt-10 max-w-2xl text-sm text-ink-muted">{t(lang, 'admin.reg.eventAdmins.portalOff')}</p>}
   </GatheringSurface>
 </Admin>
-
-<script>
-  // Question builder (vanilla progressive enhancement, ministry-wizard pattern):
-  // add/remove rows, show the Options box only for select/checkbox, and renumber
-  // every row's field names to a contiguous q[i][…] on submit so the server parses
-  // them in DOM order. With JS off, the server-rendered rows already carry correct
-  // indices and still submit.
-  const form = document.querySelector('[data-q-form]') as HTMLFormElement | null;
-  if (form) {
-    const list = form.querySelector('[data-q-list]') as HTMLElement;
-    const tpl = form.querySelector('template[data-q-template]') as HTMLTemplateElement | null;
-
-    function syncOptions(row: Element) {
-      const type = row.querySelector('[data-q-type]') as HTMLSelectElement | null;
-      const opts = row.querySelector('[data-q-options]') as HTMLElement | null;
-      if (type && opts) opts.hidden = !(type.value === 'select' || type.value === 'checkbox');
-    }
-    function wireRow(row: Element) {
-      row.querySelector('[data-q-type]')?.addEventListener('change', () => syncOptions(row));
-      row.querySelector('[data-q-remove]')?.addEventListener('click', () => row.remove());
-      syncOptions(row);
-    }
-    list.querySelectorAll('[data-q-row]').forEach(wireRow);
-
-    form.querySelector('[data-q-add]')?.addEventListener('click', () => {
-      const clone = tpl?.content.firstElementChild?.cloneNode(true) as Element | null;
-      if (!clone) return;
-      list.appendChild(clone);
-      wireRow(clone);
-    });
-
-    // Renumber every row's fields to a contiguous q[i][…] in DOM order on submit.
-    form.addEventListener('submit', () => {
-      list.querySelectorAll('[data-q-row]').forEach((row, i) => {
-        row.querySelectorAll('[data-qname]').forEach((el) => {
-          el.setAttribute('name', `q[${i}][${el.getAttribute('data-qname')}]`);
-        });
-      });
-    });
-  }
-</script>

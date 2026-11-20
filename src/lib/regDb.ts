@@ -477,6 +477,12 @@ export async function listTicketTypesAdmin(db: AppDb, eventId: number): Promise<
   return results.map((r) => ({ ...r, taken: Number(r.taken), labels: byType.get(r.id)?.labels ?? {}, descriptions: byType.get(r.id)?.descriptions ?? {} }));
 }
 
+/** The events (and templates) that have at least one active ticket type: their event price is ignored. */
+export async function eventIdsWithActiveTickets(db: AppDb): Promise<Set<number>> {
+  const { results } = await db.prepare(`SELECT DISTINCT event_id AS id FROM reg_ticket_types WHERE active = 1`).all<{ id: number }>();
+  return new Set(results.map((r) => Number(r.id)));
+}
+
 /** What a party costs and how it is billed: one line per ticket type used (quantity = people), or a
  *  single implicit line at the event price when the event has no active ticket types. */
 export interface RegistrationPricing {

@@ -153,12 +153,20 @@ export interface ConditionError {
 const OPTION_TYPES = new Set(['select', 'checkbox']);
 const FREE_TYPES = new Set(['text', 'textarea', 'number', 'date', 'email', 'phone']);
 
-const opsFor = (type: string): readonly ConditionOp[] =>
+export const conditionOpsFor = (type: string): readonly ConditionOp[] =>
   OPTION_TYPES.has(type)
     ? type === 'checkbox' ? ['eq', 'neq', 'in', 'checked', 'answered'] : ['eq', 'neq', 'in', 'answered']
     : type === 'yesno'
       ? ['eq', 'neq', 'checked', 'answered']
       : FREE_TYPES.has(type) ? ['eq', 'neq', 'answered'] : [];
+
+/** Whether `target` may be the subject of `question`'s condition (the position rule - it must come EARLIER - is the caller's):
+ *  not a section or terms question, and a per-person target only for a per-person question. */
+export function isConditionTargetAllowed(target: { type: string; scope: ConditionScope }, question: { scope: ConditionScope }): boolean {
+  if (target.type === 'section' || target.type === 'terms') return false;
+  if (target.scope === 'attendee' && question.scope !== 'attendee') return false;
+  return conditionOpsFor(target.type).length > 0;
+}
 
 /**
  * Check every draft question's condition (questions in sort order): the target must exist, come
@@ -178,7 +186,7 @@ export function validateConditions(questions: readonly DraftConditionQuestion[])
     if (condition.target >= index) return fail('condition_target_forward');
     if (target.type === 'section' || target.type === 'terms') return fail('condition_target_type');
     if (target.scope === 'attendee' && question.scope !== 'attendee') return fail('condition_target_scope');
-    const allowed = opsFor(target.type);
+    const allowed = conditionOpsFor(target.type);
     if (!(allowed as readonly string[]).includes(condition.op)) return fail('condition_op_invalid');
     const op = condition.op as ConditionOp;
     const keys = (target.options ?? []) as readonly string[];
