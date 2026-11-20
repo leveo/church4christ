@@ -9,10 +9,29 @@ import {
 } from '../../lib/blockStyles';
 import type { LeafNode, L10nString } from '../../lib/pageLayout';
 import { pickLocalizedText, type Locale } from '../../lib/locales';
+import { loadRegistrationCard } from '../../lib/regBlock';
+import { t } from '../../lib/i18n';
 
 interface Props { node: LeafNode; locale: Locale }
 const { node, locale } = Astro.props;
 const pick = (s: L10nString): string => pickLocalizedText(s, locale);
+
+// Registration card: nothing when the module is off, the event is unknown/hidden/a template, or a read fails.
+let registrationHtml = '';
+if (node.type === 'registration' && node.props.eventId !== null && Astro.locals.modules?.has('registration')) {
+  try {
+    registrationHtml = await loadRegistrationCard(Astro.locals.db, locale, node.props, {
+      cta: t(locale, 'register.block.cta'),
+      opensOn: (date) => t(locale, 'register.opensOn', { date }),
+      seatsLeft: (count) => t(locale, 'register.block.seatsLeft', { count }),
+      full: t(locale, 'register.full'),
+      fullWaitlist: t(locale, 'register.block.fullWaitlist'),
+      closed: t(locale, 'register.block.closed'),
+    });
+  } catch (err) {
+    console.error('registration block: load failed', err);
+  }
+}
 ---
 
 {
@@ -52,3 +71,4 @@ const pick = (s: L10nString): string => pickLocalizedText(s, locale);
 }
 {node.type === 'spacer' && <div class={spacerClass(node.props)} aria-hidden="true" />}
 {node.type === 'divider' && <hr class={dividerClass()} />}
+{registrationHtml && <div set:html={registrationHtml} />}

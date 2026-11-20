@@ -7,7 +7,7 @@ import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors } from '@
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import type { AnyNode, PageLayout } from '../../lib/pageLayout';
 import type { SupportedLocale } from '../../lib/locales';
-import { builderReducer, canDrop, findNode, initialState, type ContainerRef } from './model';
+import { builderReducer, canDrop, findNode, initialState, type BuilderEvent, type ContainerRef } from './model';
 import { newBlock } from './newBlock';
 import Canvas from './Canvas';
 import Palette from './Palette';
@@ -23,6 +23,8 @@ export interface PageBuilderProps {
   titleZh: string;
   layoutJson: string;
   media: { path: string; filename: string }[];
+  /** Registration events for the picker; null = the registration module is off. */
+  events: BuilderEvent[] | null;
   strings: Record<string, string>;
   uiLang: SupportedLocale;
 }
@@ -183,7 +185,7 @@ export default function PageBuilder(props: PageBuilderProps) {
       />
       <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDraggingType(null)}>
         <div className="builder-workspace">
-          <aside className="builder-palette"><Palette strings={props.strings} onQuickAdd={quickAdd} /></aside>
+          <aside className="builder-palette"><Palette strings={props.strings} onQuickAdd={quickAdd} registrationOn={props.events !== null} /></aside>
           <section className="builder-canvas-panel" aria-labelledby="builder-canvas-title">
           <div className="builder-panel-heading"><h2 id="builder-canvas-title">{props.strings.canvas}</h2><p>{props.strings.canvasHint}</p></div>
           <Canvas
@@ -192,6 +194,7 @@ export default function PageBuilder(props: PageBuilderProps) {
             editLocale={editLocale}
             draggingType={draggingType}
             strings={props.strings}
+            events={props.events ?? []}
             onSelect={(id) => dispatch({ type: 'select', id })}
             onRemove={(id) => dispatch({ type: 'remove', id })}
             onDuplicate={(id) => dispatch({ type: 'duplicate', id })}
@@ -203,6 +206,7 @@ export default function PageBuilder(props: PageBuilderProps) {
             editLocale={editLocale}
             media={props.media}
             strings={props.strings}
+            events={props.events ?? []}
             onUpdate={(id, p) => dispatch({ type: 'update', id, props: p })}
             onUpload={upload}
           /></aside>

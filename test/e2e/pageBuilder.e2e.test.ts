@@ -251,3 +251,77 @@ describe('classic pages admin integrates the builder', () => {
     expect(row!.layout_json).toBe(JSON.stringify({ v: 1, blocks: [] }));
   });
 });
+
+describe('registration block', () => {
+  const ADMIN = () => sessionCookie(1, 'admin@example.com');
+  const setModules = async (disabled: string[]) => {
+    const body = new URLSearchParams({ action: 'modules' });
+    for (const key of MODULE_KEYS) if (!disabled.includes(key)) body.append(`module.${key}`, '1');
+    expect((await post('/admin/settings', body.toString(), { cookie: await ADMIN() })).status).toBe(303);
+  };
+  const eventNode = (id: string, eventId: number | null, showSeats = true, label = { en: '', zh: '' }) =>
+    ({ id, type: 'registration', props: { eventId, showSeats, buttonLabel: label } });
+  const savePage = (slug: string, children: unknown[], cookie: string) =>
+    jsonPost('/admin/pages/builder/new', {
+      action: 'save', id: null, slug, published: true, title_en: slug, title_zh: '',
+      layout: { v: 1, blocks: [{ id: 's1', type: 'section', props: { bg: 'none', width: 'content', padY: 'md' }, children }] },
+    }, cookie);
+
+  it('saves through the builder POST and renders title, seats and the button; hides unknown, hidden and template events', async () => {
+    await setModules([]);
+    await env.DB.prepare(`UPDATE reg_events SET active = 1, capacity = 3, visible_from = NULL, opens_at = NULL, closes_at = datetime('now','+12 days'), starts_at = datetime('now','+14 days') WHERE id = 920`).run();
+    const title = (await env.DB.prepare(`SELECT title FROM reg_event_i18n WHERE event_id = 920 AND locale = 'en'`).first<{ title: string }>())!.title;
+    await env.DB.prepare(`INSERT INTO reg_events (id, starts_at, active, is_template) VALUES (8201, datetime('now','+20 days'), 1, 1)`).run();
+    await env.DB.prepare(`INSERT INTO reg_events (id, starts_at, active) VALUES (8202, datetime('now','+20 days'), 0)`).run();
+    for (const id of [8201, 8202]) await env.DB.prepare(`INSERT INTO reg_event_i18n (event_id, locale, title) VALUES (?1, 'en', ?2)`).bind(id, `Secret ${id}`).run();
+
+    const editor = await sessionCookie(2, 'pastor.david@example.com');
+    const res = await savePage('e2e-reg-block', [
+      eventNode('r1', 920, true, { en: 'Save my spot', zh: '' }),
+      eventNode('r2', 8201), eventNode('r3', 8202), eventNode('r4', 999999), eventNode('r5', null),
+    ], editor);
+    expect(res.status).toBe(200);
+
+    const html = await (await get('/en/p/e2e-reg-block')).text();
+    expect(html).toContain(title);
+    expect(html).toContain('Save my spot');
+    expect(html).toContain('href="/en/register/920"');
+    expect(html).toContain('Seats left: 3');
+    expect(html).not.toContain('Secret 8201');
+    expect(html).not.toContain('Secret 8202');
+    expect(html.match(/registration-block /g)?.length).toBe(1);
+
+    expect((await savePage('e2e-reg-block-seats', [eventNode('r1', 920, false)], editor)).status).toBe(200);
+    const noSeats = await (await get('/en/p/e2e-reg-block-seats')).text();
+    expect(noSeats).toContain('>Register</a>');
+    expect(noSeats).not.toContain('Seats left');
+
+    // Module off: the block renders nothing, the rest of the page is unaffected.
+    await setModules(['registration']);
+    const off = await (await get('/en/p/e2e-reg-block')).text();
+    expect(off).not.toContain('registration-block ');
+    expect(off).not.toContain('Save my spot');
+    await setModules([]);
+  });
+
+  it('the builder page lists non-template events for the picker; events admin offers the link select only with the module on', async () => {
+    await setModules([]);
+    await env.DB.prepare(`INSERT OR IGNORE INTO reg_events (id, starts_at, active, is_template) VALUES (8203, datetime('now','+20 days'), 1, 1)`).run();
+    await env.DB.prepare(`INSERT OR IGNORE INTO reg_event_i18n (event_id, locale, title) VALUES (8203, 'en', 'Template Only')`).run();
+    const admin = await ADMIN();
+    const builder = await (await get('/admin/pages/builder/new', { cookie: admin })).text();
+    expect(builder).toMatch(/&quot;id&quot;:\[0,920\]/);
+    expect(builder).not.toContain('Template Only');
+    const events = await (await get('/admin/events', { cookie: admin })).text();
+    expect(events).toMatch(/<select[^>]*data-reg-link/);
+    expect(events).toContain('value="920"');
+    expect(events).not.toContain('Template Only');
+
+    await setModules(['registration']);
+    const offEvents = await (await get('/admin/events', { cookie: admin })).text();
+    expect(offEvents).not.toMatch(/<select[^>]*data-reg-link/);
+    const offBuilder = await (await get('/admin/pages/builder/new', { cookie: admin })).text();
+    expect(offBuilder).not.toMatch(/&quot;id&quot;:\[0,920\]/);
+    await setModules([]);
+  });
+});

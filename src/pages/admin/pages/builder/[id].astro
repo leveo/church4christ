@@ -19,6 +19,8 @@ import { getCustomPage, savePageLayout } from '../../../../lib/pagesDb';
 import { validateLayout, emptyLayout } from '../../../../lib/pageLayout';
 import { parseBuilderSave } from '../../../../lib/validate';
 import { listRecentImages } from '../../../../lib/upload';
+import { listAllEvents } from '../../../../lib/regDb';
+import { formatDate, utcToDatetimeLocal } from '../../../../lib/dates';
 import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../../lib/mediaUpload';
 
 const user = Astro.locals.user;
@@ -89,6 +91,21 @@ const layoutJson = JSON.stringify(parsedStored?.ok ? parsedStored.layout : empty
 
 const media = await listRecentImages(db);
 
+// The registration block's event picker: non-template events with title and church-local date.
+// null (module off) hides the palette item and the picker. A failed read degrades to an empty list.
+let events: { id: number; label: string }[] | null = null;
+if (Astro.locals.modules.has('registration')) {
+  try {
+    events = (await listAllEvents(db, lang)).map((e) => ({
+      id: e.id,
+      label: `${e.title || `#${e.id}`} · ${formatDate(utcToDatetimeLocal(e.starts_at).slice(0, 10), lang)}`,
+    }));
+  } catch (err) {
+    console.error('page builder: registration events load failed', err);
+    events = [];
+  }
+}
+
 // The island gets pre-translated copy — it never touches the i18n dicts.
 const S = (k: string) => t(lang, `admin.builder.${k}`);
 const strings = Object.fromEntries(
@@ -97,7 +114,8 @@ const strings = Object.fromEntries(
     'editingIn', 'localeEn', 'localeZh', 'slug', 'titleEn', 'titleZh', 'published', 'view',
     'blocks', 'dragHint', 'emptyCanvas', 'emptySection',
     'block.section', 'block.columns', 'block.heading', 'block.text', 'block.image',
-    'block.button', 'block.spacer', 'block.divider',
+    'block.button', 'block.spacer', 'block.divider', 'block.registration', 'registrationPlaceholder',
+    'prop.event', 'prop.eventNone', 'prop.noEvents', 'prop.showSeats', 'prop.buttonLabel',
     'props', 'propsNone', 'prop.level', 'prop.size', 'prop.customSize', 'prop.align',
     'prop.text', 'prop.markdownHint', 'prop.background', 'prop.width', 'prop.padding',
     'prop.columns', 'prop.gap', 'prop.imageUrl', 'prop.altText', 'prop.rounded',
@@ -123,6 +141,7 @@ const strings = Object.fromEntries(
     titleZh={page?.i18n.zh.title ?? ''}
     layoutJson={layoutJson}
     media={media}
+    events={events}
     strings={{ ...strings, canvas: contentCopy(lang).canvas, canvasHint: contentCopy(lang).canvasHint, moveUp: contentCopy(lang).moveUp, moveDown: contentCopy(lang).moveDown, selectBlock: contentCopy(lang).selectBlock }}
     uiLang={lang}
   />

@@ -6,6 +6,7 @@
 import type { RegQuestion } from './regDb';
 import type { SelfEditInput, SubmissionInput } from './regManage';
 import { MAX_PARTY_SIZE_LIMIT } from './regManage';
+import { isEventFull } from './regPhase';
 
 /** Form fields grouped by name (a checkbox group has several values). */
 export type FieldBag = Record<string, string[]>;
@@ -193,6 +194,29 @@ export function seatsLeft(
   if (types.length === 0 || types.some((type) => type.seats_left === null)) return eventLeft;
   const typed = types.reduce((sum, type) => sum + (type.seats_left ?? 0), 0);
   return eventLeft === null ? typed : Math.min(eventLeft, typed);
+}
+
+// ── Full or open, for lists and cards ───────────────────────────────────────
+
+export type SeatState = { full: boolean; waitlist: boolean };
+
+/**
+ * Whether an event is full for a list card or a page-builder card. Full means the event
+ * capacity is reached OR every ACTIVE ticket type is at its limit (a type without a limit never
+ * fills; an event without active types is judged by its capacity alone). A full event takes
+ * waitlist sign-ups when it has the waitlist on and nothing it sells costs money (the event price,
+ * or every active ticket type's price).
+ */
+export function seatState(
+  event: { capacity: number | null; taken_count: number; price_cents: number | null; waitlist_enabled: number },
+  activeTypes: ReadonlyArray<{ seats_left: number | null; price_cents?: number }> = [],
+): SeatState {
+  const typesFull = activeTypes.length > 0 && activeTypes.every((type) => type.seats_left !== null && type.seats_left <= 0);
+  const full = isEventFull(event) || typesFull;
+  const free = activeTypes.length > 0
+    ? activeTypes.every((type) => (type.price_cents ?? 0) <= 0)
+    : event.price_cents === null || event.price_cents <= 0;
+  return { full, waitlist: full && free && event.waitlist_enabled === 1 };
 }
 
 // ── Redirect targets ────────────────────────────────────────────────────────

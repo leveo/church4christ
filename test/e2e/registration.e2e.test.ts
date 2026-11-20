@@ -38,6 +38,7 @@ async function enableRegistration(): Promise<void> {
 /** Put the seeded events and their data back to the seed state (worker writes are not rolled back between tests). */
 async function resetRegistrationData(): Promise<void> {
   const run = (sql: string) => env.DB.prepare(sql).run();
+  await run(`DELETE FROM reg_ticket_types WHERE event_id IN (920, 930)`);
   await run(`DELETE FROM reg_answers`);
   await run(`DELETE FROM reg_attendees`);
   await run(`DELETE FROM registrations`);
@@ -154,6 +155,23 @@ describe('Registration on D1: filling an event', () => {
     // A member sees the waitlist place on their own events page.
     const mine = await (await get('/en/my/events', { cookie: await sessionCookie(...MEMBERS[3]) })).text();
     expect(mine).toContain('On the waitlist');
+  });
+
+  it('lists a typed event as full when every active ticket type is at its limit, on /register and /my/events', async () => {
+    await enableRegistration();
+    // Capacity 3, never reached; one limited type that is used up.
+    const type = await env.DB.prepare(`INSERT INTO reg_ticket_types (event_id, price_cents, capacity) VALUES (920, 0, 1) RETURNING id`).first<{ id: number }>();
+    await env.DB.prepare(`INSERT INTO reg_ticket_type_i18n (ticket_type_id, locale, label) VALUES (?1, 'en', 'Adult')`).bind(type!.id).run();
+    const cell = (html: string) => html.slice(html.indexOf('Neighbors Potluck Night') > -1 ? html.indexOf('Neighbors Potluck Night') : 0);
+    expect(cell(await (await get('/en/register')).text())).not.toContain('Join the waitlist');
+    const reg = await env.DB.prepare(`INSERT INTO registrations (event_id, name, email, submission_key, party_size, status) VALUES (920, 'A', 'a@example.com', 'typed-full-1', 1, 'confirmed') RETURNING id`).first<{ id: number }>();
+    await env.DB.prepare(`INSERT INTO reg_attendees (registration_id, name, ticket_type_id) VALUES (?1, 'A', ?2)`).bind(reg!.id, type!.id).run();
+    expect(await (await get('/en/register')).text()).toContain('Join the waitlist');
+    const mine = await (await get('/en/my/events', { cookie: await sessionCookie(...MEMBERS[3]) })).text();
+    expect(mine).toContain('Join the waitlist');
+    await env.DB.prepare(`UPDATE reg_events SET waitlist_enabled = 0 WHERE id = 920`).run();
+    expect(await (await get('/en/register')).text()).toContain('>Full<');
+    await env.DB.prepare(`DELETE FROM reg_ticket_types WHERE event_id = 920`).run();
   });
 
   it('emails each registrant, serves the QR image, and an admin cancel promotes the waitlist and mails both', async () => {

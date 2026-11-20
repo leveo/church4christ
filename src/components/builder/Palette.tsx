@@ -4,9 +4,9 @@
 import { useDraggable } from '@dnd-kit/core';
 import type { AnyNode } from '../../lib/pageLayout';
 
-const TYPES: AnyNode['type'][] = ['section', 'columns', 'heading', 'text', 'image', 'button', 'spacer', 'divider'];
+const TYPES: AnyNode['type'][] = ['section', 'columns', 'heading', 'text', 'image', 'button', 'spacer', 'divider', 'registration'];
 const ICONS: Record<AnyNode['type'], string> = {
-  section: '▭', columns: '◫', heading: 'H', text: '¶', image: '🖼', button: '⏺', spacer: '↕', divider: '—',
+  section: '▭', columns: '◫', heading: 'H', text: '¶', image: '🖼', button: '⏺', spacer: '↕', divider: '—', registration: '🎟',
 };
 
 function PaletteItem({ type, label, onQuickAdd }: { type: AnyNode['type']; label: string; onQuickAdd: (t: AnyNode['type']) => void }) {
@@ -29,12 +29,12 @@ function PaletteItem({ type, label, onQuickAdd }: { type: AnyNode['type']; label
   );
 }
 
-export default function Palette({ strings, onQuickAdd }: { strings: Record<string, string>; onQuickAdd: (t: AnyNode['type']) => void }) {
+export default function Palette({ strings, onQuickAdd, registrationOn }: { strings: Record<string, string>; onQuickAdd: (t: AnyNode['type']) => void; registrationOn: boolean }) {
   return (
     <details open>
       <summary className="builder-palette-title">{strings.blocks}</summary>
       <div className="builder-palette-items">
-      {TYPES.map((type) => (
+      {TYPES.filter((type) => type !== 'registration' || registrationOn).map((type) => (
         <PaletteItem key={type} type={type} label={strings[`block.${type}`]} onQuickAdd={onQuickAdd} />
       ))}
       </div>

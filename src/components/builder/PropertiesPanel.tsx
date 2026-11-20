@@ -4,17 +4,19 @@
 import { useRef, useState } from 'react';
 import type { AnyNode, L10nString } from '../../lib/pageLayout';
 import { tin, lab } from '../../lib/adminUi';
+import type { BuilderEvent } from './model';
 
 export interface PropertiesPanelProps {
   node: AnyNode | null;
   editLocale: 'en' | 'zh';
   media: { path: string; filename: string }[];
   strings: Record<string, string>;
+  events: BuilderEvent[];
   onUpdate: (id: string, props: Record<string, unknown>) => void;
   onUpload: (file: File) => Promise<string | null>; // resolves to /media/... path or null on failure
 }
 
-export default function PropertiesPanel({ node, editLocale, media, strings, onUpdate, onUpload }: PropertiesPanelProps) {
+export default function PropertiesPanel({ node, editLocale, media, strings, events, onUpdate, onUpload }: PropertiesPanelProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
@@ -157,6 +159,35 @@ export default function PropertiesPanel({ node, editLocale, media, strings, onUp
           </label>
           {select(strings['prop.variant'], node.props.variant, [['primary', strings['prop.variantPrimary']], ['secondary', strings['prop.variantSecondary']]], (v) => set({ variant: v }))}
           {alignSelect(node.props.align)}
+        </>
+      )}
+
+      {node.type === 'registration' && (
+        <>
+          <label className="block">
+            <span className={lab}>{strings['prop.event']}</span>
+            <select
+              className={tin}
+              value={node.props.eventId === null ? '' : String(node.props.eventId)}
+              onChange={(e) => set({ eventId: e.target.value === '' ? null : Number(e.target.value) })}
+            >
+              <option value="">{strings['prop.eventNone']}</option>
+              {node.props.eventId !== null && !events.some((ev) => ev.id === node.props.eventId) && (
+                <option value={String(node.props.eventId)}>#{node.props.eventId}</option>
+              )}
+              {events.map((ev) => (
+                <option key={ev.id} value={String(ev.id)}>{ev.label}</option>
+              ))}
+            </select>
+          </label>
+          {events.length === 0 && <p className="text-xs text-ink-subtle">{strings['prop.noEvents']}</p>}
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={node.props.showSeats} onChange={(e) => set({ showSeats: e.target.checked })} /> {strings['prop.showSeats']}
+          </label>
+          <label className="block">
+            <span className={lab}>{strings['prop.buttonLabel']}</span>
+            <input className={tin} value={node.props.buttonLabel[editLocale]} onChange={(e) => setL10n('buttonLabel', node.props.buttonLabel, e.target.value)} />
+          </label>
         </>
       )}
 
