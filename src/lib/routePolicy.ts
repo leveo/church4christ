@@ -15,7 +15,7 @@
 import type { SessionUser } from './types';
 import { hasAreaAccess } from './adminAreas';
 
-export type RouteClass = 'public' | 'authed' | 'team' | 'finance' | 'console' | 'newcomerStaff' | 'adminOnly';
+export type RouteClass = 'public' | 'authed' | 'team' | 'finance' | 'console' | 'newcomerStaff' | 'regEventStaff' | 'adminOnly';
 
 // Exact-match public paths (no session). Prefix families live in PUBLIC_PREFIXES.
 const PUBLIC_EXACT = new Set([
@@ -125,6 +125,16 @@ const ADMIN_CONSOLE = [
   '/admin/registration',
 ];
 
+// The only registration admin pages a person with just a per-event role (reg_event_access) may reach: one
+// event's page and its check-in desk. The route needs a session; the page derives the role from the database
+// (regEventRole) and answers 403/404 itself, like /planning. Everything else under /admin/registration (the
+// event list, CSV export, ...) stays `console`. Extend this list, never the class, when a new per-event page
+// is added.
+const REG_EVENT_STAFF_PATHS = [/^\/admin\/registration\/\d+$/, /^\/admin\/registration\/\d+\/checkin$/];
+
+/** True for the per-event registration pages open to per-event roles (locale-stripped, trailing slash removed). */
+export const isRegEventStaffPath = (pathname: string): boolean => REG_EVENT_STAFF_PATHS.some((re) => re.test(norm(pathname)));
+
 /** Strip a single trailing slash (but keep the bare root `/`). */
 function norm(pathname: string): string {
   return pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
@@ -155,6 +165,7 @@ export function classifyRoute(pathname: string): RouteClass {
   // admin-only fallback. Finance follows, then admin-only areas, the console
   // root + explicit console list, and finally fail closed.
   if (under(p, '/admin/newcomers')) return 'newcomerStaff';
+  if (isRegEventStaffPath(p)) return 'regEventStaff';
   if (under(p, '/admin/giving') || under(p, '/admin/stripe-events')) return 'finance';
   if (ADMIN_ONLY.some((base) => under(p, base))) return 'adminOnly';
   if (p === '/admin' || ADMIN_CONSOLE.some((base) => under(p, base))) return 'console';
@@ -199,6 +210,8 @@ export function canAccess(cls: RouteClass, user: SessionUser | null): boolean {
       return user !== null && (user.isAdmin || user.isEditor || user.leaderTeamIds.length > 0);
     case 'newcomerStaff':
       return hasAreaAccess(user, 'newcomers');
+    case 'regEventStaff':
+      return user !== null;
     case 'adminOnly':
       return user?.isAdmin ?? false;
   }

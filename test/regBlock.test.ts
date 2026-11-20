@@ -61,7 +61,7 @@ describe('registration layout node', () => {
 const ev = (over: Partial<RegPublicEvent> = {}): RegPublicEvent => ({
   id: 5, title: 'Fall <Retreat>', description: null, starts_at: '2031-10-04 15:00:00', ends_at: null, location: 'Camp "Oak"',
   capacity: 10, price_cents: null, currency: 'USD', opens_at: null, closes_at: null, active: 1, visible_from: null, waitlist_enabled: 0,
-  confirmation_prefix: null, poster: null, notes: null, max_party_size: 4, allow_self_edit: 1, confirmed_count: 0, taken_count: 0, waitlist_count: 0,
+  confirmation_prefix: null, poster: null, notes: null, max_party_size: 4, allow_self_edit: 1, requires_approval: 0, confirmed_count: 0, taken_count: 0, waitlist_count: 0,
   phase: 'open', ...over,
 });
 const type = (id: number, capacity: number | null, taken: number, price_cents = 0): RegTicketType => ({

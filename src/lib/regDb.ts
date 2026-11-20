@@ -99,6 +99,8 @@ export interface RegEvent {
   max_party_size: number;
   /** 1 = registrants may edit/cancel through their manage link while the event is open or in preview. */
   allow_self_edit: number;
+  /** 1 = new sign-ups wait in 'review' (holding their seat) until staff accept, waitlist or decline them. Free events only. */
+  requires_approval: number;
   /** Seats held by confirmed registrations (SUM(party_size)). */
   confirmed_count: number;
   /** Seats held by pending + review + confirmed registrations (SUM(party_size)). */
@@ -160,7 +162,7 @@ function eventSelect(locale: Locale): string {
          e.opens_at AS opens_at, e.closes_at AS closes_at, e.active AS active,
          e.visible_from AS visible_from, e.waitlist_enabled AS waitlist_enabled,
          e.confirmation_prefix AS confirmation_prefix, e.poster AS poster,
-         e.max_party_size AS max_party_size, e.allow_self_edit AS allow_self_edit,
+         e.max_party_size AS max_party_size, e.allow_self_edit AS allow_self_edit, e.requires_approval AS requires_approval,
          (SELECT COALESCE(SUM(r.party_size), 0) FROM registrations r WHERE r.event_id = e.id AND r.status = 'confirmed') AS confirmed_count,
          ${seatsTakenSql('e.id')} AS taken_count,
          (SELECT COALESCE(SUM(r.party_size), 0) FROM registrations r WHERE r.event_id = e.id AND r.status = 'waitlist') AS waitlist_count
@@ -676,7 +678,9 @@ export interface RegistrationInsertInput {
   personId: number | null;
   name: string;
   email: string;
-  /** Status when a seat is available: 'confirmed' (free) or 'pending' (awaiting payment). */
+  /** Status when a seat is available: 'confirmed' (free) or 'pending' (awaiting payment). On an event that
+   *  requires approval a free 'confirmed' becomes 'review' (the seat is held until staff decide); an event
+   *  that requires approval inserts nothing for a priced registration. */
   status: 'pending' | 'confirmed';
   amountCents: number;
   currency: string;
@@ -698,6 +702,11 @@ export interface RegistrationInsertInput {
   answers: Array<[number, string]>;
   /** Extra conditions for the guest continuation: still active, not closed at `now`, free, same currency. */
   guard?: { now: string; currency: string };
+  /** Staff-created (the back office's manual add): the status is stored as given (never 'review', never a
+   *  waitlist fallback), `payment_method` is recorded, the ticket prices need not add up to the amount
+   *  (offline payments are entered by hand), and `overCapacity` skips the seat and ticket limits (the caller
+   *  already asked staff to confirm). Phase and the paid-approval refusal are unchanged. */
+  staff?: { paymentMethod: 'offline' | 'comp' | null; overCapacity: boolean };
 }
 
 /** Index of the INSERT ... RETURNING result inside registrationInsertStatements. */
@@ -757,7 +766,9 @@ export function registrationInsertStatements(db: AppDb, input: RegistrationInser
     );
     prices.push(`${count} * COALESCE((SELECT tp.price_cents FROM reg_ticket_types tp WHERE tp.id = ${ref}), 0)`);
   }
-  const typesHard = hasTypes ? `${valid.join(' AND ')} AND (${prices.join(' + ')}) = CAST(?6 AS INTEGER)` : '1 = 1';
+  const typesHard = hasTypes
+    ? (input.staff ? valid.join(' AND ') : `${valid.join(' AND ')} AND (${prices.join(' + ')}) = CAST(?6 AS INTEGER)`)
+    : '1 = 1';
   const typesFit = hasTypes ? fits.join(' AND ') : '1 = 1';
 
   // A typed event ignores the event price, so the continuation's "still free" guard is the amount check above.
@@ -768,7 +779,13 @@ export function registrationInsertStatements(db: AppDb, input: RegistrationInser
     guard = ` AND e.active = 1 AND COALESCE(e.closes_at, e.starts_at) > CAST(${now} AS TEXT)
            ${hasTypes ? '' : 'AND COALESCE(e.price_cents, 0) = 0'} AND lower(e.currency) = lower(CAST(${currency} AS TEXT))`;
   }
-  const seatsFit = `(e.capacity IS NULL OR h.taken + CAST(?9 AS INTEGER) <= e.capacity) AND ${typesFit}`;
+  const seatsFit = input.staff?.overCapacity ? '1 = 1' : `(e.capacity IS NULL OR h.taken + CAST(?9 AS INTEGER) <= e.capacity) AND ${typesFit}`;
+  const paymentMethod = input.staff ? `CAST(${bindNext(input.staff.paymentMethod)} AS TEXT)` : 'NULL';
+  const statusExpr = input.staff
+    ? 'CAST(?5 AS TEXT)'
+    : `CASE WHEN ${seatsFit}
+                     THEN CASE WHEN CAST(?5 AS TEXT) = 'confirmed' AND e.requires_approval = 1 THEN 'review' ELSE CAST(?5 AS TEXT) END
+                     ELSE 'waitlist' END`;
 
   const stmts: AppStatement[] = [
     db.prepare(EVENT_LOCK_AND_NUMBER_SQL).bind(input.eventId),
@@ -776,17 +793,18 @@ export function registrationInsertStatements(db: AppDb, input: RegistrationInser
       .prepare(
         `INSERT INTO registrations
            (${idColumn}event_id, person_id, name, email, status, amount_cents, currency, submission_key, confirmation_no, party_size,
-            locale, phone, manage_token_hash)
+            locale, phone, manage_token_hash, payment_method)
          SELECT ${idValue}e.id, CAST(?2 AS INTEGER), CAST(?3 AS TEXT), CAST(?4 AS TEXT),
-                CASE WHEN ${seatsFit} THEN CAST(?5 AS TEXT) ELSE 'waitlist' END,
+                ${statusExpr},
                 CAST(?6 AS INTEGER), CAST(?7 AS TEXT), CAST(?8 AS TEXT), ${confirmationNoSql('e')}, CAST(?9 AS INTEGER),
-                CAST(?11 AS TEXT), CAST(?12 AS TEXT), CAST(?13 AS TEXT)
+                CAST(?11 AS TEXT), CAST(?12 AS TEXT), CAST(?13 AS TEXT), ${paymentMethod}
          FROM reg_events e
          CROSS JOIN (
            SELECT COALESCE(SUM(r.party_size), 0) AS taken
            FROM registrations r WHERE r.event_id = ?1 AND ${HOLDS_SEAT}
          ) h
          WHERE e.id = ?1 AND e.is_template = 0 AND ${typesHard}
+           AND NOT (e.requires_approval = 1 AND CAST(?6 AS INTEGER) > 0)
            AND (${seatsFit}
                 OR (CAST(?10 AS INTEGER) = 1 AND e.waitlist_enabled = 1))${guard}
          RETURNING id, status, confirmation_no`,
@@ -913,7 +931,8 @@ export const newSubmissionKey = (): string => `srv:${crypto.randomUUID()}`;
  * sum of their prices (the passed `amountCents` is ignored), and each type's limit is part of the
  * same locked capacity decision (a free party over any limit waitlists whole, a paid one throws
  * 'event_full'). An event without active types rejects a ticketTypeId. A template is never
- * registerable ('event_not_found').
+ * registerable ('event_not_found'). An event that requires approval takes free registrations only
+ * ('approval_requires_free' for a priced one) and creates them in 'review' (see RegistrationInsertInput.status).
  *
  * Idempotent per (event, submissionKey): a repeat returns the original row
  * without a second attendee, and a unique-violation race (two requests with the
@@ -980,8 +999,9 @@ export async function createRegistration(
   if (created) return created;
   if (results[0].meta.changes === 0) throw new Error('event_not_found');
   // Nothing was inserted: a template, a ticket type deactivated or repriced since the form was read, or a full event.
-  const event = await db.prepare(`SELECT is_template FROM reg_events WHERE id = ?1`).bind(input.eventId).first<{ is_template: number }>();
+  const event = await db.prepare(`SELECT is_template, requires_approval FROM reg_events WHERE id = ?1`).bind(input.eventId).first<{ is_template: number; requires_approval: number }>();
   if (!event || event.is_template === 1) throw new Error('event_not_found');
+  if (event.requires_approval === 1 && amountCents > 0) throw new Error('approval_requires_free');
   if (priced !== null && (await priceTicketSelection(db, input.eventId, input.attendees)) !== amountCents) throw new Error('ticket_type_invalid');
   throw new Error('event_full');
 }
@@ -1020,7 +1040,7 @@ export async function priceTicketSelection(
 /** Attach the Stripe Checkout session id to a pending registration (paid flow). */
 export async function attachCheckoutSession(db: AppDb, registrationId: number, sessionId: string): Promise<void> {
   await db
-    .prepare(`UPDATE registrations SET stripe_checkout_session_id = ?1, updated_at = datetime('now') WHERE id = ?2`)
+    .prepare(`UPDATE registrations SET stripe_checkout_session_id = ?1, payment_method = 'stripe', updated_at = datetime('now') WHERE id = ?2`)
     .bind(sessionId, registrationId)
     .run();
 }
@@ -1033,7 +1053,7 @@ export async function attachCheckoutSession(db: AppDb, registrationId: number, s
 export async function confirmBySession(db: AppDb, sessionId: string, paymentIntentId: string | null): Promise<boolean> {
   const r = await db
     .prepare(
-      `UPDATE registrations SET status = 'confirmed', stripe_payment_intent_id = ?2, updated_at = datetime('now')
+      `UPDATE registrations SET status = 'confirmed', stripe_payment_intent_id = ?2, version = version + 1, updated_at = datetime('now')
        WHERE stripe_checkout_session_id = ?1 AND status = 'pending'`,
     )
     .bind(sessionId, paymentIntentId)
@@ -1049,7 +1069,7 @@ export async function confirmBySession(db: AppDb, sessionId: string, paymentInte
 export async function cancelBySession(db: AppDb, sessionId: string): Promise<boolean> {
   const r = await db
     .prepare(
-      `UPDATE registrations SET status = 'cancelled', updated_at = datetime('now')
+      `UPDATE registrations SET status = 'cancelled', version = version + 1, updated_at = datetime('now')
        WHERE stripe_checkout_session_id = ?1 AND status = 'pending'`,
     )
     .bind(sessionId)
@@ -1089,7 +1109,9 @@ export async function applyRegistrationCheckoutSession(
       `UPDATE registrations
        SET status = ?1,
            stripe_checkout_session_id = ?2,
+           payment_method = 'stripe',
            stripe_payment_intent_id = CASE WHEN ?1 = 'confirmed' THEN ?3 ELSE stripe_payment_intent_id END,
+           version = version + 1,
            updated_at = datetime('now')
        WHERE id = ?4
          AND (
@@ -1230,9 +1252,9 @@ export async function applyClaimedRegistrationCheckoutSession(
     await db.batch([
       db.prepare(
         `UPDATE registrations r
-         SET status=?1,stripe_checkout_session_id=?2,
+         SET status=?1,stripe_checkout_session_id=?2,payment_method='stripe',
              stripe_payment_intent_id=CASE WHEN ?1='confirmed' THEN ?3 ELSE stripe_payment_intent_id END,
-             updated_at=datetime('now')
+             version=version+1,updated_at=datetime('now')
          WHERE r.id=?4 AND r.status='pending' AND r.amount_cents=?5 AND r.currency=?6
            AND (r.stripe_checkout_session_id IS NULL OR r.stripe_checkout_session_id=?2)
            AND EXISTS (
@@ -1319,7 +1341,7 @@ export async function attachClaimedRegistrationCheckoutSessionId(
     await db.batch([
       db.prepare(
         `UPDATE registrations r
-         SET stripe_checkout_session_id=?1,updated_at=datetime('now')
+         SET stripe_checkout_session_id=?1,payment_method='stripe',updated_at=datetime('now')
          WHERE r.id=?2 AND r.status='pending' AND r.amount_cents=?3 AND r.currency=?4
            AND (r.stripe_checkout_session_id IS NULL OR r.stripe_checkout_session_id=?1)
            AND EXISTS (
@@ -1394,7 +1416,7 @@ export async function cancelClaimedRegistrationCheckoutRequest(
   try {
     await db.batch([
       db.prepare(
-        `UPDATE registrations r SET status='cancelled',updated_at=datetime('now')
+        `UPDATE registrations r SET status='cancelled',version=version+1,updated_at=datetime('now')
          WHERE r.id=?1 AND r.status='pending'
            AND EXISTS (
              SELECT 1 FROM church_private.stripe_checkout_requests q
@@ -1457,7 +1479,7 @@ export async function cancelRegistrationPromoting(
     db.prepare(`UPDATE reg_events SET updated_at = updated_at WHERE id = ?1`).bind(event.event_id),
     db
       .prepare(
-        `UPDATE registrations SET status = 'cancelled', cancelled_at = datetime('now'), updated_at = datetime('now')
+        `UPDATE registrations SET status = 'cancelled', cancelled_at = datetime('now'), version = version + 1, updated_at = datetime('now')
          WHERE id = ?1 AND status != 'cancelled'`,
       )
       .bind(id),
@@ -1479,7 +1501,8 @@ export async function cancelRegistrationPromoting(
  * registration never waitlists, and its seat is released by Stripe session expiry instead).
  * "Free" is the registration's own amount, not the event price, so it holds for ticket-typed
  * events too. A party is promoted only when the event capacity AND every ticket type's limit
- * hold its people. Runs after any seat is released. Candidates are read first (oldest first:
+ * hold its people. Runs after any seat is released. On an event that requires approval the promoted party
+ * becomes 'review' (it holds the seats, staff still decide), not 'confirmed'. Candidates are read first (oldest first:
  * created_at, id), then ONE batch runs: a row lock on the event (so two
  * concurrent releases serialize and each candidate is promoted once), then one
  * guarded UPDATE per candidate - still waitlisted AND the whole party fits in the
@@ -1488,13 +1511,18 @@ export async function cancelRegistrationPromoting(
  * skipped party stays first in line for the next release. Returns the promoted
  * registration ids in promotion order.
  */
-export async function promoteWaitlist(db: AppDb, eventId: number): Promise<number[]> {
-  const event = await db.prepare(`SELECT id FROM reg_events WHERE id = ?1`).bind(eventId).first<{ id: number }>();
+export async function promoteWaitlist(db: AppDb, eventId: number, opts: { exclude?: number[] } = {}): Promise<number[]> {
+  const event = await db.prepare(`SELECT id, requires_approval FROM reg_events WHERE id = ?1`).bind(eventId).first<{ id: number; requires_approval: number }>();
   if (!event) return [];
-  const { results: candidates } = await db
+  // On an event that requires approval a freed seat only brings the waitlisted party up to 'review'.
+  const target: RegStatus = event.requires_approval === 1 ? 'review' : 'confirmed';
+  const { results: everyone } = await db
     .prepare(`SELECT id FROM registrations WHERE event_id = ?1 AND status = 'waitlist' ORDER BY created_at, id`)
     .bind(eventId)
     .all<{ id: number }>();
+  // `exclude`: registrations staff just moved to the waitlist, which must not be promoted straight back.
+  const skip = new Set(opts.exclude ?? []);
+  const candidates = everyone.filter((c) => !skip.has(c.id));
   if (candidates.length === 0) return [];
   const stmts: AppStatement[] = [
     // The lock only; it must not take a confirmation number.
@@ -1504,7 +1532,7 @@ export async function promoteWaitlist(db: AppDb, eventId: number): Promise<numbe
     stmts.push(
       db
         .prepare(
-          `UPDATE registrations SET status = 'confirmed', updated_at = datetime('now')
+          `UPDATE registrations SET status = ?3, version = version + 1, updated_at = datetime('now')
            WHERE id = ?1 AND event_id = ?2 AND status = 'waitlist' AND amount_cents = 0
              AND EXISTS (
                SELECT 1 FROM reg_events e
@@ -1524,7 +1552,7 @@ export async function promoteWaitlist(db: AppDb, eventId: number): Promise<numbe
              )
            RETURNING id`,
         )
-        .bind(candidate.id, eventId),
+        .bind(candidate.id, eventId, target),
     );
   }
   const results = await db.batch(stmts);
@@ -1575,6 +1603,10 @@ export interface RegEventAdmin {
   poster: string | null;
   max_party_size: number;
   allow_self_edit: number;
+  /** 1 = new sign-ups wait in 'review' until staff decide. Free events only. */
+  requires_approval: number;
+  /** NULL (no reminder) or 1-30: days before the start that confirmed registrants get a reminder email. */
+  reminder_days: number | null;
   /** 1 = a reusable template: never public, never registerable. */
   is_template: number;
   /** Per-language notes shown to registrants (only languages that have a row/notes). */
@@ -1593,6 +1625,7 @@ const ADMIN_EVENT_SELECT = `
          e.visible_from AS visible_from, e.waitlist_enabled AS waitlist_enabled,
          e.confirmation_prefix AS confirmation_prefix, e.next_confirmation AS next_confirmation,
          e.poster AS poster, e.max_party_size AS max_party_size, e.allow_self_edit AS allow_self_edit,
+         e.requires_approval AS requires_approval, e.reminder_days AS reminder_days,
          e.is_template AS is_template,
          (SELECT COALESCE(SUM(r.party_size), 0) FROM registrations r WHERE r.event_id = e.id AND r.status = 'confirmed') AS confirmed_count,
          ${seatsTakenSql('e.id')} AS taken_count,
@@ -1687,6 +1720,11 @@ export interface RegEventSaveInput {
   max_party_size?: number;
   /** 1/0: registrants may edit or cancel through their manage link (default 1). */
   allow_self_edit?: number;
+  /** 1/0: new sign-ups wait for staff approval (default 0; undefined leaves it unchanged on update). Refused
+   *  ('approval_requires_free') while the event or any active ticket type has a price. */
+  requires_approval?: number;
+  /** Days (1-30) before the start that confirmed registrants get a reminder; null = none; undefined leaves it unchanged. */
+  reminder_days?: number | null;
   /** The installation's default language (default: the runtime default). */
   defaultLocale?: Locale;
 }
@@ -1735,6 +1773,31 @@ export async function saveEvent(db: AppDb, input: RegEventSaveInput): Promise<nu
   if (input.allow_self_edit !== undefined && input.allow_self_edit !== 0 && input.allow_self_edit !== 1) {
     throw new Error('allow_self_edit_invalid');
   }
+  if (input.requires_approval !== undefined && input.requires_approval !== 0 && input.requires_approval !== 1) {
+    throw new Error('requires_approval_invalid');
+  }
+  if (input.reminder_days != null && !(Number.isInteger(input.reminder_days) && input.reminder_days >= 1 && input.reminder_days <= 30)) {
+    throw new Error('reminder_days_invalid');
+  }
+  // Approval holds a seat for a free sign-up; a price (on the event or an active ticket type) is refused,
+  // whichever order the two were set in.
+  {
+    let approval = input.requires_approval;
+    if (approval === undefined && input.id != null) {
+      const stored = await db.prepare(`SELECT requires_approval FROM reg_events WHERE id = ?1`).bind(input.id).first<{ requires_approval: number }>();
+      approval = stored?.requires_approval ?? 0;
+    }
+    if (approval === 1) {
+      if ((input.price_cents ?? 0) > 0) throw new Error('approval_requires_free');
+      if (input.id != null) {
+        const priced = await db
+          .prepare(`SELECT 1 AS present FROM reg_ticket_types WHERE event_id = ?1 AND active = 1 AND price_cents > 0`)
+          .bind(input.id)
+          .first();
+        if (priced) throw new Error('approval_requires_free');
+      }
+    }
+  }
 
   let eventId: number;
   if (input.id != null) {
@@ -1753,6 +1816,8 @@ export async function saveEvent(db: AppDb, input: RegEventSaveInput): Promise<nu
       ['poster', input.poster],
       ['max_party_size', input.max_party_size],
       ['allow_self_edit', input.allow_self_edit],
+      ['requires_approval', input.requires_approval],
+      ['reminder_days', input.reminder_days],
     ];
     for (const [column, value] of optional) {
       if (value === undefined) continue;
@@ -1770,14 +1835,15 @@ export async function saveEvent(db: AppDb, input: RegEventSaveInput): Promise<nu
     const created = await db
       .prepare(
         `INSERT INTO reg_events (starts_at, ends_at, location, capacity, price_cents, opens_at, closes_at, active,
-                                 visible_from, waitlist_enabled, confirmation_prefix, poster, max_party_size, allow_self_edit)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) RETURNING id`,
+                                 visible_from, waitlist_enabled, confirmation_prefix, poster, max_party_size, allow_self_edit,
+                                 requires_approval, reminder_days)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16) RETURNING id`,
       )
       .bind(
         input.starts_at, input.ends_at ?? null, input.location ?? null, input.capacity ?? null,
         input.price_cents ?? null, input.opens_at ?? null, input.closes_at ?? null, input.active,
         input.visible_from ?? null, input.waitlist_enabled ?? 1, input.confirmation_prefix ?? null, input.poster ?? null,
-        input.max_party_size ?? 1, input.allow_self_edit ?? 1,
+        input.max_party_size ?? 1, input.allow_self_edit ?? 1, input.requires_approval ?? 0, input.reminder_days ?? null,
       )
       .first<{ id: number }>();
     eventId = created!.id;
@@ -1910,10 +1976,10 @@ async function copyEvent(
     .prepare(
       `INSERT INTO reg_events (starts_at, ends_at, location, capacity, price_cents, currency, opens_at, closes_at,
                                active, visible_from, waitlist_enabled, confirmation_prefix, next_confirmation, poster,
-                               max_party_size, allow_self_edit, is_template)
+                               max_party_size, allow_self_edit, requires_approval, reminder_days, is_template)
        SELECT starts_at, ends_at, location, capacity, price_cents, currency, opens_at, closes_at,
               0, visible_from, waitlist_enabled, confirmation_prefix, 1, poster,
-              max_party_size, allow_self_edit, CAST(?2 AS INTEGER)
+              max_party_size, allow_self_edit, requires_approval, reminder_days, CAST(?2 AS INTEGER)
        FROM reg_events WHERE id = ?1
        RETURNING id`,
     )
@@ -2265,7 +2331,7 @@ export async function saveEventForm(
 ): Promise<SaveEventFormResult> {
   const defaultLocale = opts.defaultLocale ?? getRuntimeDefaultLocale();
   const errors: FormError[] = [];
-  const event = await db.prepare(`SELECT id FROM reg_events WHERE id = ?1`).bind(eventId).first<{ id: number }>();
+  const event = await db.prepare(`SELECT id, requires_approval FROM reg_events WHERE id = ?1`).bind(eventId).first<{ id: number; requires_approval: number }>();
   if (!event) return { ok: false, errors: [{ path: '', code: 'event_not_found' }] };
   if (!isRecord(payload)) return { ok: false, errors: [{ path: '', code: 'invalid' }] };
 
@@ -2474,6 +2540,8 @@ export async function saveEventForm(
       if (typeof price !== 'number' || !Number.isInteger(price) || price < 0 || price > MAX_PRICE_CENTS) errors.push({ path: at('price_cents'), code: 'invalid' });
       else if (price > 0 && opts.backend === 'd1') errors.push({ path: at('price_cents'), code: 'paid_unavailable' });
       else draft.price_cents = price;
+      // An event that requires approval is free: no active ticket type may carry a price.
+      if (typeof price === 'number' && price > 0 && event.requires_approval === 1 && !(raw.active === false || raw.active === 0)) errors.push({ path: at('price_cents'), code: 'approval_requires_free' });
       if (raw.capacity !== undefined && raw.capacity !== null) {
         const c = raw.capacity;
         if (typeof c !== 'number' || !Number.isInteger(c) || c < 1 || c > 1_000_000) errors.push({ path: at('capacity'), code: 'invalid' });

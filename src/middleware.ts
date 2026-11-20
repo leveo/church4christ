@@ -385,7 +385,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
     // pre-session), role short = 403 (canAccess), grant missing = 403 (here).
     // Unknown /admin paths carry no area and fail closed to super-admin-only.
     const u = context.locals.user;
-    if (u?.isAdmin && !u.isSuperAdmin && (rest === '/admin' || rest.startsWith('/admin/'))) {
+    // The per-event registration pages are the exception: a limited admin with only a per-event role (no
+    // `registration` area) must reach them, and the page itself checks the role (regEventRole).
+    if (u?.isAdmin && !u.isSuperAdmin && cls !== 'regEventStaff' && (rest === '/admin' || rest.startsWith('/admin/'))) {
       if (rest !== '/admin') {
         const area = adminAreaForPath(rest);
         if (!area || !hasAreaAccess(u, area)) return finish(forbidden(context.locals.locale));
