@@ -28,7 +28,7 @@ ones you do not need and click **Save modules** — the change takes effect imme
 
 ![The Modules panel in Settings](../images/admin/settings-modules.png)
 
-**The 22 modules:**
+**The 23 modules:**
 
 <!-- capabilities:start -->
 | Key | English | 中文 | Required database |
@@ -55,6 +55,7 @@ ones you do not need and click **Save modules** — the change takes effect imme
 | `registration` | Registration | 活动报名 | Either |
 | `learning` | Learning | 学习 | Either |
 | `planning` | Service Planning | 服事流程 | Either |
+| `event-logistics` | Event Logistics | 活动后勤 | Either |
 <!-- capabilities:end -->
 
 The `learning` module depends on `people`, works on either database, and is enabled by the

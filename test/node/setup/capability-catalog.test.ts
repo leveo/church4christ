@@ -31,6 +31,7 @@ const EXPECTED_KEYS = [
   'registration',
   'learning',
   'planning',
+  'event-logistics',
 ] as const;
 
 const cloneCatalog = (): any => structuredClone(catalogJson);
@@ -62,7 +63,7 @@ describe('canonical capability catalog', () => {
     expect(CAPABILITY_CATALOG.presets['website-community'].modules).toEqual(
       [...EXPECTED_KEYS.slice(0, 17), 'learning'],
     );
-    // Service Planning (module 22) is in no preset; it is switched on separately.
+    // Service Planning (module 22) and Event Logistics (module 23) are in no preset; they are switched on separately.
     expect(CAPABILITY_CATALOG.presets['full-church'].modules).toEqual(EXPECTED_KEYS.slice(0, 21));
   });
 
@@ -82,7 +83,7 @@ describe('canonical capability catalog', () => {
   });
 
   test('registers Newcomers on both providers with People as a hard dependency', () => {
-    expect(CAPABILITY_KEYS).toHaveLength(22);
+    expect(CAPABILITY_KEYS).toHaveLength(23);
     expect(CAPABILITY_CATALOG.presets.website.modules).toHaveLength(8);
     expect(CAPABILITY_CATALOG.presets['website-community'].modules).toHaveLength(18);
     expect(CAPABILITY_CATALOG.presets['full-church'].modules).toHaveLength(21);

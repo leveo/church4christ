@@ -21,7 +21,8 @@
     "giving": { "label": "Dons", "description": "Enregistrez les dons et acceptez éventuellement les paiements Stripe." },
     "registration": { "label": "Inscriptions", "description": "Gérez des inscriptions gratuites ou payantes aux événements." },
     "learning": { "label": "Formation", "description": "Poursuivez les cours de ministère au-delà du temps de classe." },
-    "planning": { "label": "Planification des cultes", "description": "Planifiez les déroulés, les répétitions, les disponibilités et les calendriers des cultes et des événements." }
+    "planning": { "label": "Planification des cultes", "description": "Planifiez les déroulés, les répétitions, les disponibilités et les calendriers des cultes et des événements." },
+    "event-logistics": { "label": "Logistique des événements", "description": "Répartissez l’hébergement, les tables et les petits groupes des personnes inscrites à un événement." }
   },
   "presets": {
     "website": { "label": "Site web", "description": "Un site public ciblé et une boîte à outils de publication." },

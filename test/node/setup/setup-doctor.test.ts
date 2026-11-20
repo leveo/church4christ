@@ -68,6 +68,7 @@ const SUPABASE_MIGRATIONS = [
   '0043_registration_party.sql',
   '0044_registration_builder.sql',
   '0045_registration_back_office.sql',
+  '0046_registration_logistics.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });
@@ -392,6 +393,10 @@ describe('doctor database check', () => {
     expect(TABLES_BY_CAPABILITY.registration).toEqual(expect.arrayContaining([
       'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers', 'reg_attendees', 'reg_attendee_answers', 'reg_ticket_types', 'reg_ticket_type_i18n', 'reg_checkins', 'reg_activity', 'reg_event_access', 'reg_outbox',
     ]));
+    expect(TABLES_BY_CAPABILITY['event-logistics']).toEqual([
+      'reg_tags', 'reg_attendee_tags', 'reg_venues', 'reg_room_types', 'reg_rooms', 'reg_room_assignments',
+      'reg_tables', 'reg_table_seats', 'reg_groups', 'reg_group_members',
+    ]);
     expect(TABLES_BY_CAPABILITY.portal).toEqual(expect.arrayContaining([
       'group_members', 'group_files', 'prayer_items', 'households', 'household_members',
     ]));

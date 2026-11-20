@@ -17,6 +17,7 @@ import {
   moduleBackendRequirementKey,
   buildModuleGroups,
   filterByBackend,
+  logisticsModuleEnabled,
   moduleForPath,
 } from '../src/lib/modules';
 
@@ -26,7 +27,7 @@ describe('MODULES registry', () => {
     expect(moduleBackendRequirementKey('d1')).toBe('admin.modules.requiresD1');
   });
 
-  it('has all 22 module keys in display order', () => {
+  it('has all 23 module keys in display order', () => {
     expect([...MODULE_KEYS]).toEqual([
       'bulletins',
       'sermons',
@@ -50,6 +51,7 @@ describe('MODULES registry', () => {
       'registration',
       'learning',
       'planning',
+      'event-logistics',
     ]);
   });
 
@@ -92,6 +94,16 @@ describe('MODULES registry', () => {
         expect(MODULES[key].uses).toEqual([]);
       }
     }
+  });
+
+  it('event logistics hard-depends on registration, owns no routes and runs on both backends', () => {
+    const raw = CAPABILITIES['event-logistics'];
+    expect(raw.dependsOn).toEqual(['registration']);
+    expect(MODULES['event-logistics']).toEqual({ publicPrefixes: [], adminPrefixes: [], navKeys: [], uses: [] });
+    expect(moduleForPath('/admin/registration/5')).toBe('registration');
+    expect(logisticsModuleEnabled(new Set(['registration', 'event-logistics']))).toBe(true);
+    expect(logisticsModuleEnabled(new Set(['event-logistics']))).toBe(false);
+    expect(logisticsModuleEnabled(new Set(['registration']))).toBe(false);
   });
 
   it('only giving requires the supabase backend (portal and registration run on D1)', () => {

@@ -47,9 +47,9 @@ describe('buildSetupPlan', () => {
   it('turns Full Church into Supabase with every module enabled', () => {
     const plan = buildSetupPlan({ ...base, preset: 'full-church' }, raw);
     expect(plan.backend).toBe('supabase');
-    // Service Planning is not part of any preset: it is switched on separately.
+    // Service Planning and Event Logistics are not part of any preset: they are switched on separately.
     const off = Object.entries(plan.moduleSettings).filter(([, value]) => value === '0').map(([key]) => key);
-    expect(off).toEqual(['module.planning']);
+    expect(off).toEqual(['module.planning', 'module.event-logistics']);
     expect(plan.services).toEqual(['hyperdrive', 'r2', 'worker']);
   });
 

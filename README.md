@@ -292,6 +292,7 @@ is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
 | `registration` | Registration | 活动报名 | Either |
 | `learning` | Learning | 学习 | Either |
 | `planning` | Service Planning | 服事流程 | Either |
+| `event-logistics` | Event Logistics | 活动后勤 | Either |
 <!-- capabilities:end -->
 
 ### Community management and workflows
@@ -456,7 +457,7 @@ pricing pages before deployment.
 | Profile | Included scope | Cost and readiness notes |
 |---|---|---|
 | **Local evaluation** | Website or community modules with local D1; full modules with compatible local Postgres | No hosted-service charge is required for local D1 evaluation. You still provide the computer, development time, and any optional external services. |
-| **D1 website/community** | Cloudflare Worker, D1, and R2 for up to 21 D1-compatible modules | A modest deployment can fit within Cloudflare free allowances. Traffic, storage, operations beyond allowances, a domain, and other services can cost money; check [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/). Production email is separate. |
+| **D1 website/community** | Cloudflare Worker, D1, and R2 for up to 22 D1-compatible modules | A modest deployment can fit within Cloudflare free allowances. Traffic, storage, operations beyond allowances, a domain, and other services can cost money; check [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/). Production email is separate. |
 | **Production email** | Transactional sign-in links, reminders, requests, and digests to arbitrary recipients | The repository supports a paid-capable Cloudflare email configuration. Arbitrary-recipient sending requires Workers Paid, currently a minimum **$5/month** including **3,000 emails**, then **$0.35 per 1,000 emails**. These amounts are subject to change; check [Cloudflare Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/). |
 | **Supabase/full modules** | Cloudflare deployment plus Supabase/Postgres for the 21 Full Church modules, including Member Portal, Giving, and Registration | Cloudflare costs still apply, and the selected [Supabase plan](https://supabase.com/pricing) may add subscription or usage charges. As of August 2026, Supabase Free has no automatic daily backups, and low-activity Free projects may be [automatically paused](https://supabase.com/docs/guides/platform/free-project-pausing) based on activity over a seven-day period. For production, take regular off-site database dumps and perform restore drills, or select a paid plan whose [backup options](https://supabase.com/docs/guides/platform/backups) meet your continuity requirements. Pricing and service policies are subject to change. Stripe starts in test mode; live payments are an explicit opt-in after the go-live checklist in [`docs/supabase-setup.md`](docs/supabase-setup.md). |
 
@@ -477,7 +478,7 @@ walkthrough.
 
 Start with `npm run setup`, choose **Deploy**, and answer the feature and church questions.
 It creates or imports the required resources, writes the generated configuration, applies
-migrations, records all 22 module settings, and bootstraps the first admin. It then hands
+migrations, records all 23 module settings, and bootstraps the first admin. It then hands
 off to `npm run deploy`. Run `npm run doctor` for the schema-v2 readiness report, and use
 the always-on `/admin/onboarding` checklist for the same stable check identities.
 Giving, Registration, Groups, Teams, Newcomer, imports, and the optional read-only Planning
@@ -496,7 +497,7 @@ inventory, rehearse in staging, and review the [`Unreleased` changelog](CHANGELO
 applying forward migrations. Maintainers preparing a release should follow
 the [release process](docs/release-process.md).
 
-**Choosing your database.** The 21 D1-compatible modules exclude
+**Choosing your database.** The 22 D1-compatible modules exclude
 **Giving**, which requires Postgres, and **paid Registration**, which does too. Account requirements follow the
 mode: local D1 needs no external account; deployed D1 needs a Cloudflare account; local
 Supabase needs a Supabase account or compatible local Postgres database; deployed Supabase

@@ -87,6 +87,10 @@
     "planning": {
       "label": "Perencanaan Ibadah",
       "description": "Rencanakan rundown, latihan, ketersediaan, dan kalender untuk ibadah dan acara."
+    },
+    "event-logistics": {
+      "label": "Logistik acara",
+      "description": "Atur penginapan, tempat duduk, dan kelompok kecil bagi orang yang terdaftar di sebuah acara."
     }
   },
   "presets": {
