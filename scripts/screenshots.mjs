@@ -355,6 +355,78 @@ const LEGACY_CAPTURE_ROWS = [
       { wait: '[data-confirmation]' },
     ],
   },
+  // Ticket types, per-person questions and show-if (Phase 3). These rows use the sample event "Family Camp Weekend"
+  // (931 on the throwaway state built for the builder rows above: Adult / Child tickets, a childcare yes/no with a
+  // conditional number, per-person shirt size, diet and a conditional badge name, and a terms question). The review
+  // and manage rows REGISTER for real: run each in its own pass on a disposable database.
+  ...[
+    ['docs/images/registration/form-tickets.png', null],
+    ['docs/images/mobile/register-form-tickets.png', MOBILE_VIEWPORT],
+  ].map(([out, viewport]) => ({
+    path: '/en/register/931', out, backend: 'd1', sessionIdentity: DAVID, anchorSelector: '#f-party', anchorMargin: viewport ? 20 : 40, ...(viewport ? { viewport } : {}),
+    expectedText: 'Ticket type',
+    interact: [
+      { wait: '[data-household]:not([hidden])' },
+      { click: '[data-chip][data-name="Mia Chen"]' },
+      { click: 'input[name="ticket_0"][value="1"]' },
+      { click: 'input[name="ticket_1"][value="2"]' },
+      { click: 'input[name="924"][value="yes"]' },
+      { fill: { 'input[name="925"]': '1', 'select[name="pq_0_926"]': 'm', 'select[name="pq_1_926"]': 's', 'input[name="pq_0_928"]': 'Dave' } },
+    ],
+  })),
+  // The same form further down: the second person's own block, then the once-per-registration questions with the
+  // conditional "How many children?" shown because the childcare answer is Yes.
+  ...[
+    ['docs/images/registration/form-person-two.png', '#f-ticket-1', 'Person 2'],
+    ['docs/images/registration/form-questions.png', '[data-qid="923"]', 'About your family'],
+  ].map(([out, anchorSelector, expectedText]) => ({
+    path: '/en/register/931', out, backend: 'd1', sessionIdentity: DAVID, anchorSelector, anchorMargin: 40, expectedText,
+    interact: [
+      { wait: '[data-household]:not([hidden])' },
+      { click: '[data-chip][data-name="Mia Chen"]' },
+      { click: 'input[name="ticket_0"][value="1"]' },
+      { click: 'input[name="ticket_1"][value="2"]' },
+      { click: 'input[name="924"][value="yes"]' },
+      { fill: { 'input[name="925"]': '1', 'select[name="pq_0_926"]': 'm', 'select[name="pq_1_926"]': 's', 'input[name="pq_0_928"]': 'Dave' } },
+    ],
+  })),
+  ...[
+    ['docs/images/registration/review-tickets.png', null],
+    ['docs/images/mobile/register-review-tickets.png', MOBILE_VIEWPORT],
+  ].map(([out, viewport]) => ({
+    path: '/en/register/931', out, backend: 'd1', sessionIdentity: DAVID, ...(viewport ? { viewport, anchor: 'Check your registration', anchorMargin: 20 } : {}),
+    expectedText: 'Check your registration',
+    interact: [
+      { wait: '[data-household]:not([hidden])' },
+      { click: '[data-chip][data-name="Mia Chen"]' },
+      { click: 'input[name="ticket_0"][value="1"]' },
+      { click: 'input[name="ticket_1"][value="2"]' },
+      { click: 'input[name="924"][value="yes"]' },
+      { fill: { 'input[name="925"]': '1', 'select[name="pq_0_926"]': 'm', 'select[name="pq_1_926"]': 's', 'input[name="pq_0_928"]': 'Dave' } },
+      { click: 'input[name="930"]' },
+      { submit: '[data-register-form]' },
+    ],
+  })),
+  ...[
+    ['docs/images/registration/manage-tickets.png', null, null],
+    ['docs/images/registration/manage-tickets-edit.png', null, '#reg-edit'],
+    ['docs/images/mobile/register-manage-tickets.png', MOBILE_VIEWPORT, '.reg-people'],
+  ].map(([out, viewport, anchorSelector]) => ({
+    path: '/en/register/931', out, backend: 'd1', sessionIdentity: DAVID, ...(viewport ? { viewport } : {}), ...(anchorSelector ? { anchorSelector, anchorMargin: 40 } : {}),
+    finalPath: '/en/register/manage', expectedText: 'Ticket type',
+    interact: [
+      { wait: '[data-household]:not([hidden])' },
+      { click: '[data-chip][data-name="Mia Chen"]' },
+      { click: 'input[name="ticket_0"][value="1"]' },
+      { click: 'input[name="ticket_1"][value="2"]' },
+      { click: 'input[name="924"][value="yes"]' },
+      { fill: { 'input[name="925"]': '1', 'select[name="pq_0_926"]': 'm', 'select[name="pq_1_926"]': 's', 'input[name="pq_0_928"]': 'Dave' } },
+      { click: 'input[name="930"]' },
+      { submit: '[data-register-form]' },
+      { submit: 'form[action="/api/register/submit"]' },
+      { wait: '[data-confirmation]' },
+    ],
+  })),
   { path: '/admin/registration?edit=920', out: 'docs/images/registration/admin-editor-party.png', admin: true, backend: 'd1', anchorSelector: 'input[name="max_party_size"]', anchorMargin: 120, expectedText: 'Max people per registration' },
   // Registration form builder (Phase 3). These rows need a sample event with several questions (one with a
   // show-if condition, per-person ones with options), ticket types and two templates. Build them on a throwaway

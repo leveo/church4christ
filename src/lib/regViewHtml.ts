@@ -232,7 +232,7 @@ export function renderQuestionField(q: ViewQuestion, opts: QuestionFieldOptions)
   // controls marked data-req: every required control except a checkbox group, which has no native required.
   if (q.required && q.type !== 'checkbox') control = control.replace(/<(input|select|textarea)\b/g, '<$1 data-req');
   // The terms checkbox carries its own label (and star); every other question has a legend.
-  const legend = q.type === 'terms' ? `<legend class="${lab}">${esc(q.label)}</legend>` : `<legend class="${lab}">${esc(q.label)}${star(q.required)}</legend>`;
+  const legend = q.type === 'terms' ? `<legend class="sr-only">${esc(q.label)}</legend>` : `<legend class="${lab}">${esc(q.label)}${star(q.required)}</legend>`;
   const help = q.help && q.type !== 'terms'
     ? `<details class="reg-help"><summary aria-label="${esc(opts.helpLabel ?? 'Help')}"><span aria-hidden="true">ⓘ</span></summary><p>${esc(q.help)}</p></details>`
     : '';

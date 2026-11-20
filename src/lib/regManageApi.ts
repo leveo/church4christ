@@ -85,7 +85,10 @@ export async function buildRegistrationView(
       when: whenText(event.starts_at, event.ends_at, locale),
       where: event.location,
       notes: event.notes,
-      priceText: event.price_cents !== null && event.price_cents > 0 ? formatCents(event.price_cents, event.currency, locale) : t(locale, 'register.free'),
+      // With ticket types the event price is ignored (each person's own price is on their line), so it is not shown.
+      priceText: s.attendees.some((a) => a.ticket_type_id !== null)
+        ? null
+        : event.price_cents !== null && event.price_cents > 0 ? formatCents(event.price_cents, event.currency, locale) : t(locale, 'register.free'),
     },
     registration: {
       confirmationNo: reg.confirmation_no,
