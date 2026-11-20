@@ -51,7 +51,7 @@ const TABLES_BY_CAPABILITY = Object.freeze({
   ]),
   giving: Object.freeze(['funds', 'fund_i18n', 'gifts', 'recurring_gifts', 'stripe_customers', 'giving_statement_outbox', 'giving_audit_events', 'households', 'household_members', 'identity_giving_checkout_continuations']),
   registration: Object.freeze([
-    'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers', 'reg_attendees', 'reg_attendee_answers', 'reg_ticket_types', 'reg_ticket_type_i18n', 'identity_registration_continuations',
+    'reg_events', 'reg_event_i18n', 'reg_questions', 'reg_question_i18n', 'registrations', 'reg_answers', 'reg_attendees', 'reg_attendee_answers', 'reg_ticket_types', 'reg_ticket_type_i18n', 'reg_checkins', 'reg_activity', 'reg_event_access', 'reg_outbox', 'identity_registration_continuations',
   ]),
   planning: Object.freeze([
     'planning_events', 'planning_event_coordinators', 'planning_items', 'planning_sessions',
