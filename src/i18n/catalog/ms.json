@@ -91,6 +91,14 @@
     "event-logistics": {
       "label": "Logistik acara",
       "description": "Atur penginapan, tempat duduk dan kumpulan kecil bagi orang yang mendaftar untuk sesuatu acara."
+    },
+    "pledges": {
+      "label": "Ikrar",
+      "description": "Jalankan kempen ikrar dengan jadual pemberian, sasaran dan kemasukan kad kertas."
+    },
+    "missions": {
+      "label": "Misi",
+      "description": "Paparkan lawatan misi pada peta dunia dengan garis masa dan kisah lawatan."
     }
   },
   "presets": {

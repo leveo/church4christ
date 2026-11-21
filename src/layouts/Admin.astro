@@ -125,6 +125,7 @@ const rawSections: NavSection[] = [
       },
       { label: t(lang, 'admin.nav.testimonies'), href: '/admin/testimonies', module: 'testimonies', area: 'testimonies' },
       { label: t(lang, 'admin.nav.pages'), href: '/admin/pages', area: 'pages' },
+      { label: t(lang, 'admin.nav.missions'), href: '/admin/missions', module: 'missions', area: 'missions' },
     ],
   },
   {
@@ -156,6 +157,7 @@ const rawSections: NavSection[] = [
   { label: t(lang, 'admin.nav.newcomers'), href: '/admin/newcomers', show: isNewcomerStaff, module: 'newcomers', area: 'newcomers' },
   { label: t(lang, 'admin.nav.onboarding'), href: '/admin/onboarding', show: isAdmin, area: 'onboarding' },
   { label: t(lang, 'admin.giving.title'), href: '/admin/giving', show: isFinance, module: 'giving', area: 'giving' },
+  { label: t(lang, 'admin.nav.pledges'), href: '/admin/pledges', show: isAdmin, module: 'pledges', area: 'pledges' },
   {
     label: t(lang, 'admin.stripe.title'),
     href: '/admin/stripe-events',

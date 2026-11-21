@@ -1,0 +1,64 @@
+---
+// Public pledge campaigns (module `pledges`). Lists every published campaign;
+// a single campaign is opened directly. Owned by the module, so the middleware
+// 404s this route when Pledges is off or outside its public date window.
+import Base from '../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { todayInTz, formatDate } from '../../../lib/dates';
+import { campaignPhase, listPublicCampaigns, type Campaign } from '../../../lib/pledgeDb';
+
+export const prerender = false;
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+let campaigns: Campaign[] = [];
+try {
+  campaigns = await listPublicCampaigns(Astro.locals.db, locale);
+} catch (err) {
+  console.error('pledge index: load failed', err);
+}
+if (campaigns.length === 1) return Astro.redirect(localePath(locale, `/pledge/${campaigns[0].slug}`), 302);
+const today = todayInTz();
+const phaseText = (c: Campaign, phase: ReturnType<typeof campaignPhase>) =>
+  phase === 'upcoming'
+    ? t(locale, 'pledges.phase.upcoming', { date: formatDate(c.pledge_opens!, locale) })
+    : phase === 'closed'
+      ? t(locale, 'pledges.phase.closed')
+      : c.pledge_closes
+        ? t(locale, 'pledges.phase.open', { date: formatDate(c.pledge_closes, locale) })
+        : t(locale, 'pledges.phase.openNoEnd');
+---
+
+<Base title={t(locale, 'pledges.title')} locale={locale}>
+  <div class="container-content py-10">
+    <p class="section-eyebrow">{t(locale, 'pledges.eyebrow')}</p>
+    <h1 class="mt-2 font-display text-display-lg font-bold">{t(locale, 'pledges.title')}</h1>
+    <p class="mt-3 max-w-2xl text-ink-muted">{t(locale, 'pledges.indexIntro')}</p>
+    {
+      campaigns.length === 0 ? (
+        <p class="mt-8 rounded-md border border-border bg-surface-raised px-4 py-8 text-center text-ink-muted">{t(locale, 'pledges.empty')}</p>
+      ) : (
+        <ul class="mt-8 grid gap-4 sm:grid-cols-2">
+          {campaigns.map((c) => {
+            const phase = campaignPhase(c, today);
+            return (
+              <li class="rounded-xl border border-border bg-surface-raised p-6">
+                <h2 class="font-display text-heading-sm font-bold">
+                  <a class="hover:underline" href={localePath(locale, `/pledge/${c.slug}`)}>{c.title}</a>
+                </h2>
+                <p class="mt-2 text-sm text-ink-muted">
+                  {t(locale, 'pledges.givingPeriod', { start: formatDate(c.giving_start, locale), end: formatDate(c.giving_end, locale) })}
+                </p>
+                <p class="mt-1 text-sm font-semibold">{phaseText(c, phase)}</p>
+              </li>
+            );
+          })}
+        </ul>
+      )
+    }
+  </div>
+</Base>

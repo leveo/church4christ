@@ -1,0 +1,134 @@
+---
+// Public mission atlas (module `missions`): headline numbers, a world map with a
+// pin per published trip that has coordinates, a year filter, and a timeline of
+// trip cards (newest year first). The map needs no JavaScript: the land outline
+// is a CSS mask colored by design tokens, and each pin is a link to its story.
+// Owned by the module, so the middleware 404s it when Missions is off or outside
+// its public date window.
+import Base from '../../../layouts/Base.astro';
+import { localeMeta, localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { formatDate } from '../../../lib/dates';
+import { mediaPath } from '../../../lib/mediaRef';
+import { listPublishedTrips, type TripRow } from '../../../lib/missionDb';
+import { countryName, groupByYear, projectPin, tripStats } from '../../../lib/missionMap';
+
+export const prerender = false;
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+let all: TripRow[] = [];
+try {
+  all = await listPublishedTrips(Astro.locals.db, locale);
+} catch (err) {
+  console.error('missions: load failed', err);
+}
+const years = [...new Set(all.map((trip) => trip.year))].sort((a, b) => b - a);
+const yearParam = Number(Astro.url.searchParams.get('year'));
+const year = years.includes(yearParam) ? yearParam : null;
+const trips = year ? all.filter((trip) => trip.year === year) : all;
+const stats = tripStats(all);
+const bcp47 = localeMeta(locale).bcp47;
+const place = (trip: TripRow) => trip.location || countryName(trip.country_code, bcp47);
+const when = (trip: TripRow) =>
+  trip.start_date
+    ? trip.end_date && trip.end_date !== trip.start_date
+      ? `${formatDate(trip.start_date, locale)} – ${formatDate(trip.end_date, locale)}`
+      : formatDate(trip.start_date, locale)
+    : String(trip.year);
+const pins = trips.filter((trip) => trip.latitude !== null && trip.longitude !== null);
+const href = (trip: TripRow) => localePath(locale, `/missions/${trip.slug}`);
+---
+
+<Base title={t(locale, 'missions.title')} locale={locale} description={t(locale, 'missions.intro')}>
+  <div class="container-wide py-10">
+    <p class="section-eyebrow">{t(locale, 'missions.eyebrow')}</p>
+    <h1 class="mt-2 font-display text-display-lg font-bold">{t(locale, 'missions.title')}</h1>
+    <p class="mt-3 max-w-2xl text-ink-muted">{t(locale, 'missions.intro')}</p>
+
+    {all.length > 0 && (
+      <dl class="mission-stats mt-6">
+        <div><dt>{t(locale, 'missions.stats.trips')}</dt><dd>{stats.trips}</dd></div>
+        <div><dt>{t(locale, 'missions.stats.countries')}</dt><dd>{stats.countries}</dd></div>
+        {stats.firstYear !== null && <div><dt>{t(locale, 'missions.stats.years')}</dt><dd>{stats.firstYear === stats.lastYear ? stats.firstYear : `${stats.firstYear}–${stats.lastYear}`}</dd></div>}
+      </dl>
+    )}
+
+    <figure class="mission-map mt-6" aria-labelledby="mission-map-caption">
+      <div class="mission-land" aria-hidden="true"></div>
+      {pins.map((trip) => {
+        const at = projectPin(trip.latitude!, trip.longitude!);
+        return (
+          <a class="mission-pin" href={href(trip)} style={`left:${at.left}%;top:${at.top}%`} data-trip={trip.slug}>
+            <span class="sr-only">{trip.title} · {place(trip)} · {trip.year}</span>
+            <span class="mission-pin-label" aria-hidden="true">{trip.title}<br /><small>{place(trip)} · {trip.year}</small></span>
+          </a>
+        );
+      })}
+      <figcaption id="mission-map-caption" class="sr-only">{t(locale, 'missions.mapCaption', { count: pins.length })}</figcaption>
+    </figure>
+
+    {years.length > 1 && (
+      <nav class="mt-6 flex flex-wrap gap-2" aria-label={t(locale, 'missions.filterLabel')}>
+        <a class:list={['mission-chip', !year && 'is-active']} href={localePath(locale, '/missions')} aria-current={!year ? 'page' : undefined}>{t(locale, 'missions.allYears')}</a>
+        {years.map((y) => <a class:list={['mission-chip', year === y && 'is-active']} href={`${localePath(locale, '/missions')}?year=${y}`} aria-current={year === y ? 'page' : undefined}>{y}</a>)}
+      </nav>
+    )}
+
+    {
+      trips.length === 0 ? (
+        <p class="mt-8 rounded-md border border-border bg-surface-raised px-4 py-8 text-center text-ink-muted">{t(locale, 'missions.empty')}</p>
+      ) : (
+        <div class="mt-8 space-y-10">
+          {groupByYear(trips).map((group) => (
+            <section aria-labelledby={`year-${group.year}`}>
+              <h2 id={`year-${group.year}`} class="mission-year font-display text-heading-md font-bold">{group.year}</h2>
+              <ul class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {group.trips.map((trip) => {
+                  const cover = mediaPath(trip.cover_media_key);
+                  return (
+                    <li class="mission-card">
+                      <a href={href(trip)} class="block h-full">
+                        {cover ? <img src={cover} alt="" loading="lazy" class="mission-card-img" /> : <div class="mission-card-img mission-card-blank" aria-hidden="true"></div>}
+                        <div class="p-4">
+                          <p class="text-sm text-ink-muted">{place(trip)} · {when(trip)}</p>
+                          <h3 class="mt-1 font-semibold">{trip.title}</h3>
+                          {trip.summary && <p class="mt-2 text-sm text-ink-muted">{trip.summary}</p>}
+                        </div>
+                      </a>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+        </div>
+      )
+    }
+  </div>
+</Base>
+
+<style>
+  .mission-stats { display: flex; flex-wrap: wrap; gap: 1rem 2.5rem; }
+  .mission-stats dt { font-size: .8rem; color: var(--color-ink-muted); }
+  .mission-stats dd { font-family: var(--font-display); font-size: 2rem; font-weight: 700; line-height: 1.1; }
+  .mission-map { position: relative; width: 100%; aspect-ratio: 2 / 1; border-radius: var(--radius-lg); background: var(--color-primary-soft); overflow: hidden; border: 1px solid var(--color-border); }
+  .mission-land { position: absolute; inset: 0; background: var(--color-primary); opacity: .35; -webkit-mask: url('/images/missions/world-land.svg') center / 100% 100% no-repeat; mask: url('/images/missions/world-land.svg') center / 100% 100% no-repeat; }
+  .mission-pin { position: absolute; width: 1.25rem; height: 1.25rem; margin: -.625rem 0 0 -.625rem; border-radius: 999px; background: var(--color-accent); border: 2px solid var(--color-surface); box-shadow: var(--shadow-md); }
+  .mission-pin:hover, .mission-pin:focus-visible { z-index: 2; outline: 2px solid var(--color-ring); outline-offset: 2px; }
+  .mission-pin-label { display: none; position: absolute; left: 50%; bottom: 140%; transform: translateX(-50%); width: max-content; max-width: 14rem; padding: .4rem .6rem; border-radius: var(--radius-md); background: var(--color-surface-raised); color: var(--color-ink); font-size: .8rem; line-height: 1.3; box-shadow: var(--shadow-md); border: 1px solid var(--color-border); }
+  .mission-pin-label small { color: var(--color-ink-muted); }
+  .mission-pin:hover .mission-pin-label, .mission-pin:focus-visible .mission-pin-label { display: block; }
+  .mission-chip { display: inline-flex; align-items: center; min-height: 2.5rem; padding: 0 .9rem; border-radius: 999px; border: 1px solid var(--color-border); font-size: .875rem; font-weight: 600; color: var(--color-ink-muted); }
+  .mission-chip:hover { background: var(--color-surface-raised); }
+  .mission-chip.is-active { background: var(--color-primary-soft); color: var(--color-on-primary-soft); border-color: var(--color-primary); }
+  .mission-year { border-bottom: 1px solid var(--color-border); padding-bottom: .5rem; }
+  .mission-card { border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--color-surface-raised); }
+  .mission-card:hover { box-shadow: var(--shadow-md); }
+  .mission-card-img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; }
+  .mission-card-blank { background: var(--color-primary-soft); }
+  @media (max-width: 639px) { .mission-pin { width: .9rem; height: .9rem; margin: -.45rem 0 0 -.45rem; } }
+</style>

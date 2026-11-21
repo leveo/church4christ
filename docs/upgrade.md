@@ -628,3 +628,37 @@ There is no new secret, binding, cron trigger, or dependency.
 - **Identity merge.** Who placed a person in a room, at a table, or in a group is kept as history
   (`historical_preserve`). There is no new merge conflict.
 - No down migration. Restore the pre-upgrade backup as in section 5 if you must go back.
+
+## Upgrading 1.7.0 to the next release
+
+This release adds two optional modules, [Pledges](features/pledges.md) and
+[Missions](features/missions.md), and optional public dates for them. There is no new secret,
+binding, cron trigger, or dependency.
+
+- **Apply the migrations** before deploying: D1 `migrations/0055_pledges.sql` and
+  `migrations/0056_missions.sql` (`npm run db:migrate:remote`), Postgres
+  `migrations-supabase/0047_pledges.sql` and `migrations-supabase/0048_missions.sql`
+  (`npm run db:migrate:supabase`). Back up first. They only add tables (`pledge_campaigns`,
+  `pledge_campaign_i18n`, `pledges`, `pledge_installments`, `pledge_events`, `mission_trips`,
+  `mission_trip_i18n`, `mission_trip_photos`). There is no backfill.
+- **Both modules stay off after the upgrade.** On a database that already has data, the
+  migrations record `module.pledges = 0` and `module.missions = 0`. An explicit saved choice is
+  never changed. A fresh install follows the module choice made in setup, and no preset includes
+  either module.
+- **To turn one on:** a super admin ticks **Pledges** or **Missions** in **Settings → Modules**.
+  Optionally set **Public from** / **Public until**: outside those dates the public pages and menu
+  link are hidden, the admin pages are not. The dates are stored as `moduleWindow.<key>.start` and
+  `.end` settings, outside the `module.<key>` rows that setup and doctor check.
+- **Access.** Pledge records hold personal details: `/admin/pledges` is admin-only and needs the new
+  **Pledges** area grant (super admins always pass). `/admin/missions` is open to editors and to
+  admins with the new **Missions** area grant.
+- **Email.** Pledge confirmations use the existing email binding and are logged in `email_log`
+  with kind `pledgeConfirmation`. Local fixtures do not prove live delivery.
+- **Menu.** When Missions is on, a **Missions** link appears in the default menu under Connect.
+  A site with a saved custom menu keeps it unchanged; add the link under **Navigation**.
+- **Giving link (Supabase only).** With Giving on, a campaign and a trip can be linked to a fund
+  (`fund_id` columns, no foreign key). Pledge progress reads gifts in that fund; only staff with the
+  Giving area or the finance role see the amounts. Use a fund kept for one campaign. No change to
+  Stripe settings or webhooks.
+- **Setup doctor** now also expects the new tables. Run the migrations before running doctor.
+- No down migration. Restore the pre-upgrade backup as in section 5 if you must go back.

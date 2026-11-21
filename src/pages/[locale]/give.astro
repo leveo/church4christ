@@ -41,6 +41,9 @@ const stripeMode = givingOn ? stripeConfiguredMode(env as unknown as StripeEnv) 
 const stripeReady = stripeMode !== null;
 const funds = givingOn ? await listFunds(Astro.locals.db, locale, { activeOnly: true }) : [];
 const errParam = givingOn ? Astro.url.searchParams.get('error') : null;
+// `?fund=<id>` (from a pledge campaign or mission trip page) preselects that fund when it is active.
+const fundParam = Number(Astro.url.searchParams.get('fund'));
+const preselect = funds.some((f) => f.id === fundParam) ? fundParam : null;
 const sessionSecret = String((env as unknown as { SESSION_SECRET?: string }).SESSION_SECRET ?? '');
 const checkoutIdentity = givingOn
   ? await selectGivingCheckoutIdentityForRender(
@@ -56,7 +59,8 @@ const frequencies = [
   { value: 'month', label: 'give.monthly', guestOk: false },
   { value: 'year', label: 'give.yearly', guestOk: false },
 ];
-const signinHref = localePath(locale, `/signin?next=${encodeURIComponent(localePath(locale, '/give'))}`);
+const giveReturn = localePath(locale, preselect !== null ? `/give?fund=${preselect}` : '/give');
+const signinHref = localePath(locale, `/signin?next=${encodeURIComponent(giveReturn)}`);
 
 // ── Module OFF: the existing external-link stewardship page ──────────────────
 const found = await getLocalized('pages', 'give', locale, Astro.locals.db);
@@ -101,7 +105,7 @@ try {
             <span class={lab}>{t(locale, 'give.fund')}</span>
             <select name="fund_id" required class={tin}>
               {funds.map((f) => (
-                <option value={f.id} selected={f.is_default}>{f.name}</option>
+                <option value={f.id} selected={preselect !== null ? f.id === preselect : f.is_default}>{f.name}</option>
               ))}
             </select>
             {funds.some((f) => f.description) && (

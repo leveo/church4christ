@@ -1,0 +1,63 @@
+---
+// Mission trips (module `missions`; console route class, re-checked here as
+// editor or the `missions` area grant). Every trip, newest first, with status.
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import { hasAreaAccess } from '../../../lib/adminAreas';
+import { badge, badgeActive, badgeScheduled, btn, btnSecondary, noticeErr, noticeOk, td, th } from '../../../lib/adminUi';
+import { listTrips, type TripRow } from '../../../lib/missionDb';
+import { localePath, type Locale } from '../../../lib/locales';
+
+export const prerender = false;
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || hasAreaAccess(user, 'missions'))) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+let trips: TripRow[] = [];
+let dbFailed = false;
+try {
+  trips = await listTrips(Astro.locals.db, lang);
+} catch (e) {
+  console.error('admin missions: load failed', e);
+  dbFailed = true;
+}
+---
+
+<Admin title={t(lang, 'missions.admin.title')}>
+  <div class="flex flex-wrap items-end justify-between gap-4">
+    <div>
+      <h1 class="font-display text-display-lg font-bold">{t(lang, 'missions.admin.title')}</h1>
+      <p class="mt-1 max-w-2xl text-sm text-ink-muted">{t(lang, 'missions.admin.intro')}</p>
+    </div>
+    <div class="flex gap-2">
+      <a href="/admin/missions/new" class={btn}>{t(lang, 'missions.admin.new')}</a>
+      <a href={localePath(lang, '/missions')} class={btnSecondary}>{t(lang, 'missions.admin.viewPublic')}</a>
+    </div>
+  </div>
+  {Astro.url.searchParams.has('deleted') && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'missions.admin.deleted')}</p>}
+  {dbFailed && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'missions.admin.dbError')}</p>}
+  {
+    trips.length === 0 && !dbFailed ? (
+      <p class="mt-6 rounded-md border border-border bg-surface-raised px-4 py-10 text-center text-ink-muted">{t(lang, 'missions.admin.empty')}</p>
+    ) : (
+      <div class="mt-6 overflow-x-auto rounded-xl border border-border">
+        <table class="w-full min-w-[560px]">
+          <thead class="bg-surface-sunken">
+            <tr><th class={th}>{t(lang, 'missions.admin.field.year')}</th><th class={th}>{t(lang, 'missions.admin.field.title')}</th><th class={th}>{t(lang, 'missions.admin.field.location')}</th><th class={th}>{t(lang, 'missions.admin.field.status')}</th><th class={th}>{t(lang, 'missions.admin.pin')}</th></tr>
+          </thead>
+          <tbody>
+            {trips.map((trip) => (
+              <tr class="border-t border-border" data-trip-row={trip.slug}>
+                <td class={td}>{trip.year}</td>
+                <td class={td}><a class="font-semibold text-primary hover:underline" href={`/admin/missions/${trip.id}`}>{trip.title || trip.slug}</a></td>
+                <td class={td}>{trip.location}</td>
+                <td class={td}><span class={`${badge} ${trip.status === 'published' ? badgeActive : badgeScheduled}`}>{t(lang, `missions.admin.status.${trip.status}`)}</span></td>
+                <td class={td}>{trip.latitude !== null ? t(lang, 'missions.admin.pinYes') : t(lang, 'missions.admin.pinNo')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+</Admin>

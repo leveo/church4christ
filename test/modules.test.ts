@@ -27,7 +27,7 @@ describe('MODULES registry', () => {
     expect(moduleBackendRequirementKey('d1')).toBe('admin.modules.requiresD1');
   });
 
-  it('has all 23 module keys in display order', () => {
+  it('has all 25 module keys in display order', () => {
     expect([...MODULE_KEYS]).toEqual([
       'bulletins',
       'sermons',
@@ -52,6 +52,8 @@ describe('MODULES registry', () => {
       'learning',
       'planning',
       'event-logistics',
+      'pledges',
+      'missions',
     ]);
   });
 
@@ -89,8 +91,10 @@ describe('MODULES registry', () => {
     expect(MODULES['activity-score'].uses).toEqual(['groups', 'serve', 'registration', 'learning']);
     expect(MODULES.learning.uses).toEqual(['groups', 'portal', 'activity-score']);
     expect(MODULES.planning.uses).toEqual(['serve']);
+    expect(MODULES.pledges.uses).toEqual(['giving']);
+    expect(MODULES.missions.uses).toEqual(['giving']);
     for (const key of MODULE_KEYS) {
-      if (key !== 'gifts' && key !== 'people' && key !== 'giving' && key !== 'groups' && key !== 'portal' && key !== 'attendance' && key !== 'activity-score' && key !== 'learning' && key !== 'planning') {
+      if (key !== 'gifts' && key !== 'people' && key !== 'giving' && key !== 'groups' && key !== 'portal' && key !== 'attendance' && key !== 'activity-score' && key !== 'learning' && key !== 'planning' && key !== 'pledges' && key !== 'missions') {
         expect(MODULES[key].uses).toEqual([]);
       }
     }

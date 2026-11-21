@@ -60,7 +60,7 @@ and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing
 launch and during operation.
 
 > **One choice to know about: your database.** The **D1** filing cabinet above is the
-> default for 22 modules. **Giving** and *paid* **Registration** need Postgres. Setup selects **Supabase**
+> default for 24 modules. **Giving** and *paid* **Registration** need Postgres. Setup selects **Supabase**
 > when Giving is enabled. Free **Registration** runs on D1. Local D1 needs no external
 > account; deployed D1 needs Cloudflare. Local Supabase needs a local or hosted Supabase
 > database; deployed Supabase needs both Cloudflare and Supabase. There is no automated

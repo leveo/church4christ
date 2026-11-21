@@ -1,0 +1,109 @@
+---
+// One published mission trip: cover photo, place and dates, team, the story
+// (escape-first Markdown), a photo gallery, and an optional YouTube film behind
+// a click-to-load facade (no third-party request until the visitor chooses).
+import Base from '../../../layouts/Base.astro';
+import YouTubeEmbed from '../../../components/YouTubeEmbed.astro';
+import { localeMeta, localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { formatDate } from '../../../lib/dates';
+import { mediaPath } from '../../../lib/mediaRef';
+import { renderMarkdown } from '../../../lib/markdown';
+import { extractYouTubeId } from '../../../lib/youtube';
+import { getPublishedTrip, listPublishedTripPhotos } from '../../../lib/missionDb';
+import { countryName, projectPin } from '../../../lib/missionMap';
+import { giveHref, linkedGivingFund } from '../../../lib/pledgeGiving';
+
+export const prerender = false;
+
+const locale = parseLocale(Astro.params.locale ?? '');
+const slug = String(Astro.params.slug ?? '');
+if (!locale || !/^[a-z0-9-]{1,80}$/.test(slug)) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const trip = await getPublishedTrip(Astro.locals.db, slug, locale);
+if (!trip) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const photos = await listPublishedTripPhotos(Astro.locals.db, trip.id);
+const bcp47 = localeMeta(locale).bcp47;
+const place = trip.location || countryName(trip.country_code, bcp47);
+const when = trip.start_date
+  ? trip.end_date && trip.end_date !== trip.start_date
+    ? `${formatDate(trip.start_date, locale)} – ${formatDate(trip.end_date, locale)}`
+    : formatDate(trip.start_date, locale)
+  : String(trip.year);
+const cover = mediaPath(trip.cover_media_key);
+const videoId = trip.video_url ? extractYouTubeId(trip.video_url) : null;
+const storyHtml = trip.story_md ? renderMarkdown(trip.story_md) : '';
+// "Support this mission" when Giving is on and the trip has an active fund.
+const givingFund = await linkedGivingFund(Astro.locals.db, locale, trip.fund_id, Astro.locals.modules.has('giving'));
+const pin = trip.latitude !== null && trip.longitude !== null ? projectPin(trip.latitude, trip.longitude) : null;
+---
+
+<Base title={trip.title} locale={locale} description={trip.summary || undefined}>
+  <article class="container-content py-10">
+    <p class="text-sm"><a class="text-primary hover:underline" href={localePath(locale, '/missions')}>← {t(locale, 'missions.title')}</a></p>
+    <p class="section-eyebrow mt-4">{place} · {trip.year}</p>
+    <h1 class="mt-2 font-display text-display-lg font-bold">{trip.title}</h1>
+    {trip.summary && <p class="mt-3 max-w-2xl text-lg text-ink-muted">{trip.summary}</p>}
+    {cover && <img src={cover} alt={t(locale, 'missions.coverAlt', { title: trip.title })} class="mission-cover mt-6" />}
+
+    <dl class="mission-facts mt-6">
+      <div><dt>{t(locale, 'missions.fact.when')}</dt><dd>{when}</dd></div>
+      {place && <div><dt>{t(locale, 'missions.fact.where')}</dt><dd>{place}</dd></div>}
+      {trip.team_size !== null && trip.team_size > 0 && <div><dt>{t(locale, 'missions.fact.team')}</dt><dd>{t(locale, 'missions.teamSize', { count: trip.team_size })}</dd></div>}
+      {trip.team_note && <div><dt>{t(locale, 'missions.fact.people')}</dt><dd>{trip.team_note}</dd></div>}
+    </dl>
+
+    {givingFund && (
+      <p class="mt-6">
+        <a class="inline-flex items-center rounded-md bg-primary px-5 py-3 font-semibold text-on-primary hover:opacity-90" href={giveHref(locale, givingFund.id)} data-give-link>
+          {t(locale, 'missions.support', { fund: givingFund.name })}
+        </a>
+      </p>
+    )}
+
+    {storyHtml && <div class="prose mt-8"><Fragment set:html={storyHtml} /></div>}
+
+    {videoId && (
+      <section class="mt-8 max-w-3xl">
+        <h2 class="font-display text-heading-sm font-bold">{t(locale, 'missions.film')}</h2>
+        <div class="mt-3"><YouTubeEmbed videoId={videoId} title={trip.title} locale={locale} loadThumbnail={false} /></div>
+      </section>
+    )}
+
+    {photos.length > 0 && (
+      <section class="mt-8">
+        <h2 class="font-display text-heading-sm font-bold">{t(locale, 'missions.photos')}</h2>
+        <ul class="mission-gallery mt-3">
+          {photos.map((p, i) => {
+            const src = mediaPath(p.media_key);
+            return src ? <li><a href={src}><img src={src} alt={t(locale, 'missions.photoAlt', { title: trip.title, n: i + 1 })} loading="lazy" /></a></li> : null;
+          })}
+        </ul>
+      </section>
+    )}
+
+    {pin && (
+      <figure class="mission-mini mt-8" aria-hidden="true">
+        <div class="mission-land"></div>
+        <span class="mission-dot" style={`left:${pin.left}%;top:${pin.top}%`}></span>
+      </figure>
+    )}
+  </article>
+</Base>
+
+<style>
+  .mission-cover { width: 100%; max-height: 32rem; object-fit: cover; border-radius: var(--radius-lg); }
+  .mission-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 1rem; padding: 1rem 0; border-block: 1px solid var(--color-border); }
+  .mission-facts dt { font-size: .8rem; color: var(--color-ink-muted); }
+  .mission-facts dd { font-weight: 600; }
+  .mission-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: .75rem; }
+  .mission-gallery img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--radius-md); }
+  .mission-mini { position: relative; max-width: 28rem; aspect-ratio: 2 / 1; border-radius: var(--radius-md); background: var(--color-primary-soft); overflow: hidden; }
+  .mission-land { position: absolute; inset: 0; background: var(--color-primary); opacity: .35; -webkit-mask: url('/images/missions/world-land.svg') center / 100% 100% no-repeat; mask: url('/images/missions/world-land.svg') center / 100% 100% no-repeat; }
+  .mission-dot { position: absolute; width: .9rem; height: .9rem; margin: -.45rem 0 0 -.45rem; border-radius: 999px; background: var(--color-accent); border: 2px solid var(--color-surface); }
+</style>

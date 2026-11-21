@@ -91,6 +91,14 @@
     "event-logistics": {
       "label": "Veranstaltungslogistik",
       "description": "Unterkunft, Sitzplätze und Kleingruppen für die Angemeldeten einer Veranstaltung einteilen."
+    },
+    "pledges": {
+      "label": "Zusagen",
+      "description": "Führe Zusagenkampagnen mit Gabenplänen, Zielen und Erfassung von Papierkarten durch."
+    },
+    "missions": {
+      "label": "Mission",
+      "description": "Zeige Missionsreisen auf einer Weltkarte mit Zeitleiste und Reiseberichten."
     }
   },
   "presets": {

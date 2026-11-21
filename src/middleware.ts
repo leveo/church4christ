@@ -14,7 +14,16 @@ import { LEGACY_LOCALE_SETTINGS, getLocaleSettings, type LocaleSettings } from '
 import { loadDict } from './lib/i18n';
 import { sameOriginTarget } from './lib/safeRedirect';
 import { getActiveTheme, THEME_DEFAULT } from './lib/theme';
-import { MODULE_KEYS, filterByBackend, getEnabledModules, moduleForPath } from './lib/modules';
+import {
+  MODULE_KEYS,
+  filterByBackend,
+  getEnabledModules,
+  getModuleWindows,
+  isPublicModulePath,
+  moduleForPath,
+  publicModuleSet,
+} from './lib/modules';
+import { todayInTz } from './lib/dates';
 import { applySecurityHeaders } from './lib/securityHeaders';
 import { SESSION_COOKIE, verifySession } from './lib/session';
 import { loadSessionUser, loadSessionUserByEmail } from './lib/currentUser';
@@ -256,6 +265,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
       modules = filterByBackend(MODULE_KEYS, context.locals.dbBackend);
     }
     context.locals.modules = modules;
+    context.locals.publicModules = modules;
 
     const mod = moduleForPath(rest);
     if (mod && !modules.has(mod)) {
@@ -362,6 +372,24 @@ export const onRequest = defineMiddleware(async (context, next) => {
         applySecurityHeaders(res.headers);
         return finish(res);
       }
+    }
+
+    // Public date windows (schedulable modules): outside its window an enabled
+    // module's PUBLIC pages 404 and its nav links hide, while its admin pages stay
+    // available. A failed read leaves every window open (the on/off switch above
+    // is the safety gate; a window is a convenience).
+    let publicModules: Set<string> = modules;
+    try {
+      publicModules = publicModuleSet(modules, await getModuleWindows(db), todayInTz());
+    } catch {
+      publicModules = modules;
+    }
+    context.locals.publicModules = publicModules;
+    if (mod && modules.has(mod) && !publicModules.has(mod) && isPublicModulePath(rest, mod)) {
+      const rendered = await context.rewrite('/404');
+      const res = new Response(rendered.body, { status: 404, headers: rendered.headers });
+      applySecurityHeaders(res.headers);
+      return finish(res);
     }
 
     // Route policy gate: the policy classifies BEFORE route existence, so a

@@ -20,6 +20,8 @@ import { describe, expect, it } from 'vitest';
 import { get } from '../e2e/helpers';
 import { mintSession, SESSION_COOKIE } from '../../src/lib/session';
 import { todayInTz } from '../../src/lib/dates';
+import { openDb, type DbEnv } from '../../src/lib/dbProvider';
+import { saveFund } from '../../src/lib/fundDb';
 
 const SECRET = (env as unknown as { SESSION_SECRET: string }).SESSION_SECRET;
 async function sessionCookie(id: number, email: string): Promise<string> {
@@ -80,6 +82,47 @@ describe('Postgres-backed worker: public render path', () => {
     expect(body).toContain('name="amount"');
     expect(body).toContain('name="name"');
     expect(body).toContain('name="email"');
+  });
+
+  it('/en/give?fund=<id> preselects that active fund and keeps it through the sign-in link', async () => {
+    // Pledge campaigns and mission trips link here with their Giving fund. This baseline has no funds.
+    const { db, end } = openDb(env as unknown as DbEnv);
+    let general: number;
+    let building: number;
+    try {
+      general = await saveFund(db, { fund_number: 'E100', name_en: 'General', name_zh: '常费', active: 1, sort: 1, is_default: true });
+      building = await saveFund(db, { fund_number: 'E200', name_en: 'Building', name_zh: '建堂', active: 1, sort: 2 });
+    } finally {
+      await end();
+    }
+    try {
+      const body = await (await get(`/en/give?fund=${building}`)).text();
+      expect(body).toMatch(new RegExp(`<option value="${building}"[^>]*selected`));
+      expect(body).not.toMatch(new RegExp(`<option value="${general}"[^>]*selected`));
+      expect(body).toContain(`href="/en/signin?next=${encodeURIComponent(`/en/give?fund=${building}`)}"`);
+      // An unknown fund falls back to the default fund.
+      const fallback = await (await get('/en/give?fund=999999')).text();
+      expect(fallback).toMatch(new RegExp(`<option value="${general}"[^>]*selected`));
+      expect(fallback).toContain(`href="/en/signin?next=${encodeURIComponent('/en/give')}"`);
+    } finally {
+      // Later tests in this file expect the no-funds baseline.
+      const cleanup = openDb(env as unknown as DbEnv);
+      try {
+        await cleanup.db.batch([
+          cleanup.db.prepare('DELETE FROM fund_i18n WHERE fund_id IN (?1, ?2)').bind(general, building),
+          cleanup.db.prepare('DELETE FROM funds WHERE id IN (?1, ?2)').bind(general, building),
+        ]);
+      } finally {
+        await cleanup.end();
+      }
+    }
+  });
+
+  it('/en/pledge and /en/missions render over Postgres', async () => {
+    expect((await get('/en/pledge/room-to-grow')).status).toBe(200);
+    const missions = await get('/en/missions');
+    expect(missions.status).toBe(200);
+    expect(await missions.text()).toContain('A clinic by the sea');
   });
 
   it('/en/give sends a signed-in giver directly to identity-bound checkout', async () => {

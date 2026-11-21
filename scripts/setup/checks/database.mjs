@@ -62,6 +62,8 @@ const TABLES_BY_CAPABILITY = Object.freeze({
     'planning_session_people', 'availability_windows', 'planning_notification_rules',
     'teams', 'team_members', 'people',
   ]),
+  pledges: Object.freeze(['pledge_campaigns', 'pledge_campaign_i18n', 'pledges', 'pledge_installments', 'pledge_events']),
+  missions: Object.freeze(['mission_trips', 'mission_trip_i18n', 'mission_trip_photos', 'media']),
   learning: Object.freeze([
     'learning_provider_connections', 'learning_provider_credentials', 'learning_programs',
     'learning_courses', 'learning_identity_links', 'learning_enrollments', 'learning_activities',

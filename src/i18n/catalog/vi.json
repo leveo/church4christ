@@ -22,7 +22,9 @@
     "registration": { "label": "Đăng ký", "description": "Vận hành đăng ký sự kiện miễn phí hoặc có phí." },
     "learning": { "label": "Học tập", "description": "Tiếp tục các khóa học mục vụ ngoài giờ lên lớp." },
     "planning": { "label": "Lên kế hoạch thờ phượng", "description": "Lên kế hoạch chương trình chi tiết, tập dượt, thời gian có thể phục vụ và lịch cho các buổi thờ phượng và sự kiện." },
-    "event-logistics": { "label": "Hậu cần sự kiện", "description": "Sắp xếp chỗ ở, chỗ ngồi và nhóm nhỏ cho những người đã đăng ký một sự kiện." }
+    "event-logistics": { "label": "Hậu cần sự kiện", "description": "Sắp xếp chỗ ở, chỗ ngồi và nhóm nhỏ cho những người đã đăng ký một sự kiện." },
+    "pledges": { "label": "Cam kết dâng hiến", "description": "Tổ chức các chiến dịch cam kết dâng hiến với lịch dâng, mục tiêu và nhập phiếu cam kết trên giấy." },
+    "missions": { "label": "Truyền giáo", "description": "Hiển thị các chuyến truyền giáo trên bản đồ thế giới cùng dòng thời gian và câu chuyện của từng chuyến đi." }
   },
   "presets": {
     "website": { "label": "Trang web", "description": "Một trang web công khai tập trung và bộ công cụ đăng nội dung." },

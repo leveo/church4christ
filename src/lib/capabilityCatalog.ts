@@ -17,6 +17,8 @@ export interface CapabilityDef {
   uses: CapabilityKey[];
   dependsOn: CapabilityKey[];
   requiresBackend?: ProviderKey;
+  /** Public pages can be limited to a date window in Settings -> Modules. */
+  schedulable?: boolean;
   requiredServices: ServiceKey[];
   optionalServices: ServiceKey[];
   seedProfiles: string[];

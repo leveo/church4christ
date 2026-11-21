@@ -102,6 +102,8 @@ const ADMIN_ONLY = [
   '/admin/learning',
   '/admin/planning',
   '/admin/onboarding',
+  // Pledge records hold personal details and giving intentions: site admins with the pledges grant only.
+  '/admin/pledges',
 ];
 
 // Console areas under /admin (editor ∪ admin ∪ leader; pages enforce finer).
@@ -123,6 +125,8 @@ const ADMIN_CONSOLE = [
   // is console (editor ∪ admin ∪ leader), not adminOnly. The module gate (off by
   // default) still 404s it when registration is disabled.
   '/admin/registration',
+  // Mission trips are public content: editors and admins with the missions grant maintain them.
+  '/admin/missions',
 ];
 
 // The registration admin pages a person with just a per-event role (reg_event_access) may reach, each with the

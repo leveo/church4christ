@@ -1,0 +1,70 @@
+---
+// Staff pledge fields, shared by paper-card entry and record editing. Email,
+// signature and consent are optional here: a paper card may leave them blank,
+// and the card itself is the signed record. The server recalculates the plan.
+import { t } from '../../lib/i18n';
+import { errorText, lab, tin } from '../../lib/adminUi';
+import { GIVING_METHODS, PLEDGE_FREQUENCIES } from '../../lib/pledgePlan';
+import type { Locale } from '../../lib/locales';
+
+interface Props {
+  lang: Locale;
+  values: Record<string, string>;
+  errors: Record<string, string>;
+  maxMonths: number;
+  givingStart: string;
+  givingEnd: string;
+  /** Show the "adds to an earlier pledge" choice (new records only). */
+  allowAdditional: boolean;
+}
+const { lang, values, errors, maxMonths, givingStart, givingEnd, allowAdditional } = Astro.props;
+const v = (k: string, d = '') => values[k] ?? d;
+const err = (k: string) => (errors[k] ? t(lang, errors[k]) : '');
+---
+
+{allowAdditional && (
+  <div class="grid gap-4 sm:grid-cols-2">
+    <label class="block">
+      <span class={lab}>{t(lang, 'pledges.form.type')}</span>
+      <select name="pledge_type" class={tin}>
+        <option value="initial" selected={v('pledge_type', 'initial') === 'initial'}>{t(lang, 'pledges.form.typeInitial')}</option>
+        <option value="additional" selected={v('pledge_type') === 'additional'}>{t(lang, 'pledges.form.typeAdditional')}</option>
+      </select>
+    </label>
+    <label class="block"><span class={lab}>{t(lang, 'pledges.form.originalCode')}</span><input name="original_code" value={v('original_code')} maxlength="12" class={`${tin} uppercase`} />{err('original_code') && <span class={errorText}>{err('original_code')}</span>}</label>
+  </div>
+)}
+<div class="grid gap-4 sm:grid-cols-2">
+  <label class="block sm:col-span-2"><span class={lab}>{t(lang, 'pledges.form.name')} *</span><input name="name" value={v('name')} maxlength="120" class={tin} />{err('name') && <span class={errorText}>{err('name')}</span>}</label>
+  <label class="block"><span class={lab}>{t(lang, 'pledges.form.email')}</span><input type="email" name="email" value={v('email')} maxlength="254" class={tin} />{err('email') && <span class={errorText}>{err('email')}</span>}</label>
+  <label class="block"><span class={lab}>{t(lang, 'pledges.form.phone')}</span><input name="phone" value={v('phone')} maxlength="40" class={tin} /></label>
+  <label class="block"><span class={lab}>{t(lang, 'pledges.form.household')}</span><input name="household" value={v('household')} maxlength="120" class={tin} /></label>
+  <label class="block"><span class={lab}>{t(lang, 'pledges.form.address')}</span><input name="address" value={v('address')} maxlength="300" class={tin} /></label>
+</div>
+<div class="grid gap-4 sm:grid-cols-3">
+  <label class="block">
+    <span class={lab}>{t(lang, 'pledges.form.plan')}</span>
+    <select name="mode" class={tin}>
+      <option value="total" selected={v('mode', 'total') === 'total'}>{t(lang, 'pledges.form.modeTotal')}</option>
+      <option value="installment" selected={v('mode') === 'installment'}>{t(lang, 'pledges.form.modeInstallment')}</option>
+    </select>
+  </label>
+  <label class="block"><span class={lab}>{t(lang, 'pledges.form.amount')} *</span><input name="amount" value={v('amount')} inputmode="decimal" class={tin} />{err('amount') && <span class={errorText}>{err('amount')}</span>}</label>
+  <label class="block">
+    <span class={lab}>{t(lang, 'pledges.form.frequency')}</span>
+    <select name="frequency" class={tin}>{PLEDGE_FREQUENCIES.map((f) => <option value={f} selected={v('frequency', 'monthly') === f}>{t(lang, `pledges.frequency.${f}`)}</option>)}</select>
+    {err('frequency') && <span class={errorText}>{err('frequency')}</span>}
+  </label>
+  <label class="block"><span class={lab}>{t(lang, 'pledges.form.interval')}</span><input type="number" name="interval_months" min="1" max={maxMonths} value={v('interval_months', '1')} class={tin} /></label>
+  <label class="block"><span class={lab}>{t(lang, 'pledges.form.duration', { max: maxMonths })}</span><input type="number" name="duration_months" min="1" max={maxMonths} value={v('duration_months', String(maxMonths))} class={tin} />{err('duration_months') && <span class={errorText}>{err('duration_months')}</span>}</label>
+  <label class="block"><span class={lab}>{t(lang, 'pledges.form.start')}</span><input type="date" name="start_date" min={givingStart} max={givingEnd} value={v('start_date', givingStart)} class={tin} />{err('start_date') && <span class={errorText}>{err('start_date')}</span>}</label>
+</div>
+<div class="grid gap-4 sm:grid-cols-2">
+  <label class="block">
+    <span class={lab}>{t(lang, 'pledges.form.method')}</span>
+    <select name="giving_method" class={tin}>{GIVING_METHODS.map((m) => <option value={m} selected={v('giving_method', 'check') === m}>{t(lang, `pledges.method.${m}`)}</option>)}</select>
+  </label>
+  <label class="block"><span class={lab}>{t(lang, 'pledges.form.methodNote')}</span><input name="giving_note" value={v('giving_note')} maxlength="200" class={tin} />{err('giving_note') && <span class={errorText}>{err('giving_note')}</span>}</label>
+  <label class="block"><span class={lab}>{t(lang, 'pledges.form.signature')}</span><input name="signer_name" value={v('signer_name')} maxlength="120" class={tin} /></label>
+  <label class="block"><span class={lab}>{t(lang, 'pledges.admin.field.staffNote')}</span><input name="staff_note" value={v('staff_note')} maxlength="1000" class={tin} /></label>
+</div>

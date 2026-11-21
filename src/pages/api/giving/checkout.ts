@@ -86,8 +86,9 @@ export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDe
     const amountCents = parseAmountToCents(String(form.get('amount') ?? ''));
     const frequency = parseFrequency(String(form.get('frequency') ?? 'once'));
     if (!Number.isInteger(fundId) || fundId <= 0) return back(locale, 'fund');
-    if (amountCents === null) return back(locale, 'amount');
-    if (frequency === null) return back(locale, 'frequency');
+    // From here on the fund id is a valid integer: errors send the donor back with that fund still chosen.
+    if (amountCents === null) return back(locale, 'amount', fundId);
+    if (frequency === null) return back(locale, 'frequency', fundId);
 
     const fund = await deps.getFund(locals.db, locale, fundId);
     if (!fund || fund.active !== 1) return back(locale, 'fund');
@@ -117,9 +118,9 @@ export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDe
         customerId,
       });
     } catch (error) {
-      if (error instanceof Error && error.message === 'giving_name_invalid') return back(locale, 'name');
-      if (error instanceof Error && error.message === 'giving_email_invalid') return back(locale, 'email');
-      return back(locale, 'form');
+      if (error instanceof Error && error.message === 'giving_name_invalid') return back(locale, 'name', fundId);
+      if (error instanceof Error && error.message === 'giving_email_invalid') return back(locale, 'email', fundId);
+      return back(locale, 'form', fundId);
     }
     const digest = await givingCheckoutRequestDigest(normalized);
     const requestId = verifiedProof?.kind === 'initial'
@@ -131,7 +132,7 @@ export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDe
     // session epoch is read from the current person row, never from POST data.
     const epoch = await deps.getSessionEpoch(locals.db, user.id);
     const campusId = locals.campusMode === 'campus' ? locals.campus?.id : 1;
-    if (!campusId || epoch === null || !Number.isSafeInteger(epoch) || epoch < 0) return back(locale, 'form');
+    if (!campusId || epoch === null || !Number.isSafeInteger(epoch) || epoch < 0) return back(locale, 'form', fundId);
     await deps.attachIdentitySource(locals.rawDb, deps.identityEnv ?? (env as unknown as IdentityBusinessContinuationEnv), {
       campusId, source: 'giving', intentId: requestId, personId: user.id, sessionEpoch: epoch,
       sourceDigest: await continuationPayloadDigest(normalized), name: normalized.donorName, email: normalized.donorEmail,
@@ -168,9 +169,9 @@ export function createGivingCheckoutHandler(deps: GivingCheckoutDeps = defaultDe
       }, { requestId });
       return redirect(session.url);
     } catch (error) {
-      if (!isAmbiguousStripeFailure(error)) return back(locale, 'stripe');
+      if (!isAmbiguousStripeFailure(error)) return back(locale, 'stripe', fundId);
       const proof = await signRetryGivingCheckoutProof(deps.sessionSecret, requestId, digest);
-      return backWithRequest(locale, 'stripe', requestId, proof);
+      return backWithRequest(locale, 'stripe', requestId, proof, fundId);
     }
   };
 }
@@ -180,16 +181,20 @@ export const POST: APIRoute = createGivingCheckoutHandler();
 function redirect(location: string): Response {
   return new Response(null, { status: 303, headers: { location } });
 }
-function back(locale: string, error: string): Response {
-  return redirect(`/${locale}/give?error=${error}`);
+/** `&fund=<id>` for a fund id already validated as a positive integer, so the give page keeps it chosen. */
+function fundQuery(fundId?: number): string {
+  return fundId !== undefined && Number.isInteger(fundId) && fundId > 0 ? `&fund=${fundId}` : '';
 }
-function backWithRequest(locale: string, error: string, requestId: string, proof: string): Response {
+function back(locale: string, error: string, fundId?: number): Response {
+  return redirect(`/${locale}/give?error=${error}${fundQuery(fundId)}`);
+}
+function backWithRequest(locale: string, error: string, requestId: string, proof: string, fundId?: number): Response {
   const query = new URLSearchParams({
     error,
     checkoutRequestId: parseCheckoutRequestId(requestId),
     checkoutRequestProof: proof,
   });
-  return redirect(`/${locale}/give?${query.toString()}`);
+  return redirect(`/${locale}/give?${query.toString()}${fundQuery(fundId)}`);
 }
 
 function isAmbiguousStripeFailure(error: unknown): boolean {

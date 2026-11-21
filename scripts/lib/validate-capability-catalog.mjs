@@ -108,6 +108,14 @@ export function validateCapabilityCatalog(input) {
     if (def.requiresBackend !== undefined && !providers.has(def.requiresBackend)) {
       fail(`${key} has unknown provider ${String(def.requiresBackend)}`);
     }
+    // Optional: a schedulable module's public pages can be limited to a date window
+    // (Settings -> Modules). It needs public pages for the window to apply to.
+    if (def.schedulable !== undefined) {
+      if (typeof def.schedulable !== 'boolean') fail(`${key}.schedulable must be a boolean`);
+      else if (def.schedulable && (!Array.isArray(def.publicPrefixes) || def.publicPrefixes.length === 0)) {
+        fail(`${key}.schedulable needs at least one public route prefix`);
+      }
+    }
 
     const arrays = {};
     for (const field of [

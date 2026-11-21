@@ -256,6 +256,8 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Implemented: online gifts through Stripe (test mode by default, live after the go-live checklist), an offline ledger for checks and cash, and annual giving statements. |
 | [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Implemented: free event sign-up on D1 or Supabase, custom questions, waitlist, event stages, and roster export, plus paid Stripe checkout on Supabase in the same Stripe mode as Giving (verify with a small live registration before relying on it). |
 |  | **[Event logistics](docs/features/event-logistics.md)** | Optional add-on to Registration: put people in rooms, seat them at tables with an Auto-seat preview, sort them into small groups, and print room lists, door signs, and table cards. |
+|  | **[Pledges](docs/features/pledges.md)** | Optional: run a faith pledge campaign with a live plan preview, a code for adding to a pledge, confirmation emails, paper-card entry, goal progress, and CSV export. With Giving on, link a fund to track what each household has actually given. |
+|  | **[Missions](docs/features/missions.md)** | Optional: show mission trips on a world map with a year filter, a timeline, and a story page per trip, with a way to list sensitive trips without a pin. With Giving on, a trip can take gifts to its own fund. |
 | [![](docs/images/portal/member-opportunities.png)](docs/features/member-portal.md) | **[Member portal](docs/features/member-portal.md)** | One signed-in hub for current participation and open opportunities, plus household profiles, events, serving, calendar, giving, and scoped prayer. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Twelve languages](docs/features/i18n.md)** | Choose from 12 interface languages per site, with an English fallback and one-click Simplified-to-Traditional Chinese. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & automation](docs/features/email-automation.md)** | Sign-in links, reminders, and digests, with local logging and a paid-capable production configuration. |
@@ -264,7 +266,7 @@ Every feature has its own plain-English guide. Start with any of these:
 **Pick your modules.** Most optional domain capabilities are **modules** you can switch
 off from one panel in Settings — bulletins, sermons, the prayer wall, volunteer scheduling,
 and more. New installations write every module setting explicitly from the setup selection;
-the Full Church demo selects its 21 (Service Planning and Event Logistics are switched on separately). On older installations only, missing module rows retain
+the Full Church demo installs all 25 and turns on 21 (Service Planning, Event Logistics, Pledges and Missions start off and are switched on in Settings). On older installations only, missing module rows retain
 the legacy default-on behavior. A church that wants only service times and sermons can hide
 the rest in a click: the module's pages, links, and emails disappear together, and nothing
 is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
@@ -295,6 +297,8 @@ is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
 | `learning` | Learning | 学习 | Either |
 | `planning` | Service Planning | 服事流程 | Either |
 | `event-logistics` | Event Logistics | 活动后勤 | Either |
+| `pledges` | Pledges | 认献 | Either |
+| `missions` | Missions | 宣教 | Either |
 <!-- capabilities:end -->
 
 ### Community management and workflows
@@ -433,7 +437,7 @@ the [identity review or recovery workflow](docs/features/member-identity.md) bef
 
 The terminal-only `npm run setup` remains available. Setup offers **Website** (8 focused
 publishing modules), **Website + Community** (18 modules; Member Portal can be added on D1), and
-**Full Church** (21 modules; Service Planning is switched on separately). Giving
+**Full Church** (all 25 modules installed, 21 turned on; Service Planning, Event Logistics, Pledges and Missions are switched on separately). Giving
 selects Supabase automatically (free Registration runs on D1); D1-compatible selections choose D1 unless you
 explicitly override the backend. Account requirements depend on Local versus Deploy mode,
 as detailed below. For automation, pass all answers with `--yes`; add `--json` for one
@@ -480,7 +484,7 @@ walkthrough.
 
 Start with `npm run setup`, choose **Deploy**, and answer the feature and church questions.
 It creates or imports the required resources, writes the generated configuration, applies
-migrations, records all 23 module settings, and bootstraps the first admin. It then hands
+migrations, records all 25 module settings, and bootstraps the first admin. It then hands
 off to `npm run deploy`. Run `npm run doctor` for the schema-v2 readiness report, and use
 the always-on `/admin/onboarding` checklist for the same stable check identities.
 Giving, Registration, Groups, Teams, Newcomer, imports, and the optional read-only Planning

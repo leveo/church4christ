@@ -66,7 +66,7 @@ describe('aggregate service attendance documentation', () => {
     expect(readme).toMatch(/Service attendance[^\n]*docs\/features\/service-attendance\.md/i);
     expect(readme).toMatch(/Website \+ Community[^\n]*(?:\n[^\n]*)?18/);
     expect(readme).toMatch(/Full Church[^\n]*(?:\n[^\n]*)?21/);
-    expect(modules).toMatch(/The 23 modules/);
+    expect(modules).toMatch(/The 25 modules/);
     expect(modules).toMatch(/Website \+ Community[^\n]*(?:\n[^\n]*)?18/);
     expect(architecture).toMatch(/`attendance`[^\n]*Service Attendance/);
     expect(supabase).toMatch(/22 D1-compatible modules/i);
