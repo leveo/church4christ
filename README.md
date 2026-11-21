@@ -266,7 +266,7 @@ Every feature has its own plain-English guide. Start with any of these:
 **Pick your modules.** Most optional domain capabilities are **modules** you can switch
 off from one panel in Settings — bulletins, sermons, the prayer wall, volunteer scheduling,
 and more. New installations write every module setting explicitly from the setup selection;
-the Full Church demo selects its 21 (Service Planning and Event Logistics are switched on separately). On older installations only, missing module rows retain
+the Full Church demo installs all 25 and turns on 21 (Service Planning, Event Logistics, Pledges and Missions start off and are switched on in Settings). On older installations only, missing module rows retain
 the legacy default-on behavior. A church that wants only service times and sermons can hide
 the rest in a click: the module's pages, links, and emails disappear together, and nothing
 is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
@@ -437,7 +437,7 @@ the [identity review or recovery workflow](docs/features/member-identity.md) bef
 
 The terminal-only `npm run setup` remains available. Setup offers **Website** (8 focused
 publishing modules), **Website + Community** (18 modules; Member Portal can be added on D1), and
-**Full Church** (21 modules; Service Planning is switched on separately). Giving
+**Full Church** (all 25 modules installed, 21 turned on; Service Planning, Event Logistics, Pledges and Missions are switched on separately). Giving
 selects Supabase automatically (free Registration runs on D1); D1-compatible selections choose D1 unless you
 explicitly override the backend. Account requirements depend on Local versus Deploy mode,
 as detailed below. For automation, pass all answers with `--yes`; add `--json` for one
