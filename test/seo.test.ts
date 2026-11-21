@@ -49,6 +49,9 @@ describe('sitemap', () => {
     expect(withoutSermons).toContain('/serve');
     expect(enabledSitemapPaths(new Set())).toEqual(expect.arrayContaining(['/', '/about', '/visit', '/give', '/privacy']));
     expect(enabledSitemapPaths(new Set())).not.toContain('/events');
+    // Missions is listed while its public pages show (the sitemap passes locals.publicModules).
+    expect(enabledSitemapPaths(new Set(['missions']))).toContain('/missions');
+    expect(enabledSitemapPaths(new Set())).not.toContain('/missions');
   });
 
   it('renders both locales with hreflang alternates, escaped locations, and dates', () => {

@@ -28,7 +28,7 @@ ones you do not need and click **Save modules** — the change takes effect imme
 
 ![The Modules panel in Settings](../images/admin/settings-modules.png)
 
-**The 23 modules:**
+**The 25 modules:**
 
 <!-- capabilities:start -->
 | Key | English | 中文 | Required database |
@@ -56,6 +56,8 @@ ones you do not need and click **Save modules** — the change takes effect imme
 | `learning` | Learning | 学习 | Either |
 | `planning` | Service Planning | 服事流程 | Either |
 | `event-logistics` | Event Logistics | 活动后勤 | Either |
+| `pledges` | Pledges | 认献 | Either |
+| `missions` | Missions | 宣教 | Either |
 <!-- capabilities:end -->
 
 The `learning` module depends on `people`, works on either database, and is enabled by the
@@ -110,10 +112,19 @@ never get a link to a page that no longer exists:
   **Children off** and Attendance hides its check-in link editor, while historical aggregate
   reports and CSV remain readable. See [Service attendance](service-attendance.md).
 
-The Full Church preset enables 21 modules (every module except Service Planning and Event
-Logistics, which you switch on separately in **Settings → Modules**); Website enables 8; Website + Community
+The Full Church preset enables 21 modules (every module except Service Planning, Event
+Logistics, Pledges and Missions, which you switch on separately in **Settings → Modules**); Website enables 8; Website + Community
 enables 18 of the 19 modules that are compatible with D1 (Member Portal is selected separately). Custom setup can select individual
 modules.
+
+**Public dates.** Some modules are used for a season: a pledge campaign, or a mission page
+shown while a trip is being prayed for. [Pledges](pledges.md) and [Missions](missions.md) have
+two optional dates under their checkbox, **Public from** and **Public until** (both inclusive, in
+the church's time zone). Outside those dates the module's public pages return "not found" and its
+menu link is hidden, while its admin pages stay open so the team can prepare beforehand and follow
+up afterwards. The card says whether the public pages are showing now. Leave both dates empty to
+keep the pages public whenever the module is on. The on/off checkbox still switches everything,
+admin included.
 
 ## How it fits together
 
@@ -149,6 +160,14 @@ soft-degrade so an off module never leaves a dangling reference.
   puts the result on `locals.modules` (a `Set<ModuleKey>`) and, on a DB read failure, falls
   back to "everything enabled" filtered through the same `filterByBackend` — so the fail-safe
   can never re-enable a backend-gated module either.
+- **Public date windows:** a capability with `"schedulable": true` (today `pledges` and
+  `missions`) can have `moduleWindow.<key>.start` / `.end` settings (YYYY-MM-DD, inclusive,
+  church time zone; empty means unbounded). They live outside the `module.<key>` namespace that
+  setup and doctor check, are written to the unscoped database by the Modules form, and are read
+  through `getModuleWindows` (same 60s per-isolate cache). After the on/off and campus gates, the
+  middleware sets `locals.publicModules` and 404s only the module's `publicPrefixes` when today is
+  outside the window; the header and footer use `locals.publicModules` for links. A failed read
+  leaves every window open.
 - **Enforcement:** `src/middleware.ts` is the single choke point — after locale resolution
   and before route policy, a path owned by a disabled module rewrites to `/404` with a 404
   status. A DB failure fails open to all-enabled so a fresh install never 500s.

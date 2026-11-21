@@ -67,7 +67,7 @@ suite('clean-room Supabase setup', () => {
       const first = JSON.parse(firstRun.stdout);
       expect(first).toMatchObject({ schemaVersion: 1, kind: 'setup-result', backend: 'supabase' });
       expect(first.enabledModules).toHaveLength(21);
-      expect(first.moduleRows).toBe(23);
+      expect(first.moduleRows).toBe(25);
       expect(first.admin.status).toMatch(/created|already-admin/);
       expect(first.doctor.status).toBe('ready-with-limitations');
       expect(first.doctor.checks).toContainEqual(expect.objectContaining({ code: 'services.stripe-ok', severity: 'info' }));

@@ -1,0 +1,60 @@
+---
+// Pledge campaigns (module `pledges`; adminOnly route class + the `pledges`
+// area grant, re-checked here). Lists every campaign with its active totals;
+// each campaign opens its own dashboard.
+import Admin from '../../../layouts/Admin.astro';
+import { t } from '../../../lib/i18n';
+import { hasAreaAccess } from '../../../lib/adminAreas';
+import { btn, badge, badgeActive, badgeInactive, badgeScheduled, noticeErr } from '../../../lib/adminUi';
+import { formatCents } from '../../../lib/money';
+import { formatDate } from '../../../lib/dates';
+import { listCampaigns, type CampaignListRow } from '../../../lib/pledgeDb';
+import type { Locale } from '../../../lib/locales';
+
+export const prerender = false;
+
+const user = Astro.locals.user;
+if (!user || !hasAreaAccess(user, 'pledges')) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+let campaigns: CampaignListRow[] = [];
+let dbFailed = false;
+try {
+  campaigns = await listCampaigns(Astro.locals.db, lang);
+} catch (e) {
+  console.error('admin pledges: load failed', e);
+  dbFailed = true;
+}
+const statusBadge = { draft: badgeScheduled, published: badgeActive, archived: badgeInactive } as const;
+---
+
+<Admin title={t(lang, 'pledges.admin.title')}>
+  <div class="flex flex-wrap items-end justify-between gap-4">
+    <div>
+      <h1 class="font-display text-display-lg font-bold">{t(lang, 'pledges.admin.title')}</h1>
+      <p class="mt-1 max-w-2xl text-sm text-ink-muted">{t(lang, 'pledges.admin.intro')}</p>
+    </div>
+    <a href="/admin/pledges/new/edit" class={btn}>{t(lang, 'pledges.admin.newCampaign')}</a>
+  </div>
+  {dbFailed && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'pledges.admin.dbError')}</p>}
+  {
+    campaigns.length === 0 && !dbFailed ? (
+      <p class="mt-6 rounded-md border border-border bg-surface-raised px-4 py-10 text-center text-ink-muted">{t(lang, 'pledges.admin.empty')}</p>
+    ) : (
+      <ul class="mt-6 grid gap-4 md:grid-cols-2">
+        {campaigns.map((c) => (
+          <li class="rounded-xl border border-border bg-surface-raised p-5" data-campaign={c.slug}>
+            <div class="flex items-start justify-between gap-3">
+              <h2 class="font-display text-heading-sm font-bold"><a class="hover:underline" href={`/admin/pledges/${c.id}`}>{c.title || c.slug}</a></h2>
+              <span class={`${badge} ${statusBadge[c.status]}`}>{t(lang, `pledges.admin.status.${c.status}`)}</span>
+            </div>
+            <p class="mt-1 text-sm text-ink-muted">{t(lang, 'pledges.givingPeriod', { start: formatDate(c.giving_start, lang), end: formatDate(c.giving_end, lang) })}</p>
+            <p class="mt-3 text-sm">
+              {t(lang, 'pledges.admin.listTotals', { count: c.pledge_count, total: formatCents(c.total_cents, c.currency, lang) })}
+              {c.goal_cents ? ` · ${t(lang, 'pledges.admin.ofGoal', { goal: formatCents(c.goal_cents, c.currency, lang) })}` : ''}
+            </p>
+          </li>
+        ))}
+      </ul>
+    )
+  }
+</Admin>

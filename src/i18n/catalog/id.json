@@ -91,6 +91,14 @@
     "event-logistics": {
       "label": "Logistik acara",
       "description": "Atur penginapan, tempat duduk, dan kelompok kecil bagi orang yang terdaftar di sebuah acara."
+    },
+    "pledges": {
+      "label": "Janji Iman",
+      "description": "Jalankan kampanye janji iman dengan jadwal pemberian, target, dan input kartu kertas."
+    },
+    "missions": {
+      "label": "Misi",
+      "description": "Tampilkan perjalanan misi pada peta dunia dengan lini masa dan kisah perjalanan."
     }
   },
   "presets": {

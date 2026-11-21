@@ -24,6 +24,7 @@ export const BUILTIN_NAV: { key: string; path: string }[] = [
   { key: 'nav.fellowships', path: '/fellowships' },
   { key: 'nav.groups', path: '/groups' },
   { key: 'nav.learn', path: '/learn' },
+  { key: 'nav.missions', path: '/missions' },
   { key: 'nav.articles', path: '/articles' },
 ];
 
@@ -88,7 +89,7 @@ const NAV_GROUPS: readonly {
 }[] = [
   { key: 'welcome', labelKey: 'nav.group.welcome', paths: ['/visit', '/new-here', '/about'] },
   { key: 'explore', labelKey: 'nav.group.explore', paths: ['/sermons', '/bulletin', '/events', '/articles'] },
-  { key: 'connect', labelKey: 'nav.group.connect', paths: ['/ministries', '/fellowships', '/groups', '/learn'] },
+  { key: 'connect', labelKey: 'nav.group.connect', paths: ['/ministries', '/fellowships', '/groups', '/learn', '/missions'] },
   { key: 'participate', labelKey: 'nav.group.participate', paths: ['/register', '/serve', '/serve/opportunities'] },
   { key: 'more', labelKey: 'nav.group.more' },
 ] as const;

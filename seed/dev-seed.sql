@@ -768,3 +768,70 @@ INSERT INTO reg_question_i18n (question_id, locale, label) VALUES
   (921, 'zh', '你会带什么？'),
   (922, 'en', 'Any food allergies?'),
   (922, 'zh', '有食物过敏吗？');
+
+-- Pledges (pledges module, off on upgrade). One fictional campaign whose pledge
+-- period straddles today and whose giving period starts next month and runs three
+-- years, with a gift guide, three pledges (one online, one adding to it, one paper
+-- card) and their planned gifts. Planned gifts are intentions, not payments.
+INSERT INTO pledge_campaigns (id, slug, status, pledge_opens, pledge_closes, giving_start, giving_end, max_months, goal_cents, household_goal, gift_guide) VALUES
+  (1, 'room-to-grow', 'published', date('now','-14 days'), date('now','+60 days'),
+   date('now','start of month','+1 month'), date('now','start of month','+37 months','-1 day'), 36,
+   50000000, 120, '[{"households":2,"totalCents":5000000},{"households":10,"totalCents":1000000},{"households":40,"totalCents":360000},{"households":60,"totalCents":120000}]');
+
+INSERT INTO pledge_campaign_i18n (campaign_id, locale, title, intro_md) VALUES
+  (1, 'en', 'Room to Grow', 'Our family is growing. Over the next three years we will build classrooms and a fellowship hall for the children, students and neighbors God keeps sending us.
+
+Please pray, then make a pledge of what you plan to give.'),
+  (1, 'zh', '扩展空间', '教会的大家庭正在成长。在未来三年里，我们将为神不断带来的孩子、学生和邻舍建造教室与团契厅。
+
+请先祷告，再填写你计划奉献的认献。');
+
+INSERT INTO pledges (id, campaign_id, code, idempotency_key, pledge_type, parent_id, name, email, mode, frequency, interval_months, duration_months, gift_count, total_cents, installment_cents, final_cents, start_date, end_date, giving_method, signer_name, consent, source, locale, email_status, created_at) VALUES
+  (1, 1, 'DEMQKWRT', 'a0000000-0000-4000-8000-000000000001', 'initial', NULL, 'Grace Chen', 'grace.chen@example.com', 'total', 'quarterly', 3, 12, 4, 360000, 90000, 90000,
+   date('now','start of month','+1 month'), date('now','start of month','+10 months'), 'online', 'Grace Chen', 1, 'online', 'en', 'sent', datetime('now','-10 days')),
+  (2, 1, 'DEMPXNVB', 'a0000000-0000-4000-8000-000000000002', 'additional', 1, 'Grace Chen', 'grace.chen@example.com', 'total', 'once', 1, 1, 1, 120000, 120000, 120000,
+   date('now','start of month','+2 months'), date('now','start of month','+2 months'), 'check', 'Grace Chen', 1, 'online', 'en', 'sent', datetime('now','-3 days')),
+  (3, 1, 'DEMHJYTC', NULL, 'initial', NULL, '王建国', NULL, 'installment', 'yearly', 12, 36, 3, 1200000, 400000, 400000,
+   date('now','start of month','+1 month'), date('now','start of month','+25 months'), 'check', '王建国', 0, 'paper', 'zh', 'none', datetime('now','-5 days'));
+
+INSERT INTO pledge_installments (pledge_id, seq, gift_date, amount_cents) VALUES
+  (1, 1, date('now','start of month','+1 month'), 90000),
+  (1, 2, date('now','start of month','+4 months'), 90000),
+  (1, 3, date('now','start of month','+7 months'), 90000),
+  (1, 4, date('now','start of month','+10 months'), 90000),
+  (2, 1, date('now','start of month','+2 months'), 120000),
+  (3, 1, date('now','start of month','+1 month'), 400000),
+  (3, 2, date('now','start of month','+13 months'), 400000),
+  (3, 3, date('now','start of month','+25 months'), 400000);
+
+INSERT INTO pledge_events (pledge_id, action, actor, occurred_at) VALUES
+  (1, 'created', '', datetime('now','-10 days')),
+  (1, 'email_sent', '', datetime('now','-10 days')),
+  (2, 'created', '', datetime('now','-3 days')),
+  (2, 'email_sent', '', datetime('now','-3 days')),
+  (3, 'created', 'admin@example.com', datetime('now','-5 days'));
+
+-- Missions (missions module, off on upgrade). Fictional trips: three with map
+-- pins and one deliberately without coordinates, as a church would list a trip
+-- to a sensitive place. One draft never appears publicly.
+INSERT INTO mission_trips (id, slug, status, year, start_date, end_date, country_code, latitude, longitude, team_size) VALUES
+  (1, 'coastal-clinic', 'published', CAST(substr(CAST(date('now','start of day') AS TEXT),1,4) AS INTEGER), NULL, NULL, 'GH', 5.11, -1.25, 9),
+  (2, 'english-camp', 'published', CAST(substr(CAST(date('now','start of day') AS TEXT),1,4) AS INTEGER) - 1, NULL, NULL, 'TH', 18.79, 98.98, 12),
+  (3, 'neighbor-week', 'published', CAST(substr(CAST(date('now','start of day') AS TEXT),1,4) AS INTEGER) - 1, NULL, NULL, 'US', 29.42, -98.49, 20),
+  (4, 'partner-visit', 'published', CAST(substr(CAST(date('now','start of day') AS TEXT),1,4) AS INTEGER) - 3, NULL, NULL, NULL, NULL, NULL, 3),
+  (5, 'next-summer', 'draft', CAST(substr(CAST(date('now','start of day') AS TEXT),1,4) AS INTEGER) + 1, NULL, NULL, 'PE', -3.75, -73.25, NULL);
+
+INSERT INTO mission_trip_i18n (trip_id, locale, title, location, summary, story_md, team_note) VALUES
+  (1, 'en', 'A clinic by the sea', 'Cape Coast, Ghana', 'Nine volunteers served alongside a partner clinic for two weeks.', 'Our team helped a partner clinic run screening days and taught first aid to church youth leaders.
+
+Thank you for every prayer that carried us.', 'Led by Pastor Daniel Lee'),
+  (1, 'zh', '海边的诊所', '加纳 · 海岸角', '九位同工与当地伙伴诊所一同服事两周。', '团队协助伙伴诊所举办健康检查日，并为教会青年同工教授急救。
+
+感谢每一位为我们祷告的弟兄姊妹。', '由 Daniel Lee 牧师带领'),
+  (2, 'en', 'Summer English camp', 'Chiang Mai, Thailand', 'Twelve students and teachers ran a week of English and Bible stories.', 'We partnered with a local church to welcome sixty children for songs, games and stories.', ''),
+  (2, 'zh', '暑期英语营', '泰国 · 清迈', '十二位学生与老师带领一周的英语与圣经故事营。', '我们与当地教会合作，迎接六十位孩子一起唱歌、游戏、听故事。', ''),
+  (3, 'en', 'Neighbor week', 'San Antonio, Texas', 'A week of home repairs and a block party a short drive from home.', 'Twenty members repaired three homes and shared a meal with the street.', ''),
+  (3, 'zh', '邻舍服事周', '美国 · 德州圣安东尼奥', '在离家不远的地方，用一周修缮房屋并举办街区聚会。', '二十位会友修缮了三户人家，并与整条街的邻舍共进晚餐。', ''),
+  (4, 'en', 'Visiting partners in East Asia', 'East Asia', 'A small team encouraged long-term partners. The place is not shown to protect them.', 'Three members spent ten days listening, praying and serving with partners we have supported for many years.', ''),
+  (4, 'zh', '探访东亚的同工', '东亚', '小型团队探访并鼓励长期同工。为保护他们，不显示具体地点。', '三位会友用十天时间陪伴多年来所支持的同工，聆听、祷告并一同服事。', ''),
+  (5, 'en', 'Planning: river villages', 'Loreto, Peru', 'A draft trip that is not public yet.', '', '');

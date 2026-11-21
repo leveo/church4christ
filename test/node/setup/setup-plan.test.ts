@@ -49,7 +49,7 @@ describe('buildSetupPlan', () => {
     expect(plan.backend).toBe('supabase');
     // Service Planning and Event Logistics are not part of any preset: they are switched on separately.
     const off = Object.entries(plan.moduleSettings).filter(([, value]) => value === '0').map(([key]) => key);
-    expect(off).toEqual(['module.planning', 'module.event-logistics']);
+    expect(off).toEqual(['module.planning', 'module.event-logistics', 'module.pledges', 'module.missions']);
     expect(plan.services).toEqual(['hyperdrive', 'r2', 'worker']);
   });
 

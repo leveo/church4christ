@@ -1,0 +1,337 @@
+---
+// One public pledge campaign (module `pledges`): its introduction, gift guide,
+// and the pledge form. The form posts back here. The server recalculates the
+// whole plan, stores the pledge with its schedule in one batch, then emails a
+// confirmation; a saved pledge stays saved even when the email is delayed.
+// A reload or double submit reuses the form's idempotency key and shows the
+// same pledge again. A honeypot absorbs simple bots, and each email address may
+// submit a few pledges a day. Personal details are never echoed back after the
+// pledge is saved; the confirmation shows the code and plan only.
+import { env } from 'cloudflare:workers';
+import Base from '../../../layouts/Base.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { formatDate, todayInTz, toUtcSql } from '../../../lib/dates';
+import { formatCents } from '../../../lib/money';
+import { renderMarkdown } from '../../../lib/markdown';
+import { btn, btnSecondary, errorText, lab, tin } from '../../../lib/adminUi';
+import type { EmailEnv } from '../../../lib/email';
+import {
+  campaignPhase,
+  getPledge,
+  getPublicCampaign,
+  listInstallments,
+  pledgeFingerprint,
+  submitOnlinePledge,
+  type InstallmentRow,
+  type PledgeRow,
+} from '../../../lib/pledgeDb';
+import { parsePledgeForm, type FieldErrors } from '../../../lib/pledgeForms';
+import { planLine, sendPledgeConfirmation } from '../../../lib/pledgeNotify';
+import { GIVING_METHODS, PLEDGE_FREQUENCIES } from '../../../lib/pledgePlan';
+import { giveHref, linkedGivingFund } from '../../../lib/pledgeGiving';
+
+export const prerender = false;
+
+const locale = parseLocale(Astro.params.locale ?? '');
+const slug = String(Astro.params.slug ?? '');
+if (!locale || !/^[a-z0-9-]{1,80}$/.test(slug)) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const db = Astro.locals.db;
+const campaign = await getPublicCampaign(db, slug, locale);
+if (!campaign) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+Astro.response.headers.set('Cache-Control', 'no-store');
+const today = todayInTz();
+const phase = campaignPhase(campaign, today);
+// With Giving on and a linked, active fund, people can give online right away.
+const givingFund = await linkedGivingFund(db, locale, campaign.fund_id, Astro.locals.modules.has('giving'));
+const giveUrl = givingFund ? giveHref(locale, givingFund.id) : null;
+const origin = (env as unknown as { APP_ORIGIN?: string }).APP_ORIGIN?.replace(/\/+$/, '') ?? '';
+
+let errors: FieldErrors = {};
+let values: Record<string, string> = {};
+let saved: { pledge: PledgeRow; gifts: InstallmentRow[]; email: 'sent' | 'failed' | 'none' } | null = null;
+let formError = '';
+
+if (Astro.request.method === 'POST') {
+  let fd: FormData | null = null;
+  try {
+    fd = await Astro.request.formData();
+  } catch {
+    formError = 'pledges.err.expired';
+  }
+  if (fd) {
+    values = Object.fromEntries([...fd.entries()].filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, String(v)]));
+    if (String(fd.get('website') ?? '') !== '') {
+      // Honeypot: look like success to a bot, store nothing.
+      return Astro.redirect(localePath(locale, `/pledge/${slug}`), 303);
+    }
+    if (phase !== 'open') {
+      formError = 'pledges.err.closed';
+    } else {
+      const parsed = parsePledgeForm(fd, campaign, { staff: false, locale });
+      if (!parsed.ok) {
+        errors = parsed.errors;
+      } else {
+        const v = parsed.value;
+        const result = await submitOnlinePledge(db, campaign.id, {
+          ...v.write,
+          idempotencyKey: v.idempotencyKey,
+          fingerprint: await pledgeFingerprint(v.fingerprintFields),
+          originalCode: v.originalCode,
+          dayAgoUtc: toUtcSql(new Date(Date.now() - 86_400_000)),
+        });
+        if (!result.ok) {
+          if (result.error === 'original_not_found') errors.original_code = 'pledges.err.originalNotFound';
+          else formError = result.error === 'rate_limited' ? 'pledges.err.rateLimited' : 'pledges.err.conflict';
+        } else {
+          let email: 'sent' | 'failed' | 'none' = 'none';
+          if (!result.replay) {
+            const outcome = await sendPledgeConfirmation(env as unknown as EmailEnv, db, result.id, '', { giveUrl: giveUrl && origin ? `${origin}${giveUrl}` : null });
+            email = outcome === 'sent' ? 'sent' : outcome === 'failed' ? 'failed' : 'none';
+          }
+          const pledge = await getPledge(db, result.id);
+          if (pledge) {
+            if (result.replay) email = pledge.email_status === 'sent' ? 'sent' : pledge.email_status === 'failed' ? 'failed' : 'none';
+            saved = { pledge, gifts: await listInstallments(db, pledge.id), email };
+          }
+        }
+      }
+    }
+  }
+}
+
+const idempotencyKey = values.idempotency_key && /^[0-9a-f-]{36}$/i.test(values.idempotency_key) ? values.idempotency_key : crypto.randomUUID();
+const val = (k: string, d = '') => values[k] ?? d;
+const err = (k: string) => (errors[k] ? t(locale, errors[k]) : '');
+const money = (c: number) => formatCents(c, campaign.currency, locale);
+const introHtml = campaign.intro_md ? renderMarkdown(campaign.intro_md) : '';
+const phaseText =
+  phase === 'upcoming'
+    ? t(locale, 'pledges.phase.upcoming', { date: formatDate(campaign.pledge_opens!, locale) })
+    : phase === 'closed'
+      ? t(locale, 'pledges.phase.closed')
+      : campaign.pledge_closes
+        ? t(locale, 'pledges.phase.open', { date: formatDate(campaign.pledge_closes, locale) })
+        : t(locale, 'pledges.phase.openNoEnd');
+// Labels the live preview needs, in this page's language (the plan math runs in the browser too).
+const previewCopy = {
+  once: t(locale, 'pledges.plan.once', { amount: '{amount}', date: '{date}' }),
+  recurring: t(locale, 'pledges.plan.recurring', { amount: '{amount}', frequency: '{frequency}', count: '{count}', first: '{first}', last: '{last}' }),
+  total: t(locale, 'pledges.preview.total', { total: '{total}' }),
+  invalid: t(locale, 'pledges.preview.invalid'),
+  everyN: t(locale, 'pledges.frequency.everyN', { n: '{n}' }),
+  frequencies: Object.fromEntries(PLEDGE_FREQUENCIES.map((f) => [f, t(locale, `pledges.frequency.${f}`)])),
+};
+const errorCount = Object.keys(errors).length + (formError ? 1 : 0);
+---
+
+<Base title={campaign.title} locale={locale} description={t(locale, 'pledges.metaDescription', { campaign: campaign.title })}>
+  <div class="container-content py-10 pledge-page">
+    <p class="section-eyebrow">{t(locale, 'pledges.eyebrow')}</p>
+    <h1 class="mt-2 font-display text-display-lg font-bold">{campaign.title}</h1>
+    <p class="mt-3 text-sm text-ink-muted">
+      {t(locale, 'pledges.givingPeriod', { start: formatDate(campaign.giving_start, locale), end: formatDate(campaign.giving_end, locale) })}{' · '}<span class="font-semibold text-ink" data-phase={phase}>{phaseText}</span>
+    </p>
+
+    {
+      saved ? (
+        <section class="mt-8 rounded-xl border border-success bg-success-soft p-6" data-pledge-saved aria-live="polite">
+          <h2 class="font-display text-heading-sm font-bold text-ink">{t(locale, 'pledges.thanks.title')}</h2>
+          <p class="mt-2 text-ink">{t(locale, 'pledges.thanks.code')}</p>
+          <p class="mt-1 font-mono text-heading-md font-bold tracking-caps text-ink" data-pledge-code>{saved.pledge.code}</p>
+          <p class="mt-3 text-ink">{t(locale, 'pledges.thanks.total', { total: money(saved.pledge.total_cents) })}</p>
+          <p class="text-ink">{planLine(locale, saved.pledge, campaign.currency)}</p>
+          <p class="mt-3 text-sm text-ink">
+            {saved.email === 'sent' ? t(locale, 'pledges.thanks.emailSent') : saved.email === 'failed' ? t(locale, 'pledges.thanks.emailDelayed') : ''}
+          </p>
+          <p class="mt-1 text-sm text-ink">{t(locale, 'pledges.thanks.additional')}</p>
+          <details class="mt-4">
+            <summary class="cursor-pointer text-sm font-semibold">{t(locale, 'pledges.thanks.schedule', { count: saved.gifts.length })}</summary>
+            <table class="mt-2 text-sm">
+              <tbody>
+                {saved.gifts.map((g) => (
+                  <tr><td class="pr-6 py-0.5">{formatDate(g.gift_date, locale)}</td><td class="text-right">{money(g.amount_cents)}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+          <p class="mt-4 text-sm text-ink-muted">{t(locale, 'pledges.intentions')}</p>
+          <div class="mt-4 flex flex-wrap gap-3 print-hide">
+            {giveUrl && <a class={btn} href={giveUrl} data-give-link>{t(locale, 'pledges.giveNow', { fund: givingFund!.name })}</a>}
+            <button type="button" class={giveUrl ? btnSecondary : btn} onclick="window.print()">{t(locale, 'pledges.thanks.print')}</button>
+          </div>
+        </section>
+      ) : (
+        <>
+          {introHtml && <article class="prose mt-6"><Fragment set:html={introHtml} /></article>}
+
+          {campaign.giftGuide.length > 0 && (
+            <section class="mt-8">
+              <h2 class="font-display text-heading-sm font-bold">{t(locale, 'pledges.guide.title')}</h2>
+              <p class="mt-1 text-sm text-ink-muted">{t(locale, 'pledges.guide.intro', { months: campaign.max_months })}</p>
+              <table class="mt-3 w-full max-w-xl text-sm">
+                <thead>
+                  <tr class="border-b border-border text-left text-ink-muted">
+                    <th class="py-2 pr-4 font-semibold">{t(locale, 'pledges.guide.households')}</th>
+                    <th class="py-2 pr-4 font-semibold">{t(locale, 'pledges.guide.total')}</th>
+                    <th class="py-2 font-semibold">{t(locale, 'pledges.guide.monthly', { months: campaign.max_months })}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {campaign.giftGuide.map((g) => (
+                    <tr class="border-b border-border">
+                      <td class="py-1.5 pr-4">{g.households}</td>
+                      <td class="py-1.5 pr-4 font-semibold">{money(g.totalCents)}</td>
+                      <td class="py-1.5">{money(Math.round(g.totalCents / campaign.max_months))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
+
+          {giveUrl && (
+            <p class="mt-6 text-sm">
+              <a class="font-semibold text-primary hover:underline" href={giveUrl} data-give-link>{t(locale, 'pledges.giveNow', { fund: givingFund!.name })} →</a>
+            </p>
+          )}
+
+          {phase !== 'open' ? (
+            <p class="mt-8 rounded-md border border-border bg-surface-raised px-4 py-6 text-center text-ink-muted">{phaseText}</p>
+          ) : (
+            <form method="post" class="mt-10 max-w-2xl space-y-6" data-pledge-form novalidate>
+              <h2 class="font-display text-heading-sm font-bold">{t(locale, 'pledges.form.title')}</h2>
+              {errorCount > 0 && <p class={errorText} role="alert">{formError ? t(locale, formError) : t(locale, 'pledges.err.fix')}</p>}
+              <input type="hidden" name="idempotency_key" value={idempotencyKey} />
+              <div class="hp" aria-hidden="true"><label>Website <input name="website" tabindex="-1" autocomplete="off" /></label></div>
+
+              <fieldset class="space-y-2">
+                <legend class={lab}>{t(locale, 'pledges.form.type')}</legend>
+                <label class="flex items-center gap-2"><input type="radio" name="pledge_type" value="initial" checked={val('pledge_type', 'initial') !== 'additional'} /> {t(locale, 'pledges.form.typeInitial')}</label>
+                <label class="flex items-center gap-2"><input type="radio" name="pledge_type" value="additional" checked={val('pledge_type') === 'additional'} /> {t(locale, 'pledges.form.typeAdditional')}</label>
+                <label class="block" data-show-when="additional">
+                  <span class={lab}>{t(locale, 'pledges.form.originalCode')}</span>
+                  <input name="original_code" value={val('original_code')} maxlength="12" autocomplete="off" class={`${tin} uppercase`} />
+                  <span class="block text-sm text-ink-muted">{t(locale, 'pledges.form.originalCodeHelp')}</span>
+                  {err('original_code') && <span class={errorText}>{err('original_code')}</span>}
+                </label>
+              </fieldset>
+
+              <fieldset class="grid gap-4 sm:grid-cols-2">
+                <legend class="sr-only">{t(locale, 'pledges.form.about')}</legend>
+                <label class="block sm:col-span-2"><span class={lab}>{t(locale, 'pledges.form.name')} *</span><input name="name" value={val('name')} maxlength="120" autocomplete="name" class={tin} />{err('name') && <span class={errorText}>{err('name')}</span>}</label>
+                <label class="block"><span class={lab}>{t(locale, 'pledges.form.email')} *</span><input type="email" name="email" value={val('email')} maxlength="254" autocomplete="email" class={tin} />{err('email') && <span class={errorText}>{err('email')}</span>}</label>
+                <label class="block"><span class={lab}>{t(locale, 'pledges.form.phone')}</span><input type="tel" name="phone" value={val('phone')} maxlength="40" autocomplete="tel" class={tin} /></label>
+                <label class="block"><span class={lab}>{t(locale, 'pledges.form.household')}</span><input name="household" value={val('household')} maxlength="120" class={tin} /></label>
+                <label class="block"><span class={lab}>{t(locale, 'pledges.form.address')}</span><input name="address" value={val('address')} maxlength="300" autocomplete="street-address" class={tin} /></label>
+              </fieldset>
+
+              <fieldset class="space-y-4 rounded-xl border border-border p-4">
+                <legend class="px-1 font-semibold">{t(locale, 'pledges.form.plan')}</legend>
+                <div class="flex flex-wrap gap-4">
+                  <label class="flex items-center gap-2"><input type="radio" name="mode" value="total" checked={val('mode', 'total') !== 'installment'} /> {t(locale, 'pledges.form.modeTotal')}</label>
+                  <label class="flex items-center gap-2"><input type="radio" name="mode" value="installment" checked={val('mode') === 'installment'} /> {t(locale, 'pledges.form.modeInstallment')}</label>
+                </div>
+                {err('mode') && <span class={errorText}>{err('mode')}</span>}
+                <div class="grid gap-4 sm:grid-cols-2">
+                  <label class="block"><span class={lab}>{t(locale, 'pledges.form.amount')} *</span><input name="amount" value={val('amount')} inputmode="decimal" maxlength="20" class={tin} />{err('amount') && <span class={errorText}>{err('amount')}</span>}</label>
+                  <label class="block">
+                    <span class={lab}>{t(locale, 'pledges.form.frequency')}</span>
+                    <select name="frequency" class={tin}>
+                      {PLEDGE_FREQUENCIES.map((f) => <option value={f} selected={val('frequency', 'monthly') === f}>{t(locale, `pledges.frequency.${f}`)}</option>)}
+                    </select>
+                    {err('frequency') && <span class={errorText}>{err('frequency')}</span>}
+                  </label>
+                  <label class="block" data-show-when-frequency="custom"><span class={lab}>{t(locale, 'pledges.form.interval')}</span><input type="number" name="interval_months" min="1" max={campaign.max_months} value={val('interval_months', '2')} class={tin} /></label>
+                  <label class="block" data-hide-when-frequency="once"><span class={lab}>{t(locale, 'pledges.form.duration', { max: campaign.max_months })}</span><input type="number" name="duration_months" min="1" max={campaign.max_months} value={val('duration_months', String(campaign.max_months))} class={tin} />{err('duration_months') && <span class={errorText}>{err('duration_months')}</span>}</label>
+                  <label class="block"><span class={lab}>{t(locale, 'pledges.form.start')}</span><input type="date" name="start_date" min={campaign.giving_start} max={campaign.giving_end} value={val('start_date', today > campaign.giving_start ? today : campaign.giving_start)} class={tin} />{err('start_date') && <span class={errorText}>{err('start_date')}</span>}</label>
+                </div>
+                <output class="block rounded-md bg-surface-sunken px-3 py-2 text-sm" data-pledge-preview aria-live="polite" data-copy={JSON.stringify(previewCopy)} data-bounds={JSON.stringify({ givingStart: campaign.giving_start, givingEnd: campaign.giving_end, maxMonths: campaign.max_months })} data-currency={campaign.currency} data-locale={locale}></output>
+              </fieldset>
+
+              <fieldset class="grid gap-4 sm:grid-cols-2">
+                <label class="block">
+                  <span class={lab}>{t(locale, 'pledges.form.method')}</span>
+                  <select name="giving_method" class={tin}>
+                    {GIVING_METHODS.map((m) => <option value={m} selected={val('giving_method', 'online') === m}>{t(locale, `pledges.method.${m}`)}</option>)}
+                  </select>
+                  {err('giving_method') && <span class={errorText}>{err('giving_method')}</span>}
+                </label>
+                <label class="block"><span class={lab}>{t(locale, 'pledges.form.methodNote')}</span><input name="giving_note" value={val('giving_note')} maxlength="200" class={tin} />{err('giving_note') && <span class={errorText}>{err('giving_note')}</span>}</label>
+              </fieldset>
+
+              <fieldset class="space-y-3 rounded-xl border border-border p-4">
+                <legend class="px-1 font-semibold">{t(locale, 'pledges.form.commit')}</legend>
+                <p class="text-sm text-ink-muted">{t(locale, 'pledges.intentions')}</p>
+                <label class="block"><span class={lab}>{t(locale, 'pledges.form.signature')} *</span><input name="signer_name" value={val('signer_name')} maxlength="120" autocomplete="off" class={`${tin} pledge-signature`} /><span class="block text-sm text-ink-muted">{t(locale, 'pledges.form.signatureHelp')}</span>{err('signer_name') && <span class={errorText}>{err('signer_name')}</span>}</label>
+                <label class="flex items-start gap-2"><input type="checkbox" name="consent" checked={val('consent') === 'on'} class="mt-1" /> <span>{t(locale, 'pledges.form.consent')}</span></label>
+                {err('consent') && <span class={errorText}>{err('consent')}</span>}
+              </fieldset>
+
+              <button type="submit" class={btn}>{t(locale, 'pledges.form.submit')}</button>
+            </form>
+          )}
+        </>
+      )
+    }
+  </div>
+</Base>
+
+<script>
+  import { calculatePledgePlan } from '../../../lib/pledgePlan';
+
+  // Progressive enhancement only: the form works without this. It shows and hides
+  // the fields that apply, and previews the plan with the server's own arithmetic.
+  const form = document.querySelector<HTMLFormElement>('[data-pledge-form]');
+  const out = document.querySelector<HTMLOutputElement>('[data-pledge-preview]');
+  if (form && out) {
+    const copy = JSON.parse(out.dataset.copy ?? '{}');
+    const bounds = JSON.parse(out.dataset.bounds ?? '{}');
+    const lang = out.dataset.locale ?? 'en';
+    const money = new Intl.NumberFormat(lang, { style: 'currency', currency: (out.dataset.currency ?? 'usd').toUpperCase() });
+    const dates = new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeZone: 'UTC' });
+    const fill = (tpl: string, vars: Record<string, string | number>) => tpl.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ''));
+    const day = (s: string) => dates.format(new Date(`${s}T00:00:00Z`));
+    const update = () => {
+      const fd = new FormData(form);
+      const frequency = String(fd.get('frequency'));
+      const type = String(fd.get('pledge_type'));
+      form.querySelectorAll<HTMLElement>('[data-show-when]').forEach((el) => { el.hidden = el.dataset.showWhen !== type; });
+      form.querySelectorAll<HTMLElement>('[data-show-when-frequency]').forEach((el) => { el.hidden = el.dataset.showWhenFrequency !== frequency; });
+      form.querySelectorAll<HTMLElement>('[data-hide-when-frequency]').forEach((el) => { el.hidden = el.dataset.hideWhenFrequency === frequency; });
+      const r = calculatePledgePlan({
+        mode: String(fd.get('mode')),
+        amount: String(fd.get('amount') ?? ''),
+        frequency,
+        durationMonths: Number(fd.get('duration_months')),
+        intervalMonths: Number(fd.get('interval_months') || 1),
+        startDate: String(fd.get('start_date') ?? ''),
+      }, bounds);
+      if (!r.ok) { out.textContent = String(fd.get('amount') ?? '').trim() ? copy.invalid : ''; return; }
+      const p = r.plan;
+      const freq = p.frequency === 'custom' ? fill(copy.everyN, { n: p.intervalMonths }) : copy.frequencies[p.frequency];
+      const line = p.count === 1
+        ? fill(copy.once, { amount: money.format(p.totalCents / 100), date: day(p.startDate) })
+        : fill(copy.recurring, { amount: money.format(p.installmentCents / 100), frequency: freq, count: p.count, first: day(p.startDate), last: day(p.endDate) });
+      out.textContent = `${fill(copy.total, { total: money.format(p.totalCents / 100) })} ${line}`;
+    };
+    form.addEventListener('input', update);
+    form.addEventListener('change', update);
+    update();
+  }
+</script>
+
+<style>
+  .hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+  .pledge-signature { font-family: var(--font-display); font-style: italic; font-size: 1.15rem; }
+  [hidden] { display: none !important; }
+  @media print {
+    :global(header), :global(footer), .print-hide { display: none !important; }
+  }
+</style>

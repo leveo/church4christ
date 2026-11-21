@@ -64,6 +64,7 @@ export const SITEMAP_PATHS = [
   '/serve/testimonies',
   '/give',
   '/register',
+  '/missions',
   '/privacy',
 ] as const;
 

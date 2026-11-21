@@ -256,6 +256,8 @@ Every feature has its own plain-English guide. Start with any of these:
 | [![](docs/images/admin/giving.png)](docs/features/giving.md) | **[Giving](docs/features/giving.md)** | Implemented: online gifts through Stripe (test mode by default, live after the go-live checklist), an offline ledger for checks and cash, and annual giving statements. |
 | [![](docs/images/admin/registration.png)](docs/features/registration.md) | **[Registration](docs/features/registration.md)** | Implemented: free event sign-up on D1 or Supabase, custom questions, waitlist, event stages, and roster export, plus paid Stripe checkout on Supabase in the same Stripe mode as Giving (verify with a small live registration before relying on it). |
 |  | **[Event logistics](docs/features/event-logistics.md)** | Optional add-on to Registration: put people in rooms, seat them at tables with an Auto-seat preview, sort them into small groups, and print room lists, door signs, and table cards. |
+|  | **[Pledges](docs/features/pledges.md)** | Optional: run a faith pledge campaign with a live plan preview, a code for adding to a pledge, confirmation emails, paper-card entry, goal progress, and CSV export. With Giving on, link a fund to track what each household has actually given. |
+|  | **[Missions](docs/features/missions.md)** | Optional: show mission trips on a world map with a year filter, a timeline, and a story page per trip, with a way to list sensitive trips without a pin. With Giving on, a trip can take gifts to its own fund. |
 | [![](docs/images/portal/member-opportunities.png)](docs/features/member-portal.md) | **[Member portal](docs/features/member-portal.md)** | One signed-in hub for current participation and open opportunities, plus household profiles, events, serving, calendar, giving, and scoped prayer. |
 | [![](docs/images/public/home-zh.png)](docs/features/i18n.md) | **[Twelve languages](docs/features/i18n.md)** | Choose from 12 interface languages per site, with an English fallback and one-click Simplified-to-Traditional Chinese. |
 | [![](docs/images/admin/email-tab.png)](docs/features/email-automation.md) | **[Email & automation](docs/features/email-automation.md)** | Sign-in links, reminders, and digests, with local logging and a paid-capable production configuration. |
@@ -295,6 +297,8 @@ is deleted. See [**`docs/features/modules.md`**](docs/features/modules.md).
 | `learning` | Learning | 学习 | Either |
 | `planning` | Service Planning | 服事流程 | Either |
 | `event-logistics` | Event Logistics | 活动后勤 | Either |
+| `pledges` | Pledges | 认献 | Either |
+| `missions` | Missions | 宣教 | Either |
 <!-- capabilities:end -->
 
 ### Community management and workflows

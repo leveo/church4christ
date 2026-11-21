@@ -71,7 +71,7 @@ check [Supabase pricing](https://supabase.com/pricing),
 [Free project pausing](https://supabase.com/docs/guides/platform/free-project-pausing).
 
 Giving and paid Registration are **not available on D1**. Giving is force-disabled on D1, even if legacy
-settings say it is on, and D1 refuses a priced Registration event. New setup writes explicit selected settings for all 23 modules.
+settings say it is on, and D1 refuses a priced Registration event. New setup writes explicit selected settings for all 25 modules.
 
 ---
 

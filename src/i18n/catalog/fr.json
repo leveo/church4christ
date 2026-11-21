@@ -22,7 +22,9 @@
     "registration": { "label": "Inscriptions", "description": "Gérez des inscriptions gratuites ou payantes aux événements." },
     "learning": { "label": "Formation", "description": "Poursuivez les cours de ministère au-delà du temps de classe." },
     "planning": { "label": "Planification des cultes", "description": "Planifiez les déroulés, les répétitions, les disponibilités et les calendriers des cultes et des événements." },
-    "event-logistics": { "label": "Logistique des événements", "description": "Répartissez l’hébergement, les tables et les petits groupes des personnes inscrites à un événement." }
+    "event-logistics": { "label": "Logistique des événements", "description": "Répartissez l’hébergement, les tables et les petits groupes des personnes inscrites à un événement." },
+    "pledges": { "label": "Promesses de don", "description": "Gérez des campagnes de promesses de don avec calendriers de dons, objectifs et saisie des cartes papier." },
+    "missions": { "label": "Mission", "description": "Présentez les voyages missionnaires sur une carte du monde, avec une chronologie et le récit de chaque voyage." }
   },
   "presets": {
     "website": { "label": "Site web", "description": "Un site public ciblé et une boîte à outils de publication." },

@@ -7,7 +7,7 @@ import { enabledSitemapPaths, publicOrigin, renderSitemap, type SitemapPage } fr
 // both locales with hreflang alternates. Private and token pages never appear.
 export const GET: APIRoute = async ({ url, locals }) => {
   const origin = publicOrigin((env as { APP_ORIGIN?: string }).APP_ORIGIN, url);
-  const pages: SitemapPage[] = enabledSitemapPaths(locals.modules).map((path) => ({ path }));
+  const pages: SitemapPage[] = enabledSitemapPaths(locals.publicModules ?? locals.modules).map((path) => ({ path }));
   try {
     for (const page of await listCustomPages(locals.db)) {
       if (page.published) pages.push({ path: `/p/${encodeURIComponent(page.slug)}`, lastmod: page.updated_at });

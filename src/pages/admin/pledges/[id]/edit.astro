@@ -1,0 +1,146 @@
+---
+// Create (/admin/pledges/new/edit) or edit a pledge campaign. Localized title and
+// introduction use the shared per-language tabs; the giving period bounds every
+// planned gift; the optional pledge period bounds when the public form accepts
+// pledges. The module's own public date window lives in Settings -> Modules.
+import Admin from '../../../../layouts/Admin.astro';
+import LocaleFields from '../../../../components/admin/LocaleFields.astro';
+import GivingFundSelect from '../../../../components/admin/GivingFundSelect.astro';
+import { listFunds, type Fund } from '../../../../lib/fundDb';
+import { getSetting } from '../../../../lib/settings';
+import { t } from '../../../../lib/i18n';
+import { hasAreaAccess } from '../../../../lib/adminAreas';
+import { btn, btnSecondary, card, errorText, lab, tin, noticeErr } from '../../../../lib/adminUi';
+import { formatCents } from '../../../../lib/money';
+import {
+  campaignSlugTaken,
+  createCampaign,
+  getCampaign,
+  getCampaignTexts,
+  updateCampaign,
+  PLEDGE_CAMPAIGN_STATUSES,
+  type CampaignText,
+} from '../../../../lib/pledgeDb';
+import { parseCampaignForm, type FieldErrors } from '../../../../lib/pledgeForms';
+import { giftGuideText } from '../../../../lib/pledgePlan';
+import { SUPPORTED_LOCALES, type Locale, type SupportedLocale } from '../../../../lib/locales';
+
+export const prerender = false;
+
+const user = Astro.locals.user;
+if (!user || !hasAreaAccess(user, 'pledges')) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+const isNew = Astro.params.id === 'new';
+const id = isNew ? null : /^\d+$/.test(Astro.params.id ?? '') ? Number(Astro.params.id) : NaN;
+if (Number.isNaN(id)) return new Response(null, { status: 404 });
+const existing = id ? await getCampaign(db, id, lang) : null;
+if (id && !existing) return new Response(null, { status: 404 });
+// The Giving link is offered only while Giving is on (never on D1, where it cannot be).
+const givingOn = Astro.locals.modules.has('giving');
+let funds: Fund[] = [];
+if (givingOn) {
+  try {
+    funds = await listFunds(db, lang);
+  } catch (e) {
+    console.error('pledge campaign: funds load failed', e);
+  }
+}
+
+let errors: FieldErrors = {};
+let values: Record<string, string> = {};
+let texts: Partial<Record<SupportedLocale, CampaignText>> = id ? await getCampaignTexts(db, id) : {};
+let failed = false;
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  values = Object.fromEntries([...fd.entries()].map(([k, v]) => [k, String(v)]));
+  const parsed = parseCampaignForm(fd);
+  if (parsed.ok && !givingOn) delete parsed.value.fundId;
+  if (parsed.ok && (await campaignSlugTaken(db, parsed.value.slug, id))) {
+    errors = { slug: 'pledges.admin.err.slugTaken' };
+  } else if (parsed.ok && typeof parsed.value.fundId === 'number' && !funds.some((f) => f.id === parsed.value.fundId)) {
+    errors = { fund_id: 'pledges.admin.err.fund' };
+  } else if (parsed.ok) {
+    try {
+      // A new campaign uses the church's giving currency (the setting Giving uses), so pledges and
+      // gifts are counted in the same currency. It stays fixed once pledges exist.
+      const rawCurrency = (await getSetting(db, 'giving.currency', 'usd')).trim().toLowerCase();
+      const savedId = id
+        ? (await updateCampaign(db, id, parsed.value), id)
+        : await createCampaign(db, { ...parsed.value, currency: /^[a-z]{3}$/.test(rawCurrency) ? rawCurrency : 'usd' });
+      return Astro.redirect(`/admin/pledges/${savedId}?saved=1`, 303);
+    } catch (e) {
+      console.error('pledge campaign save failed', e);
+      failed = true;
+    }
+  } else {
+    errors = parsed.errors;
+  }
+  texts = {};
+  for (const code of SUPPORTED_LOCALES) {
+    if (values[`title_${code}`] !== undefined) texts[code] = { title: values[`title_${code}`] ?? '', intro: values[`intro_${code}`] ?? '' };
+  }
+}
+
+const cents = (c: number | null | undefined) => (c ? (c / 100).toFixed(2).replace(/\.00$/, '') : '');
+const v = (k: string, fallback: string) => values[k] ?? fallback;
+const err = (k: string) => (errors[k] ? t(lang, errors[k]) : '');
+const titleValues = Object.fromEntries(Object.entries(texts).map(([k, x]) => [k, x?.title ?? '']));
+const introValues = Object.fromEntries(Object.entries(texts).map(([k, x]) => [k, x?.intro ?? '']));
+const heading = existing ? t(lang, 'pledges.admin.editCampaign') : t(lang, 'pledges.admin.newCampaign');
+---
+
+<Admin title={heading}>
+  <p class="text-sm"><a class="text-primary hover:underline" href={existing ? `/admin/pledges/${existing.id}` : '/admin/pledges'}>← {existing ? existing.title : t(lang, 'pledges.admin.title')}</a></p>
+  <h1 class="mt-2 font-display text-display-lg font-bold">{heading}</h1>
+  {failed && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'pledges.admin.saveFailed')}</p>}
+  {Object.keys(errors).length > 0 && <p class={`mt-4 ${errorText}`}>{t(lang, 'admin.form.fixErrors')}</p>}
+  <form method="post" class={`${card} mt-6 max-w-3xl space-y-5`}>
+    <LocaleFields name="title" label={t(lang, 'pledges.admin.field.title')} values={titleValues} maxlength={200} lang={lang} error={errors.title} />
+    <LocaleFields name="intro" label={t(lang, 'pledges.admin.field.intro')} values={introValues} multiline rows={6} maxlength={8000} lang={lang} />
+    <div class="grid gap-4 sm:grid-cols-2">
+      <label class="block"><span class={lab}>{t(lang, 'pledges.admin.field.slug')}</span><input name="slug" value={v('slug', existing?.slug ?? '')} maxlength="80" class={tin} /><span class="block text-sm text-ink-muted">{t(lang, 'pledges.admin.field.slugHelp')}</span>{err('slug') && <span class={errorText}>{err('slug')}</span>}</label>
+      <label class="block">
+        <span class={lab}>{t(lang, 'pledges.admin.field.status')}</span>
+        <select name="status" class={tin}>{PLEDGE_CAMPAIGN_STATUSES.map((s) => <option value={s} selected={v('status', existing?.status ?? 'draft') === s}>{t(lang, `pledges.admin.status.${s}`)}</option>)}</select>
+      </label>
+    </div>
+    <fieldset class="grid gap-4 sm:grid-cols-2">
+      <legend class="mb-2 font-semibold">{t(lang, 'pledges.admin.field.pledgePeriod')}</legend>
+      <p class="text-sm text-ink-muted sm:col-span-2">{t(lang, 'pledges.admin.field.pledgePeriodHelp')}</p>
+      <label class="block"><span class={lab}>{t(lang, 'pledges.admin.field.opens')}</span><input type="date" name="pledge_opens" value={v('pledge_opens', existing?.pledge_opens ?? '')} class={tin} />{err('pledge_opens') && <span class={errorText}>{err('pledge_opens')}</span>}</label>
+      <label class="block"><span class={lab}>{t(lang, 'pledges.admin.field.closes')}</span><input type="date" name="pledge_closes" value={v('pledge_closes', existing?.pledge_closes ?? '')} class={tin} />{err('pledge_closes') && <span class={errorText}>{err('pledge_closes')}</span>}</label>
+    </fieldset>
+    <fieldset class="grid gap-4 sm:grid-cols-3">
+      <legend class="mb-2 font-semibold">{t(lang, 'pledges.admin.field.givingPeriod')}</legend>
+      <label class="block"><span class={lab}>{t(lang, 'pledges.admin.field.givingStart')}</span><input type="date" name="giving_start" value={v('giving_start', existing?.giving_start ?? '')} class={tin} />{err('giving_start') && <span class={errorText}>{err('giving_start')}</span>}</label>
+      <label class="block"><span class={lab}>{t(lang, 'pledges.admin.field.givingEnd')}</span><input type="date" name="giving_end" value={v('giving_end', existing?.giving_end ?? '')} class={tin} />{err('giving_end') && <span class={errorText}>{err('giving_end')}</span>}</label>
+      <label class="block"><span class={lab}>{t(lang, 'pledges.admin.field.maxMonths')}</span><input type="number" name="max_months" min="1" max="120" value={v('max_months', String(existing?.max_months ?? 36))} class={tin} />{err('max_months') && <span class={errorText}>{err('max_months')}</span>}</label>
+    </fieldset>
+    <fieldset class="grid gap-4 sm:grid-cols-2">
+      <legend class="mb-2 font-semibold">{t(lang, 'pledges.admin.field.goals')}</legend>
+      <label class="block"><span class={lab}>{t(lang, 'pledges.admin.field.goal')}</span><input name="goal" inputmode="decimal" value={v('goal', cents(existing?.goal_cents))} class={tin} />{err('goal') && <span class={errorText}>{err('goal')}</span>}</label>
+      <label class="block"><span class={lab}>{t(lang, 'pledges.admin.field.householdGoal')}</span><input type="number" min="1" name="household_goal" value={v('household_goal', existing?.household_goal ? String(existing.household_goal) : '')} class={tin} />{err('household_goal') && <span class={errorText}>{err('household_goal')}</span>}</label>
+      <label class="block sm:col-span-2">
+        <span class={lab}>{t(lang, 'pledges.admin.field.giftGuide')}</span>
+        <textarea name="gift_guide" rows="6" class={`${tin} font-mono`}>{v('gift_guide', giftGuideText(existing?.giftGuide ?? []))}</textarea>
+        <span class="block text-sm text-ink-muted">{t(lang, 'pledges.admin.field.giftGuideHelp', { example: `3 x ${formatCents(500000, 'usd', lang)}` })}</span>
+        {err('gift_guide') && <span class={errorText}>{err('gift_guide')}</span>}
+      </label>
+    </fieldset>
+    {givingOn && (
+      <GivingFundSelect
+        lang={lang}
+        funds={funds}
+        value={values.fund_id !== undefined ? (Number(values.fund_id) || null) : (existing?.fund_id ?? null)}
+        help={t(lang, 'pledges.admin.field.fundHelp')}
+        error={errors.fund_id}
+      />
+    )}
+    <div class="flex flex-wrap gap-3">
+      <button type="submit" class={btn}>{t(lang, 'pledges.admin.save')}</button>
+      <a href={existing ? `/admin/pledges/${existing.id}` : '/admin/pledges'} class={btnSecondary}>{t(lang, 'pledges.admin.cancel')}</a>
+    </div>
+  </form>
+</Admin>

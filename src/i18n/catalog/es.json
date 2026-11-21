@@ -22,7 +22,9 @@
     "registration": { "label": "Inscripciones", "description": "Gestiona inscripciones a eventos gratuitas o de pago." },
     "learning": { "label": "Aprendizaje", "description": "Continúa los cursos del ministerio más allá del horario de clase." },
     "planning": { "label": "Planificación de cultos", "description": "Planifica guiones, ensayos, disponibilidad y calendarios de cultos y eventos." },
-    "event-logistics": { "label": "Logística de eventos", "description": "Asigna alojamiento, mesas y grupos pequeños a las personas inscritas en un evento." }
+    "event-logistics": { "label": "Logística de eventos", "description": "Asigna alojamiento, mesas y grupos pequeños a las personas inscritas en un evento." },
+    "pledges": { "label": "Promesas de fe", "description": "Gestiona campañas de promesas con calendarios de donación, metas y registro de tarjetas en papel." },
+    "missions": { "label": "Misiones", "description": "Muestra los viajes misioneros en un mapa del mundo con línea de tiempo e historias de cada viaje." }
   },
   "presets": {
     "website": { "label": "Sitio web", "description": "Un sitio web público enfocado y herramientas de publicación." },

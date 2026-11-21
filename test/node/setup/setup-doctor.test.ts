@@ -69,6 +69,8 @@ const SUPABASE_MIGRATIONS = [
   '0044_registration_builder.sql',
   '0045_registration_back_office.sql',
   '0046_registration_logistics.sql',
+  '0047_pledges.sql',
+  '0048_missions.sql',
 ];
 
 const rowResult = (rows: Record<string, unknown>[]) => ({ results: rows, meta: { changes: 0 }, success: true });
