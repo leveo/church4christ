@@ -91,6 +91,14 @@
     "event-logistics": {
       "label": "Logística de eventos",
       "description": "Distribua hospedagem, mesas e pequenos grupos para as pessoas inscritas em um evento."
+    },
+    "pledges": {
+      "label": "Promessas de fé",
+      "description": "Gerencie campanhas de promessas com cronogramas de contribuição, metas e registro de cartões em papel."
+    },
+    "missions": {
+      "label": "Missões",
+      "description": "Mostre as viagens missionárias em um mapa-múndi com linha do tempo e histórias de cada viagem."
     }
   },
   "presets": {

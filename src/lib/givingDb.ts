@@ -868,3 +868,42 @@ export async function getStripeCustomer(db: AppDb, personId: number, livemode = 
     .first<{ stripe_customer_id: string | null }>();
   return legacy?.stripe_customer_id ?? null;
 }
+
+export interface FundGiverRow {
+  /** lower(trim()) of the linked person's email, or null for a gift without a person. */
+  person_email: string | null;
+  /** lower(trim()) of the email stored on the gift, or null. */
+  donor_email: string | null;
+  received_cents: number;
+  gift_count: number;
+  last_gift_date: string;
+}
+
+/**
+ * Money given to one fund over an inclusive effective-date window, grouped by
+ * who gave it, for matching against pledges (Pledges module). Same counting
+ * rules as every other giving total: succeeded gifts only, net of refunds,
+ * the church-time-zone effective date, one currency, and test-mode Stripe gifts
+ * only when `includeTest`. Postgres only — callers check that Giving is on.
+ */
+export async function fundGiftsByGiver(
+  db: AppDb,
+  filter: { fundId: number; from: string; to: string; currency: string; includeTest: boolean },
+): Promise<FundGiverRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT lower(trim(p.email)) AS person_email, lower(trim(g.donor_email)) AS donor_email,
+              SUM(${NET}) AS received_cents, COUNT(g.id) AS gift_count, MAX(${EFFECTIVE_DATE}) AS last_gift_date
+       FROM gifts g LEFT JOIN people p ON p.id = g.person_id
+       WHERE g.fund_id = ?1 AND g.status = 'succeeded' AND g.currency = ?2
+         AND ${EFFECTIVE_DATE} >= ?3 AND ${EFFECTIVE_DATE} <= ?4${filter.includeTest ? '' : ` AND ${LIVE_ONLY}`}
+       GROUP BY lower(trim(p.email)), lower(trim(g.donor_email))`,
+    )
+    .bind(filter.fundId, filter.currency, filter.from, filter.to)
+    .all<FundGiverRow>();
+  return results.map((r) => ({
+    ...r,
+    received_cents: Number(r.received_cents),
+    gift_count: Number(r.gift_count),
+  }));
+}

@@ -15,6 +15,7 @@ import {
   type CapabilityKey,
 } from './capabilityCatalog';
 import type { DbBackend } from './dbProvider';
+import { isValidDateStr } from './dates';
 import { getSettings } from './settings';
 
 export const MODULE_KEYS = CAPABILITY_KEYS;
@@ -213,4 +214,102 @@ export async function getEnabledModules(db: AppDb, backend: DbBackend): Promise<
   const enabled = filterByBackend(settingsEnabled, backend);
   cache = { value: enabled, backend, expiresAt: now + CACHE_TTL_MS };
   return enabled;
+}
+
+// ---------------------------------------------------------------------------
+// Public date windows for schedulable modules (catalog `schedulable: true`).
+// A window limits only the module's PUBLIC pages and nav links: the on/off
+// switch above still gates everything, and admins keep their pages before a
+// window opens and after it closes, so they can prepare and follow up. Dates
+// are inclusive YYYY-MM-DD in the church time zone; a missing bound is open.
+// The rows live outside the `module.<key>` namespace (setup and doctor expect
+// exactly one `module.<key>` row per capability).
+
+export interface ModuleWindow {
+  start: string | null;
+  end: string | null;
+}
+
+export type ModuleWindowState = 'open' | 'upcoming' | 'ended';
+
+export const SCHEDULABLE_MODULE_KEYS: readonly ModuleKey[] = MODULE_KEYS.filter(
+  (key) => CAPABILITIES[key].schedulable === true,
+);
+
+export function moduleWindowKeys(key: ModuleKey): { start: string; end: string } {
+  return { start: `moduleWindow.${key}.start`, end: `moduleWindow.${key}.end` };
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function windowDate(value: string | undefined): string | null {
+  return value && DATE_RE.test(value) ? value : null;
+}
+
+/** Where `today` (YYYY-MM-DD) falls relative to an inclusive window. */
+export function moduleWindowState(window: ModuleWindow | undefined, today: string): ModuleWindowState {
+  if (window?.start && today < window.start) return 'upcoming';
+  if (window?.end && today > window.end) return 'ended';
+  return 'open';
+}
+
+/** The enabled modules whose public pages are open today. Pure. */
+export function publicModuleSet(
+  modules: ReadonlySet<string>,
+  windows: Partial<Record<ModuleKey, ModuleWindow>>,
+  today: string,
+): Set<string> {
+  const out = new Set<string>();
+  for (const key of modules) {
+    if (moduleWindowState(windows[key as ModuleKey], today) === 'open') out.add(key);
+  }
+  return out;
+}
+
+/** True when a locale-stripped path is one of `key`'s public (not admin) pages. */
+export function isPublicModulePath(path: string, key: ModuleKey): boolean {
+  return MODULES[key].publicPrefixes.some((prefix) => under(path, prefix));
+}
+
+/**
+ * Validate the two date inputs of a module window form. Empty means unbounded.
+ * Returns the cleaned window or an error code when a date is malformed or the
+ * window ends before it starts.
+ */
+export function parseModuleWindow(
+  startRaw: string,
+  endRaw: string,
+): { ok: true; window: ModuleWindow } | { ok: false; error: 'date' | 'order' } {
+  const start = startRaw.trim();
+  const end = endRaw.trim();
+  if ((start && !isValidDateStr(start)) || (end && !isValidDateStr(end))) return { ok: false, error: 'date' };
+  if (start && end && end < start) return { ok: false, error: 'order' };
+  return { ok: true, window: { start: start || null, end: end || null } };
+}
+
+let windowCache: { value: Partial<Record<ModuleKey, ModuleWindow>>; expiresAt: number } | null = null;
+
+/** Drop the cached windows (tests + the Settings -> Modules save). */
+export function clearModuleWindowCache(): void {
+  windowCache = null;
+}
+
+/** Stored windows of every schedulable module, cached per isolate like the enabled set. */
+export async function getModuleWindows(db: AppDb): Promise<Partial<Record<ModuleKey, ModuleWindow>>> {
+  const now = Date.now();
+  if (windowCache && windowCache.expiresAt > now) return windowCache.value;
+  const keys = SCHEDULABLE_MODULE_KEYS.flatMap((key) => {
+    const k = moduleWindowKeys(key);
+    return [k.start, k.end];
+  });
+  const rows = keys.length ? await getSettings(db, keys) : {};
+  const value: Partial<Record<ModuleKey, ModuleWindow>> = {};
+  for (const key of SCHEDULABLE_MODULE_KEYS) {
+    const k = moduleWindowKeys(key);
+    const start = windowDate(rows[k.start]);
+    const end = windowDate(rows[k.end]);
+    if (start || end) value[key] = { start, end };
+  }
+  windowCache = { value, expiresAt: now + CACHE_TTL_MS };
+  return value;
 }

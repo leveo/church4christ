@@ -1,0 +1,30 @@
+---
+// Optional link from a pledge campaign or mission trip to a Giving fund. Only
+// rendered while the Giving module is on; when it is off the field is absent and
+// the saved link is kept unchanged (see parseFundField).
+import { t } from '../../lib/i18n';
+import { errorText, lab, tin } from '../../lib/adminUi';
+import type { Fund } from '../../lib/fundDb';
+import type { Locale } from '../../lib/locales';
+
+interface Props {
+  lang: Locale;
+  funds: Fund[];
+  value: number | null;
+  help: string;
+  error?: string;
+}
+const { lang, funds, value, help, error } = Astro.props;
+---
+
+<label class="block">
+  <span class={lab}>{t(lang, 'giving.link.fund')}</span>
+  <select name="fund_id" class={tin}>
+    <option value="" selected={value === null}>{t(lang, 'giving.link.none')}</option>
+    {funds.map((f) => (
+      <option value={f.id} selected={value === f.id}>{f.name}{Number(f.active) === 1 ? '' : ` (${t(lang, 'giving.link.inactive')})`}</option>
+    ))}
+  </select>
+  <span class="block text-sm text-ink-muted">{help}</span>
+  {error && <span class={errorText}>{t(lang, error)}</span>}
+</label>

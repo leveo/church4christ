@@ -10,6 +10,45 @@ than published to npm.
 
 ## [Unreleased]
 
+Upgrading: see [Upgrading 1.7.0 to the next release](docs/upgrade.md#upgrading-170-to-the-next-release).
+
+### Added
+
+- **Pledges**, an optional module for faith pledge campaigns. Staff create campaigns with
+  localized text, a giving period, an optional pledge period, a longest plan, an amount goal, a
+  household goal and a gift guide. People pledge online: a total or each gift, one time, monthly,
+  quarterly, yearly or every few months, with a live plan preview, a typed signature and consent.
+  The server recalculates every plan in whole cents and stores the pledge, one row per planned gift
+  and its first history entry together; a reload shows the same pledge instead of a second one.
+  Each pledge has an eight-letter code for adding to it later and a confirmation email in the
+  person's language. Staff enter paper cards, edit (the plan is recalculated), archive, restore,
+  resend the confirmation, follow progress against the goals and per gift-guide level, and export
+  CSV. History names the administrator and lists changed field names only. Planned gifts are
+  intentions; nothing is charged. See [docs/features/pledges.md](docs/features/pledges.md).
+- **Missions**, an optional module that shows mission trips on a world map with headline numbers,
+  a year filter, a timeline and a story page per trip (cover, gallery, team, optional YouTube
+  film), in every site language. A trip without coordinates is listed without a map pin, for
+  sensitive places. Only published trips are public. See
+  [docs/features/missions.md](docs/features/missions.md).
+- **Pledges and Missions with Giving.** When Giving is on, a pledge campaign or a mission trip can
+  be linked to a giving fund. Their public pages (and the pledge confirmation email) offer a give
+  link that opens `/give` with that fund chosen; the fund is kept through sign-in. Pledge dashboards
+  then show real giving matched per household by email (given, due by today, pledged; fulfilled, on
+  track, behind, or no email to match), with the same columns in the CSV. Gift amounts are shown only
+  to people who can open Giving. Without Giving, both modules work on their own.
+- **Public dates for modules.** Pledges and Missions have optional **Public from** and **Public
+  until** dates in **Settings → Modules**. Outside them the public pages and menu link are hidden
+  while the admin pages stay available. Any capability can opt in with `"schedulable": true` in
+  `config/capabilities.json`.
+
+### Operator impact
+
+- Four new forward migrations: D1 `0055_pledges.sql` and `0056_missions.sql`, Postgres
+  `0047_pledges.sql` and `0048_missions.sql`. Both modules stay off on an existing installation
+  until a super admin turns them on, and no preset includes them. Setup doctor expects the new
+  tables. Two new admin areas (`pledges`, `missions`) can be granted per person. No new secret,
+  binding, cron trigger or dependency. Confirmation emails use the existing email binding.
+
 ## [1.7.0] - 2026-11-20
 
 Upgrading from 1.6.0: see [Upgrading 1.6.0 to 1.7.0](docs/upgrade.md#upgrading-160-to-170).

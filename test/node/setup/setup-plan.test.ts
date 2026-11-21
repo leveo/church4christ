@@ -14,7 +14,7 @@ const base = {
 };
 
 describe('buildSetupPlan', () => {
-  it('turns Website into a D1 plan with all 21 settings explicit', () => {
+  it('turns Website into a D1 plan with all 25 settings explicit', () => {
     const plan = buildSetupPlan({ ...base, preset: 'website' }, raw);
     expect(plan.backend).toBe('d1');
     expect(plan.preset).toBe('website');
@@ -49,7 +49,7 @@ describe('buildSetupPlan', () => {
     expect(plan.backend).toBe('supabase');
     // Service Planning and Event Logistics are not part of any preset: they are switched on separately.
     const off = Object.entries(plan.moduleSettings).filter(([, value]) => value === '0').map(([key]) => key);
-    expect(off).toEqual(['module.planning', 'module.event-logistics']);
+    expect(off).toEqual(['module.planning', 'module.event-logistics', 'module.pledges', 'module.missions']);
     expect(plan.services).toEqual(['hyperdrive', 'r2', 'worker']);
   });
 

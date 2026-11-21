@@ -21,19 +21,21 @@ const give = localePath(locale, '/give');
 
 const db = Astro.locals.db;
 const modules = Astro.locals.modules;
+// Nav links follow the public view: a scheduled module outside its window hides its link.
+const navModules = Astro.locals.publicModules ?? modules;
 // Site identity + logo + the nav menu come from admin-editable settings; a DB
 // hiccup falls back to the pre-feature hardcoded name, no logo, and the
 // module-gated default nav rather than 500ing the header on every public page
 // (mirrors Base.astro's identity guard).
 let siteName = t(locale, 'site.name');
 let logoSrc = '';
-let links = resolveDefaultNav(locale, modules);
+let links = resolveDefaultNav(locale, navModules);
 try {
   const identity = await getSiteIdentity(db, locale);
   siteName = identity.name || t(locale, 'site.name');
   const logoKey = await getLogoImageKey(db);
   logoSrc = logoKey ? (mediaPath(logoKey) ?? '') : '';
-  links = await resolveNav(db, locale, modules);
+  links = await resolveNav(db, locale, navModules);
 } catch {
   /* keep the hardcoded site name, no logo, and the default nav when settings are unavailable */
 }

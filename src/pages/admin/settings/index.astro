@@ -18,7 +18,22 @@ import { t } from '../../../lib/i18n';
 import { getSettings, setSettings } from '../../../lib/settings';
 import { parseSettingsForm } from '../../../lib/validate';
 import { clearThemeCache } from '../../../lib/theme';
-import { MODULE_GROUPS, MODULE_KEYS, MODULES, clearModuleCache, moduleBackendRequirementKey } from '../../../lib/modules';
+import {
+  MODULE_GROUPS,
+  MODULE_KEYS,
+  MODULES,
+  SCHEDULABLE_MODULE_KEYS,
+  clearModuleCache,
+  clearModuleWindowCache,
+  getModuleWindows,
+  moduleBackendRequirementKey,
+  moduleWindowKeys,
+  moduleWindowState,
+  parseModuleWindow,
+  type ModuleKey,
+  type ModuleWindow,
+} from '../../../lib/modules';
+import { todayInTz } from '../../../lib/dates';
 import { THEME_META } from '../../../lib/themeMeta.generated';
 import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
 import { mediaPath } from '../../../lib/mediaRef';
@@ -60,10 +75,24 @@ if (Astro.request.method === 'POST') {
       // parser's partial-update semantics, so unchecking truly disables a module.
       const data: Record<string, string> = {};
       for (const key of MODULE_KEYS) data[`module.${key}`] = parsed.data[`module.${key}`] === '1' ? '1' : '0';
+      // Public date windows of schedulable modules: two optional dates each. One
+      // invalid window rejects the whole save, so toggles and dates never half-apply.
+      // Windows are installation-wide (the middleware reads them before campus
+      // scoping), so they go to the unscoped database, like languages.
+      const windowData: Record<string, string> = {};
+      for (const key of SCHEDULABLE_MODULE_KEYS) {
+        const k = moduleWindowKeys(key);
+        const win = parseModuleWindow(String(fd.get(k.start) ?? ''), String(fd.get(k.end) ?? ''));
+        if (!win.ok) return Astro.redirect(`/admin/settings?windowErr=${key}-${win.error}#settings-modules`, 303);
+        windowData[k.start] = win.window.start ?? '';
+        windowData[k.end] = win.window.end ?? '';
+      }
       await setSettings(db, data);
+      await setSettings(Astro.locals.rawDb, windowData);
       // Drop the per-isolate enabled-set cache so the toggle takes effect on the
       // next request in this isolate (this redirect's GET already reflects it).
       clearModuleCache();
+      clearModuleWindowCache();
       return Astro.redirect('/admin/settings?saved=1', 303);
     } else {
       // Server-side hardening: module.* keys are ONLY writable through the
@@ -170,6 +199,18 @@ const h2 = 'font-display text-heading-sm font-bold';
 const enabledModules = Astro.locals.modules;
 const dbBackend = Astro.locals.dbBackend;
 const moduleGroups = MODULE_GROUPS;
+// Schedulable modules also show their public date window and where today falls in it.
+let moduleWindows: Partial<Record<ModuleKey, ModuleWindow>> = {};
+try {
+  moduleWindows = await getModuleWindows(Astro.locals.rawDb);
+} catch {
+  moduleWindows = {};
+}
+const today = todayInTz();
+const schedulable = new Set<string>(SCHEDULABLE_MODULE_KEYS);
+const windowErr = Astro.url.searchParams.get('windowErr') ?? '';
+const windowErrKey = windowErr.replace(/-(date|order)$/, '');
+const windowErrCode = windowErr.endsWith('-order') ? 'admin.settings.moduleWindowOrder' : 'admin.settings.moduleWindowDate';
 ---
 
 <Admin title={t(lang, 'admin.settings.title')}>
@@ -352,7 +393,7 @@ const moduleGroups = MODULE_GROUPS;
             {group.keys.map((key) => {
               const req = MODULES[key].requiresBackend;
               const gated = req !== undefined && req !== dbBackend;
-              return (
+              const toggle = (
                 <label class={`flex items-start gap-3 rounded-lg border border-border p-3 ${gated ? 'opacity-60' : 'cursor-pointer'}`}>
                   <input
                     type="checkbox"
@@ -368,6 +409,33 @@ const moduleGroups = MODULE_GROUPS;
                     {gated && req && <span class="block text-sm text-ink-muted">{t(lang, moduleBackendRequirementKey(req))}</span>}
                   </span>
                 </label>
+              );
+              if (!schedulable.has(key)) return toggle;
+              const k = moduleWindowKeys(key);
+              const win = moduleWindows[key];
+              const state = moduleWindowState(win, today);
+              return (
+                <div class="module-window rounded-lg border border-border" data-module-window={key}>
+                  {toggle}
+                  <div class="space-y-2 px-3 pb-3">
+                    <p class="text-sm font-semibold text-ink">{t(lang, 'admin.settings.moduleWindowTitle')}</p>
+                    <p class="text-sm text-ink-muted">{t(lang, 'admin.settings.moduleWindowHelp')}</p>
+                    <div class="grid gap-2 sm:grid-cols-2">
+                      <label class="block text-sm">
+                        <span class={lab}>{t(lang, 'admin.settings.moduleWindowStart')}</span>
+                        <input type="date" name={k.start} value={win?.start ?? ''} class={tin} />
+                      </label>
+                      <label class="block text-sm">
+                        <span class={lab}>{t(lang, 'admin.settings.moduleWindowEnd')}</span>
+                        <input type="date" name={k.end} value={win?.end ?? ''} class={tin} />
+                      </label>
+                    </div>
+                    <p class="text-sm text-ink-muted" data-window-state={state}>
+                      {enabledModules.has(key) ? t(lang, `admin.settings.moduleWindowState.${state}`) : t(lang, 'admin.settings.moduleWindowState.off')}
+                    </p>
+                    {windowErrKey === key && <p class={errorText}>{t(lang, windowErrCode)}</p>}
+                  </div>
+                </div>
               );
             })}
           </fieldset>
@@ -393,5 +461,7 @@ const moduleGroups = MODULE_GROUPS;
 .settings-save { position:sticky;bottom:1rem;padding:.85rem 1rem;background:var(--color-surface-raised);border:1px solid var(--color-border);border-radius:var(--radius-lg);box-shadow:var(--shadow-md);z-index:2; }
 #settings-modules fieldset { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem; }
 #settings-modules fieldset label { margin:0; }
+#settings-modules .module-window { grid-column:1 / -1; }
+#settings-modules .module-window > label { border:0; }
 @media(max-width:800px) { .settings-workspace { grid-template-columns:1fr;gap:1rem; } .settings-sections { position:static;flex-direction:row;flex-wrap:wrap; } #settings-modules fieldset { grid-template-columns:1fr; } }
 </style>

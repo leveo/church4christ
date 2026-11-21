@@ -45,7 +45,7 @@ time-zone rules; they are separate from this database requirement.
 
 ## 1. Which database should I pick?
 
-Both offer a Free plan for eligible usage. Choose Supabase to enable Giving or paid Registration; the other 21 modules, including free Registration and all of Member Portal, work on either database.
+Both offer a Free plan for eligible usage. Choose Supabase to enable Giving or paid Registration; the other 24 modules, including free Registration and all of Member Portal, work on either database.
 
 | | **D1** (default) | **Supabase** (Postgres) |
 |---|---|---|
@@ -56,7 +56,7 @@ Both offer a Free plan for eligible usage. Choose Supabase to enable Giving or p
 | **Registration — free events** | **Available** (module is off after an upgrade until enabled) | **Implemented** |
 | **Registration — paid via Stripe** | Not available (the price field is disabled) | **Implemented** — shares the same Stripe mode; verify with the checklist before live use |
 | **Member Portal** (household, groups, calendar, prayer) | **Available** (event prayers, event admins, and My registrations need Registration enabled) | **Available** (complete) |
-| **Other 21 modules** | Yes | Yes |
+| **Other 22 modules** | Yes | Yes |
 | **Backups** | Optional nightly D1 → R2 copy you configure (`deploy.md` step 9) | Free: manual dumps; Pro: automatic daily backups with 7-day retention as of August 2026 |
 | **Plan considerations** | Cloudflare allowances and email plan rules apply | Supabase limits, continuity needs, and Cloudflare/email plan rules all apply |
 
@@ -71,7 +71,7 @@ check [Supabase pricing](https://supabase.com/pricing),
 [Free project pausing](https://supabase.com/docs/guides/platform/free-project-pausing).
 
 Giving and paid Registration are **not available on D1**. Giving is force-disabled on D1, even if legacy
-settings say it is on, and D1 refuses a priced Registration event. New setup writes explicit selected settings for all 23 modules.
+settings say it is on, and D1 refuses a priced Registration event. New setup writes explicit selected settings for all 25 modules.
 
 ---
 

@@ -45,7 +45,7 @@ const quickLinks: { key: string; path: string }[] = [
 // are core. Same navKey → module reverse map the header uses.
 const navKeyModule = new Map<string, string>();
 for (const key of MODULE_KEYS) for (const nk of MODULES[key].navKeys) navKeyModule.set(nk, key);
-const modules = Astro.locals.modules;
+const modules = Astro.locals.publicModules ?? Astro.locals.modules;
 const visibleQuickLinks = quickLinks.filter((link) => {
   const owner = navKeyModule.get(link.key);
   return !owner || modules.has(owner);

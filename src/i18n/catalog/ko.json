@@ -91,6 +91,14 @@
     "event-logistics": {
       "label": "행사 배정",
       "description": "행사에 등록한 사람들의 숙소, 좌석, 소그룹을 배정합니다."
+    },
+    "pledges": {
+      "label": "작정헌금",
+      "description": "헌금 일정, 목표, 종이 카드 입력과 함께 작정헌금 캠페인을 운영해요."
+    },
+    "missions": {
+      "label": "선교",
+      "description": "선교 여행을 세계 지도, 연표, 여행 이야기와 함께 보여 줘요."
     }
   },
   "presets": {

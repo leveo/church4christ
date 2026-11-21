@@ -1,0 +1,227 @@
+---
+// One campaign's dashboard: progress against the amount and household goals,
+// households per gift-guide row, planned amounts per year, what the past 7 days
+// added, and the pledge records (active or archived). Totals always leave out
+// archived records. Planned gifts are intentions, not money received.
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import { t } from '../../../../lib/i18n';
+import { hasAreaAccess } from '../../../../lib/adminAreas';
+import { badge, badgeActive, badgeInactive, badgeScheduled, btn, btnSecondary, noticeOk, td, th } from '../../../../lib/adminUi';
+import { formatCents } from '../../../../lib/money';
+import { formatDate, toUtcSql, todayInTz } from '../../../../lib/dates';
+import { stripeMode, type StripeEnv } from '../../../../lib/stripe';
+import { canSeePledgeGiving, linkedGivingFund, loadPledgeGiving, type PledgeGivingSummary } from '../../../../lib/pledgeGiving';
+import type { Fund } from '../../../../lib/fundDb';
+import { campaignSummary, getCampaign, listPledges } from '../../../../lib/pledgeDb';
+import { planLine } from '../../../../lib/pledgeNotify';
+import { localePath, type Locale } from '../../../../lib/locales';
+
+export const prerender = false;
+
+const user = Astro.locals.user;
+if (!user || !hasAreaAccess(user, 'pledges')) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+const id = /^\d+$/.test(Astro.params.id ?? '') ? Number(Astro.params.id) : 0;
+const campaign = id ? await getCampaign(db, id, lang) : null;
+if (!campaign) return new Response(null, { status: 404 });
+const archived = Astro.url.searchParams.get('view') === 'archived';
+const [summary, pledges] = await Promise.all([
+  campaignSummary(db, campaign, toUtcSql(new Date(Date.now() - 7 * 86_400_000))),
+  listPledges(db, campaign.id, archived),
+]);
+const money = (c: number) => formatCents(c, campaign.currency, lang);
+// Giving link (Giving module on, which only happens on Postgres). Received money is finance data:
+// it is shown only to people who may open Giving itself (the giving area or the finance flag).
+const givingOn = Astro.locals.modules.has('giving');
+const canSeeGiving = canSeePledgeGiving(user, Astro.locals.modules);
+let linkedFund: Fund | null = null;
+let giving: PledgeGivingSummary | null = null;
+if (givingOn && campaign.fund_id !== null) {
+  linkedFund = await linkedGivingFund(db, lang, campaign.fund_id, true);
+  if (canSeeGiving) {
+    try {
+      giving = await loadPledgeGiving(db, campaign, {
+        givingOn,
+        includeTest: stripeMode(env as unknown as StripeEnv) !== 'live',
+        today: todayInTz(),
+      });
+    } catch (e) {
+      console.error('pledge giving progress failed', e);
+    }
+  }
+}
+const statusBadgeClass = { complete: badgeActive, on_track: badgeActive, behind: 'bg-danger-soft text-danger', unmatched: badgeInactive } as const;
+const pct = (n: number, d: number | null) => (d ? Math.min(100, Math.round((n / d) * 100)) : 0);
+const emailBadge = { none: badgeInactive, pending: badgeScheduled, sent: badgeActive, failed: 'bg-danger-soft text-danger' } as const;
+const publicHref = localePath(lang, `/pledge/${campaign.slug}`);
+---
+
+<Admin title={campaign.title}>
+  <p class="text-sm"><a class="text-primary hover:underline" href="/admin/pledges">← {t(lang, 'pledges.admin.title')}</a></p>
+  <div class="mt-2 flex flex-wrap items-end justify-between gap-4">
+    <div>
+      <h1 class="font-display text-display-lg font-bold">{campaign.title}</h1>
+      <p class="mt-1 text-sm text-ink-muted">
+        {t(lang, `pledges.admin.status.${campaign.status}`)} · {t(lang, 'pledges.givingPeriod', { start: formatDate(campaign.giving_start, lang), end: formatDate(campaign.giving_end, lang) })}
+      </p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <a href={`/admin/pledges/${campaign.id}/add`} class={btn}>{t(lang, 'pledges.admin.addPaper')}</a>
+      <a href={`/admin/pledges/${campaign.id}/export.csv`} class={btnSecondary}>{t(lang, 'pledges.admin.export')}</a>
+      <a href={`/admin/pledges/${campaign.id}/edit`} class={btnSecondary}>{t(lang, 'pledges.admin.editCampaign')}</a>
+      {campaign.status === 'published' && <a href={publicHref} class={btnSecondary}>{t(lang, 'pledges.admin.viewPublic')}</a>}
+    </div>
+  </div>
+  {Astro.url.searchParams.has('saved') && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'pledges.admin.saved')}</p>}
+  <p class="mt-4 text-sm text-ink-muted">{t(lang, 'pledges.intentions')}</p>
+
+  {givingOn && (
+    <p class="mt-2 text-sm text-ink-muted" data-linked-fund>
+      {campaign.fund_id === null ? t(lang, 'pledges.admin.noFund') : t(lang, 'pledges.admin.linkedFund', { fund: linkedFund?.name ?? `#${campaign.fund_id}` })}
+    </p>
+  )}
+  <section class="mt-6 grid gap-4 md:grid-cols-3" aria-label={t(lang, 'pledges.admin.progress')}>
+    <div class="rounded-xl border border-border bg-surface-raised p-5" data-stat="amount">
+      <p class="text-sm text-ink-muted">{t(lang, 'pledges.admin.pledged')}</p>
+      <p class="mt-1 font-display text-heading-md font-bold">{money(summary.totalCents)}</p>
+      {campaign.goal_cents && (
+        <>
+          <div class="progress mt-3" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={pct(summary.totalCents, campaign.goal_cents)}><span style={`width:${pct(summary.totalCents, campaign.goal_cents)}%`}></span></div>
+          <p class="mt-1 text-sm text-ink-muted">{t(lang, 'pledges.admin.ofGoalPct', { pct: pct(summary.totalCents, campaign.goal_cents), goal: money(campaign.goal_cents) })}</p>
+        </>
+      )}
+    </div>
+    <div class="rounded-xl border border-border bg-surface-raised p-5" data-stat="households">
+      <p class="text-sm text-ink-muted">{t(lang, 'pledges.admin.households')}</p>
+      <p class="mt-1 font-display text-heading-md font-bold">{summary.households}</p>
+      {campaign.household_goal && (
+        <>
+          <div class="progress mt-3" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={pct(summary.households, campaign.household_goal)}><span style={`width:${pct(summary.households, campaign.household_goal)}%`}></span></div>
+          <p class="mt-1 text-sm text-ink-muted">{t(lang, 'pledges.admin.ofHouseholdGoal', { goal: campaign.household_goal })}</p>
+        </>
+      )}
+      <p class="mt-1 text-sm text-ink-muted">{t(lang, 'pledges.admin.pledgeCount', { count: summary.pledgeCount })}</p>
+    </div>
+    <div class="rounded-xl border border-border bg-surface-raised p-5" data-stat="week">
+      <p class="text-sm text-ink-muted">{t(lang, 'pledges.admin.last7')}</p>
+      <p class="mt-1 font-display text-heading-md font-bold">{money(summary.last7Days.totalCents)}</p>
+      <p class="mt-1 text-sm text-ink-muted">{t(lang, 'pledges.admin.pledgeCount', { count: summary.last7Days.pledges })}</p>
+    </div>
+  </section>
+
+  {giving && (
+    <section class="mt-4 grid gap-4 md:grid-cols-3" aria-label={t(lang, 'pledges.admin.givenTitle')} data-stat="received">
+      <div class="rounded-xl border border-border bg-surface-raised p-5">
+        <p class="text-sm text-ink-muted">{t(lang, 'pledges.admin.givenByPledgers')}</p>
+        <p class="mt-1 font-display text-heading-md font-bold">{money(giving.receivedFromPledgers)}</p>
+        <div class="progress mt-3" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={pct(giving.receivedFromPledgers, summary.totalCents || null)}><span style={`width:${pct(giving.receivedFromPledgers, summary.totalCents || null)}%`}></span></div>
+        <p class="mt-1 text-sm text-ink-muted">{t(lang, 'pledges.admin.givenOfPledged', { pct: pct(giving.receivedFromPledgers, summary.totalCents || null) })}</p>
+      </div>
+      <div class="rounded-xl border border-border bg-surface-raised p-5">
+        <p class="text-sm text-ink-muted">{t(lang, 'pledges.admin.fundReceived')}</p>
+        <p class="mt-1 font-display text-heading-md font-bold">{money(giving.fundReceived)}</p>
+        <p class="mt-1 text-sm text-ink-muted">{t(lang, 'pledges.admin.fundReceivedHelp')}</p>
+      </div>
+      <div class="rounded-xl border border-border bg-surface-raised p-5">
+        <p class="text-sm text-ink-muted">{t(lang, 'pledges.admin.householdStatus')}</p>
+        <ul class="mt-2 space-y-1 text-sm">
+          {(['complete', 'on_track', 'behind', 'unmatched'] as const).map((k) => (
+            <li class="flex justify-between gap-3"><span>{t(lang, `pledges.admin.givingStatus.${k}`)}</span><span class="font-semibold">{giving!.counts[k]}</span></li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  )}
+
+  <div class="mt-6 grid gap-6 lg:grid-cols-2">
+    {summary.tiers.length > 0 && (
+      <section class="rounded-xl border border-border bg-surface-raised p-5">
+        <h2 class="font-semibold">{t(lang, 'pledges.admin.byTier')}</h2>
+        <table class="mt-2 w-full">
+          <thead><tr><th class={th}>{t(lang, 'pledges.guide.total')}</th><th class={th}>{t(lang, 'pledges.admin.tierHouseholds')}</th></tr></thead>
+          <tbody>
+            {summary.tiers.map((tier) => (
+              <tr class="border-t border-border"><td class={td}>{money(tier.totalCents)}+</td><td class={td}>{t(lang, 'pledges.admin.tierProgress', { count: tier.households, goal: tier.goalHouseholds })}</td></tr>
+            ))}
+            <tr class="border-t border-border"><td class={td}>{t(lang, 'pledges.admin.belowGuide')}</td><td class={td}>{summary.belowGuide}</td></tr>
+          </tbody>
+        </table>
+      </section>
+    )}
+    {summary.byYear.length > 0 && (
+      <section class="rounded-xl border border-border bg-surface-raised p-5">
+        <h2 class="font-semibold">{t(lang, 'pledges.admin.byYear')}</h2>
+        <table class="mt-2 w-full">
+          <tbody>
+            {summary.byYear.map((y) => (
+              <tr class="border-t border-border"><td class={td}>{y.year}</td><td class={`${td} text-right font-semibold`}>{money(y.amountCents)}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    )}
+  </div>
+
+  <section class="mt-8">
+    <div class="flex flex-wrap items-center gap-4">
+      <h2 class="font-display text-heading-sm font-bold">{t(lang, 'pledges.admin.records')}</h2>
+      <nav class="flex gap-2 text-sm" aria-label={t(lang, 'pledges.admin.records')}>
+        <a href={`/admin/pledges/${campaign.id}`} class={!archived ? 'font-semibold text-primary' : 'text-ink-muted hover:underline'} aria-current={!archived ? 'page' : undefined}>{t(lang, 'pledges.admin.active')}</a>
+        <a href={`/admin/pledges/${campaign.id}?view=archived`} class={archived ? 'font-semibold text-primary' : 'text-ink-muted hover:underline'} aria-current={archived ? 'page' : undefined}>{t(lang, 'pledges.admin.archived')}</a>
+      </nav>
+    </div>
+    {
+      pledges.length === 0 ? (
+        <p class="mt-4 rounded-md border border-border bg-surface-raised px-4 py-8 text-center text-ink-muted">{t(lang, 'pledges.admin.noRecords')}</p>
+      ) : (
+        <div class="mt-3 overflow-x-auto rounded-xl border border-border">
+          <table class="w-full min-w-[720px]">
+            <thead class="bg-surface-sunken">
+              <tr>
+                <th class={th}>{t(lang, 'pledges.admin.col.code')}</th>
+                <th class={th}>{t(lang, 'pledges.admin.col.name')}</th>
+                <th class={th}>{t(lang, 'pledges.admin.col.total')}</th>
+                <th class={th}>{t(lang, 'pledges.admin.col.plan')}</th>
+                <th class={th}>{t(lang, 'pledges.admin.col.source')}</th>
+                <th class={th}>{t(lang, 'pledges.admin.col.email')}</th>
+                {giving && <th class={th}>{t(lang, 'pledges.admin.col.given')}</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {pledges.map((p) => (
+                <tr class="border-t border-border" data-pledge-row={p.code}>
+                  <td class={`${td} font-mono`}><a class="text-primary hover:underline" href={`/admin/pledges/record/${p.id}`}>{p.code}</a>{p.pledge_type === 'additional' && <span class="block text-xs text-ink-muted">{t(lang, 'pledges.admin.addsTo', { code: p.parent_code ?? '' })}</span>}</td>
+                  <td class={td}>{p.name}</td>
+                  <td class={`${td} font-semibold`}>{money(p.total_cents)}</td>
+                  <td class={`${td} text-ink-muted`}>{planLine(lang, p, campaign.currency)}</td>
+                  <td class={td}>{t(lang, `pledges.admin.source.${p.source}`)}</td>
+                  <td class={td}><span class={`${badge} ${emailBadge[p.email_status]}`}>{t(lang, `pledges.admin.emailStatus.${p.email_status}`)}</span></td>
+                  {giving && (() => {
+                    const h = giving.byPledge.get(p.id);
+                    return (
+                      <td class={td} data-given={h?.status ?? 'none'}>
+                        {h ? (
+                          <>
+                            <span class={`${badge} ${statusBadgeClass[h.status]}`}>{t(lang, `pledges.admin.givingStatus.${h.status}`)}</span>
+                            {h.status !== 'unmatched' && <span class="block text-xs text-ink-muted">{t(lang, 'pledges.admin.givenOfHousehold', { given: money(h.receivedCents), pledged: money(h.pledgedCents) })}</span>}
+                          </>
+                        ) : '—'}
+                      </td>
+                    );
+                  })()}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
+  </section>
+</Admin>
+
+<style>
+  .progress { height: .5rem; border-radius: 999px; background: var(--color-surface-sunken); overflow: hidden; }
+  .progress span { display: block; height: 100%; background: var(--color-primary); }
+</style>

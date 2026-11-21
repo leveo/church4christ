@@ -1,0 +1,225 @@
+---
+// Create (/admin/missions/new) or edit one mission trip: localized text, dates,
+// place and optional map coordinates, team, film link, cover photo and gallery.
+// Leaving the coordinates empty lists the trip without a map pin — the way to
+// share a trip to a sensitive place without showing where it was. Images use
+// the shared upload store (R2 + media table). Deleting a trip removes its text
+// and gallery rows; uploaded files stay in the media library.
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import LocaleFields from '../../../components/admin/LocaleFields.astro';
+import GivingFundSelect from '../../../components/admin/GivingFundSelect.astro';
+import { listFunds, type Fund } from '../../../lib/fundDb';
+import { t } from '../../../lib/i18n';
+import { hasAreaAccess } from '../../../lib/adminAreas';
+import { btn, btnDanger, btnSecondary, card, errorText, lab, noticeErr, noticeOk, tin } from '../../../lib/adminUi';
+import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
+import { mediaPath } from '../../../lib/mediaRef';
+import {
+  addTripPhoto,
+  createTrip,
+  deleteTrip,
+  getTrip,
+  getTripTexts,
+  listTripPhotos,
+  removeTripPhoto,
+  setTripCover,
+  tripSlugTaken,
+  updateTrip,
+  TRIP_STATUSES,
+  TRIP_TEXT_FIELDS,
+  MAX_TRIP_PHOTOS,
+  type TripText,
+} from '../../../lib/missionDb';
+import { parseTripForm } from '../../../lib/missionForms';
+import { SUPPORTED_LOCALES, localePath, type Locale, type SupportedLocale } from '../../../lib/locales';
+
+export const prerender = false;
+
+const user = Astro.locals.user;
+if (!user || !(user.isEditor || hasAreaAccess(user, 'missions'))) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+const media = (env as unknown as { MEDIA: MediaBucket }).MEDIA;
+const isNew = Astro.params.id === 'new';
+const id = isNew ? null : /^\d+$/.test(Astro.params.id ?? '') ? Number(Astro.params.id) : NaN;
+if (Number.isNaN(id)) return new Response(null, { status: 404 });
+const existing = id ? await getTrip(db, id, lang) : null;
+if (id && !existing) return new Response(null, { status: 404 });
+// "Support this mission" links to a Giving fund, offered only while Giving is on.
+const givingOn = Astro.locals.modules.has('giving');
+let funds: Fund[] = [];
+if (givingOn) {
+  try {
+    funds = await listFunds(db, lang);
+  } catch (e) {
+    console.error('mission trip: funds load failed', e);
+  }
+}
+const here = id ? `/admin/missions/${id}` : '/admin/missions/new';
+
+let errors: Record<string, string> = {};
+let values: Record<string, string> = {};
+let texts: Partial<Record<SupportedLocale, TripText>> = id ? await getTripTexts(db, id) : {};
+let failed = false;
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = String(fd.get('_action') ?? 'save');
+  if (id && action === 'delete') {
+    await deleteTrip(db, id);
+    return Astro.redirect('/admin/missions?deleted=1', 303);
+  }
+  if (id && action === 'remove_photo') {
+    const photoId = Number(fd.get('photo_id'));
+    if (Number.isInteger(photoId)) await removeTripPhoto(db, id, photoId);
+    return Astro.redirect(`${here}?saved=1#photos`, 303);
+  }
+  if (id && action === 'remove_cover') {
+    await setTripCover(db, id, null);
+    return Astro.redirect(`${here}?saved=1`, 303);
+  }
+  if (id && action === 'add_photos') {
+    const files = fd.getAll('photos').filter((f): f is File => f instanceof File && f.size > 0);
+    let problem = '';
+    for (const file of files) {
+      try {
+        const key = await saveImageUpload({ db, media, file, uploadedBy: user.email });
+        if (!(await addTripPhoto(db, id, key))) { problem = 'missions.admin.err.tooManyPhotos'; break; }
+      } catch (e) {
+        problem = uploadErrorKey(e);
+        break;
+      }
+    }
+    return Astro.redirect(problem ? `${here}?photoErr=${encodeURIComponent(problem)}#photos` : `${here}?saved=1#photos`, 303);
+  }
+  values = Object.fromEntries([...fd.entries()].filter(([, v]) => typeof v === 'string').map(([k, v]) => [k, String(v)]));
+  const parsed = parseTripForm(fd);
+  if (parsed.ok && !givingOn) delete parsed.value.fundId;
+  if (parsed.ok && (await tripSlugTaken(db, parsed.value.slug, id))) {
+    errors = { slug: 'missions.admin.err.slugTaken' };
+  } else if (parsed.ok && typeof parsed.value.fundId === 'number' && !funds.some((f) => f.id === parsed.value.fundId)) {
+    errors = { fund_id: 'missions.admin.err.fund' };
+  } else if (parsed.ok) {
+    try {
+      const tripId = id ?? (await createTrip(db, parsed.value));
+      if (id) await updateTrip(db, id, parsed.value);
+      const coverFile = fd.get('cover');
+      if (coverFile instanceof File && coverFile.size > 0) {
+        try {
+          await setTripCover(db, tripId, await saveImageUpload({ db, media, file: coverFile, uploadedBy: user.email }));
+        } catch (e) {
+          return Astro.redirect(`/admin/missions/${tripId}?photoErr=${encodeURIComponent(uploadErrorKey(e))}`, 303);
+        }
+      }
+      return Astro.redirect(`/admin/missions/${tripId}?saved=1`, 303);
+    } catch (e) {
+      console.error('mission trip save failed', e);
+      failed = true;
+    }
+  } else {
+    errors = parsed.errors;
+  }
+  texts = {};
+  for (const code of SUPPORTED_LOCALES) {
+    if (values[`title_${code}`] === undefined) continue;
+    texts[code] = Object.fromEntries(TRIP_TEXT_FIELDS.map((f) => [f, values[`${f}_${code}`] ?? ''])) as TripText;
+  }
+}
+
+const photos = id ? await listTripPhotos(db, id) : [];
+const v = (k: string, fallback: string) => values[k] ?? fallback;
+const err = (k: string) => (errors[k] ? t(lang, errors[k]) : '');
+const field = (f: (typeof TRIP_TEXT_FIELDS)[number]) => Object.fromEntries(Object.entries(texts).map(([k, x]) => [k, x?.[f] ?? '']));
+const heading = existing ? t(lang, 'missions.admin.edit') : t(lang, 'missions.admin.new');
+const photoErr = Astro.url.searchParams.get('photoErr');
+const cover = mediaPath(existing?.cover_media_key);
+---
+
+<Admin title={heading}>
+  <p class="text-sm"><a class="text-primary hover:underline" href="/admin/missions">← {t(lang, 'missions.admin.title')}</a></p>
+  <div class="mt-2 flex flex-wrap items-end justify-between gap-3">
+    <h1 class="font-display text-display-lg font-bold">{heading}</h1>
+    {existing?.status === 'published' && <a class={btnSecondary} href={localePath(lang, `/missions/${existing.slug}`)}>{t(lang, 'missions.admin.viewPublic')}</a>}
+  </div>
+  {Astro.url.searchParams.has('saved') && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'missions.admin.saved')}</p>}
+  {photoErr && <p class={`mt-4 ${noticeErr}`}>{t(lang, photoErr)}</p>}
+  {failed && <p class={`mt-4 ${noticeErr}`}>{t(lang, 'missions.admin.saveFailed')}</p>}
+  {Object.keys(errors).length > 0 && <p class={`mt-4 ${errorText}`}>{t(lang, 'admin.form.fixErrors')}</p>}
+
+  <form method="post" enctype="multipart/form-data" class={`${card} mt-6 max-w-3xl space-y-5`}>
+    <input type="hidden" name="_action" value="save" />
+    <LocaleFields name="title" label={t(lang, 'missions.admin.field.title')} values={field('title')} maxlength={200} lang={lang} error={errors.title} />
+    <LocaleFields name="location" label={t(lang, 'missions.admin.field.location')} values={field('location')} maxlength={200} lang={lang} />
+    <LocaleFields name="summary" label={t(lang, 'missions.admin.field.summary')} values={field('summary')} multiline rows={2} maxlength={600} lang={lang} />
+    <LocaleFields name="story_md" label={t(lang, 'missions.admin.field.story')} values={field('story_md')} multiline rows={8} maxlength={20000} lang={lang} />
+    <LocaleFields name="team_note" label={t(lang, 'missions.admin.field.teamNote')} values={field('team_note')} maxlength={1000} lang={lang} />
+    <div class="grid gap-4 sm:grid-cols-3">
+      <label class="block"><span class={lab}>{t(lang, 'missions.admin.field.slug')}</span><input name="slug" value={v('slug', existing?.slug ?? '')} maxlength="80" class={tin} />{err('slug') && <span class={errorText}>{err('slug')}</span>}</label>
+      <label class="block">
+        <span class={lab}>{t(lang, 'missions.admin.field.status')}</span>
+        <select name="status" class={tin}>{TRIP_STATUSES.map((s) => <option value={s} selected={v('status', existing?.status ?? 'draft') === s}>{t(lang, `missions.admin.status.${s}`)}</option>)}</select>
+      </label>
+      <label class="block"><span class={lab}>{t(lang, 'missions.admin.field.year')}</span><input type="number" name="year" min="1900" max="2200" value={v('year', String(existing?.year ?? new Date().getUTCFullYear()))} class={tin} />{err('year') && <span class={errorText}>{err('year')}</span>}</label>
+      <label class="block"><span class={lab}>{t(lang, 'missions.admin.field.start')}</span><input type="date" name="start_date" value={v('start_date', existing?.start_date ?? '')} class={tin} />{err('start_date') && <span class={errorText}>{err('start_date')}</span>}</label>
+      <label class="block"><span class={lab}>{t(lang, 'missions.admin.field.end')}</span><input type="date" name="end_date" value={v('end_date', existing?.end_date ?? '')} class={tin} />{err('end_date') && <span class={errorText}>{err('end_date')}</span>}</label>
+      <label class="block"><span class={lab}>{t(lang, 'missions.admin.field.teamSize')}</span><input type="number" min="0" name="team_size" value={v('team_size', existing?.team_size !== null && existing?.team_size !== undefined ? String(existing.team_size) : '')} class={tin} />{err('team_size') && <span class={errorText}>{err('team_size')}</span>}</label>
+    </div>
+    <fieldset class="grid gap-4 sm:grid-cols-3">
+      <legend class="mb-1 font-semibold">{t(lang, 'missions.admin.field.map')}</legend>
+      <p class="text-sm text-ink-muted sm:col-span-3">{t(lang, 'missions.admin.field.mapHelp')}</p>
+      <label class="block"><span class={lab}>{t(lang, 'missions.admin.field.country')}</span><input name="country_code" value={v('country_code', existing?.country_code ?? '')} maxlength="2" class={`${tin} uppercase`} />{err('country_code') && <span class={errorText}>{err('country_code')}</span>}</label>
+      <label class="block"><span class={lab}>{t(lang, 'missions.admin.field.latitude')}</span><input name="latitude" inputmode="decimal" value={v('latitude', existing?.latitude !== null && existing?.latitude !== undefined ? String(existing.latitude) : '')} class={tin} />{err('latitude') && <span class={errorText}>{err('latitude')}</span>}</label>
+      <label class="block"><span class={lab}>{t(lang, 'missions.admin.field.longitude')}</span><input name="longitude" inputmode="decimal" value={v('longitude', existing?.longitude !== null && existing?.longitude !== undefined ? String(existing.longitude) : '')} class={tin} />{err('longitude') && <span class={errorText}>{err('longitude')}</span>}</label>
+    </fieldset>
+    {givingOn && (
+      <GivingFundSelect
+        lang={lang}
+        funds={funds}
+        value={values.fund_id !== undefined ? (Number(values.fund_id) || null) : (existing?.fund_id ?? null)}
+        help={t(lang, 'missions.admin.field.fundHelp')}
+        error={errors.fund_id}
+      />
+    )}
+    <label class="block"><span class={lab}>{t(lang, 'missions.admin.field.video')}</span><input name="video_url" value={v('video_url', existing?.video_url ?? '')} maxlength="300" class={tin} />{err('video_url') && <span class={errorText}>{err('video_url')}</span>}</label>
+    <div>
+      <span class={lab}>{t(lang, 'missions.admin.field.cover')}</span>
+      {cover && <img src={cover} alt="" class="mb-2 max-h-40 rounded-md" />}
+      <input type="file" name="cover" accept="image/jpeg,image/png,image/webp" class="text-sm" />
+    </div>
+    <div class="flex flex-wrap gap-3">
+      <button type="submit" class={btn}>{t(lang, 'missions.admin.save')}</button>
+      <a href="/admin/missions" class={btnSecondary}>{t(lang, 'missions.admin.cancel')}</a>
+    </div>
+  </form>
+
+  {existing && (
+    <>
+      {cover && (
+        <form method="post" class="mt-3"><input type="hidden" name="_action" value="remove_cover" /><button class={btnSecondary}>{t(lang, 'missions.admin.removeCover')}</button></form>
+      )}
+      <section id="photos" class={`${card} mt-6 max-w-3xl`}>
+        <h2 class="font-semibold">{t(lang, 'missions.admin.gallery', { count: photos.length, max: MAX_TRIP_PHOTOS })}</h2>
+        {photos.length > 0 && (
+          <ul class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {photos.map((p) => (
+              <li>
+                <img src={mediaPath(p.media_key) ?? ''} alt="" class="aspect-[4/3] w-full rounded-md object-cover" />
+                <form method="post" class="mt-1"><input type="hidden" name="_action" value="remove_photo" /><input type="hidden" name="photo_id" value={p.id} /><button class="text-sm text-danger hover:underline">{t(lang, 'missions.admin.removePhoto')}</button></form>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form method="post" enctype="multipart/form-data" class="mt-4 flex flex-wrap items-center gap-3">
+          <input type="hidden" name="_action" value="add_photos" />
+          <input type="file" name="photos" multiple accept="image/jpeg,image/png,image/webp" class="text-sm" />
+          <button class={btnSecondary}>{t(lang, 'missions.admin.addPhotos')}</button>
+        </form>
+      </section>
+      <form method="post" class="mt-6" data-confirm={t(lang, 'missions.admin.deleteConfirm')}>
+        <input type="hidden" name="_action" value="delete" />
+        <button class={btnDanger}>{t(lang, 'missions.admin.delete')}</button>
+      </form>
+    </>
+  )}
+</Admin>

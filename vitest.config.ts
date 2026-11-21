@@ -20,6 +20,7 @@ const NODE_ONLY = [
   'test/node/registrationBuilderMigration.test.ts',
   'test/node/registrationBackOfficeMigration.test.ts',
   'test/node/registrationLogisticsMigrationDefault.test.ts',
+  'test/node/pledgesMissionsMigrationDefault.test.ts',
   'test/themeMeta.test.ts',
   'test/portalMediaSeed.test.ts',
   'test/node/screenshotValidation.test.ts',

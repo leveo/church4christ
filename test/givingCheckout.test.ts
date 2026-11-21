@@ -186,6 +186,18 @@ describe('stable giving Checkout browser identity', () => {
     expect(call[1]).toMatchObject({ interval: 'year', campusId: 1 });
   });
 
+  it('keeps the chosen fund when it sends a signed-in donor back to fix the form', async () => {
+    const dependencies = deps();
+    const data = await signedForm();
+    data.set('amount', 'abc');
+    const response = await createGivingCheckoutHandler(dependencies as never)(context(data));
+    expect(response.headers.get('location')).toBe('/en/give?error=amount&fund=7');
+    const badFund = await signedForm();
+    badFund.set('fund_id', 'x');
+    const r2 = await createGivingCheckoutHandler(deps() as never)(context(badFund));
+    expect(r2.headers.get('location')).toBe('/en/give?error=fund');
+  });
+
   it('rejects an anonymous direct POST before any business or Stripe work', async () => {
     const dependencies = deps();
     const response = await createGivingCheckoutHandler(dependencies as never)(context(await signedForm(), null));
@@ -350,7 +362,7 @@ describe('stable giving Checkout browser identity', () => {
       createOneTimeCheckout: vi.fn(async () => { throw failure; }),
     });
     const response = await createGivingCheckoutHandler(dependencies as never)(context(await signedForm()));
-    expect(response.headers.get('location')).toBe('/en/give?error=stripe');
+    expect(response.headers.get('location')).toBe('/en/give?error=stripe&fund=7');
   });
 
   it('never reflects an invalid query ID into the next rendered form identity', () => {

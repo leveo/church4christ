@@ -1,0 +1,203 @@
+---
+// One pledge record: details, planned gifts, history, and staff actions — edit
+// (recalculates the plan; archived records must be restored first), archive or
+// restore, and send the confirmation email. History names the administrator who
+// made each change and lists only the names of changed fields, never values.
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import PledgeStaffFields from '../../../../components/pledges/PledgeStaffFields.astro';
+import { t } from '../../../../lib/i18n';
+import { hasAreaAccess } from '../../../../lib/adminAreas';
+import { btn, btnDanger, btnSecondary, card, errorText, noticeErr, noticeOk, td, th } from '../../../../lib/adminUi';
+import { formatCents } from '../../../../lib/money';
+import { formatDate, todayInTz } from '../../../../lib/dates';
+import { stripeMode, type StripeEnv } from '../../../../lib/stripe';
+import { canSeePledgeGiving, giveHref, linkedGivingFund, loadPledgeGiving, type HouseholdProgress } from '../../../../lib/pledgeGiving';
+import type { EmailEnv } from '../../../../lib/email';
+import {
+  getCampaign,
+  getPledge,
+  listInstallments,
+  listPledgeEvents,
+  setPledgeArchived,
+  updatePledge,
+} from '../../../../lib/pledgeDb';
+import { parsePledgeForm, type FieldErrors } from '../../../../lib/pledgeForms';
+import { planLine, sendPledgeConfirmation } from '../../../../lib/pledgeNotify';
+import { isSupportedLocale, type Locale } from '../../../../lib/locales';
+
+export const prerender = false;
+
+const user = Astro.locals.user;
+if (!user || !hasAreaAccess(user, 'pledges')) return new Response(null, { status: 403 });
+const lang: Locale = user.lang ?? 'en';
+const db = Astro.locals.db;
+const pid = /^\d+$/.test(Astro.params.pid ?? '') ? Number(Astro.params.pid) : 0;
+let pledge = pid ? await getPledge(db, pid) : null;
+if (!pledge) return new Response(null, { status: 404 });
+const campaign = await getCampaign(db, pledge.campaign_id, lang);
+if (!campaign) return new Response(null, { status: 404 });
+const here = `/admin/pledges/record/${pledge.id}`;
+const givingOn = Astro.locals.modules.has('giving');
+const canSeeGiving = canSeePledgeGiving(user, Astro.locals.modules);
+const givingFund = givingOn ? await linkedGivingFund(db, isSupportedLocale(pledge.locale) ? pledge.locale : 'en', campaign.fund_id, true) : null;
+
+let errors: FieldErrors = {};
+let values: Record<string, string> | null = null;
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const action = String(fd.get('_action') ?? '');
+  if (action === 'archive' || action === 'restore') {
+    await setPledgeArchived(db, pledge.id, action === 'archive', user.email);
+    return Astro.redirect(`${here}?done=${action}`, 303);
+  }
+  if (action === 'email') {
+    const origin = (env as unknown as { APP_ORIGIN?: string }).APP_ORIGIN?.replace(/\/+$/, '') ?? '';
+    const pledgeLocale = isSupportedLocale(pledge.locale) ? pledge.locale : 'en';
+    const giveUrl = givingFund && origin ? `${origin}${giveHref(pledgeLocale, givingFund.id)}` : null;
+    const outcome = await sendPledgeConfirmation(env as unknown as EmailEnv, db, pledge.id, user.email, { giveUrl });
+    return Astro.redirect(`${here}?email=${outcome}`, 303);
+  }
+  if (action === 'edit') {
+    values = Object.fromEntries([...fd.entries()].map(([k, v]) => [k, String(v)]));
+    const parsed = parsePledgeForm(fd, campaign, { staff: true, locale: isSupportedLocale(pledge.locale) ? pledge.locale : 'en' });
+    if (!parsed.ok) {
+      errors = parsed.errors;
+    } else {
+      const r = await updatePledge(db, pledge.id, parsed.value.write, user.email);
+      return Astro.redirect(`${here}?done=${r === 'ok' ? 'edited' : r}`, 303);
+    }
+  }
+}
+
+const [gifts, events] = await Promise.all([listInstallments(db, pledge.id), listPledgeEvents(db, pledge.id)]);
+// Real giving for this pledge's household (finance data: giving area or finance flag only).
+let household: HouseholdProgress | null = null;
+if (canSeeGiving && !pledge.archived_at) {
+  try {
+    const progress = await loadPledgeGiving(db, campaign, { givingOn, includeTest: stripeMode(env as unknown as StripeEnv) !== 'live', today: todayInTz() });
+    household = progress?.byPledge.get(pledge.id) ?? null;
+  } catch (e) {
+    console.error('pledge record giving failed', e);
+  }
+}
+const money = (c: number) => formatCents(c, campaign.currency, lang);
+const editValues: Record<string, string> = values ?? {
+  name: pledge.name,
+  email: pledge.email ?? '',
+  phone: pledge.phone,
+  household: pledge.household,
+  address: pledge.address,
+  mode: pledge.mode,
+  amount: ((pledge.mode === 'total' ? pledge.total_cents : pledge.installment_cents) / 100).toFixed(2),
+  frequency: pledge.frequency,
+  interval_months: String(pledge.interval_months),
+  duration_months: String(pledge.duration_months),
+  start_date: pledge.start_date,
+  giving_method: pledge.giving_method,
+  giving_note: pledge.giving_note,
+  signer_name: pledge.signer_name,
+  staff_note: pledge.staff_note,
+};
+const done = Astro.url.searchParams.get('done');
+const emailOutcome = Astro.url.searchParams.get('email');
+const fieldLabel = (f: string) => t(lang, `pledges.admin.fieldName.${f}`);
+const detail: [string, string][] = [
+  [t(lang, 'pledges.form.name'), pledge.name],
+  [t(lang, 'pledges.form.email'), pledge.email ?? '—'],
+  [t(lang, 'pledges.form.phone'), pledge.phone || '—'],
+  [t(lang, 'pledges.form.household'), pledge.household || '—'],
+  [t(lang, 'pledges.form.address'), pledge.address || '—'],
+  [t(lang, 'pledges.form.method'), t(lang, `pledges.method.${pledge.giving_method}`) + (pledge.giving_note ? ` — ${pledge.giving_note}` : '')],
+  [t(lang, 'pledges.form.signature'), pledge.signer_name || '—'],
+  [t(lang, 'pledges.admin.col.source'), t(lang, `pledges.admin.source.${pledge.source}`)],
+  [t(lang, 'pledges.admin.col.email'), t(lang, `pledges.admin.emailStatus.${pledge.email_status}`)],
+  [t(lang, 'pledges.admin.field.staffNote'), pledge.staff_note || '—'],
+];
+---
+
+<Admin title={pledge.code}>
+  <p class="text-sm"><a class="text-primary hover:underline" href={`/admin/pledges/${campaign.id}`}>← {campaign.title}</a></p>
+  <div class="mt-2 flex flex-wrap items-end justify-between gap-4">
+    <div>
+      <h1 class="font-mono font-display text-display-lg font-bold">{pledge.code}</h1>
+      <p class="mt-1 text-sm text-ink-muted">
+        {pledge.pledge_type === 'additional' ? t(lang, 'pledges.admin.addsTo', { code: pledge.parent_code ?? '' }) : t(lang, 'pledges.form.typeInitial')}
+        {pledge.archived_at && ` · ${t(lang, 'pledges.admin.archivedOn', { date: formatDate(pledge.archived_at.slice(0, 10), lang) })}`}
+      </p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      {!pledge.archived_at && pledge.email && (
+        <form method="post"><input type="hidden" name="_action" value="email" /><button class={btnSecondary}>{pledge.email_status === 'sent' ? t(lang, 'pledges.admin.resendEmail') : t(lang, 'pledges.admin.sendEmail')}</button></form>
+      )}
+      <form method="post">
+        <input type="hidden" name="_action" value={pledge.archived_at ? 'restore' : 'archive'} />
+        <button class={pledge.archived_at ? btnSecondary : btnDanger}>{pledge.archived_at ? t(lang, 'pledges.admin.restore') : t(lang, 'pledges.admin.archive')}</button>
+      </form>
+    </div>
+  </div>
+  {Astro.url.searchParams.has('created') && <p class={`mt-4 ${noticeOk}`}>{t(lang, 'pledges.admin.created')}</p>}
+  {done && <p class={`mt-4 ${done === 'not_found' ? noticeErr : noticeOk}`}>{t(lang, `pledges.admin.done.${done}`)}</p>}
+  {emailOutcome && <p class={`mt-4 ${emailOutcome === 'sent' ? noticeOk : noticeErr}`}>{t(lang, `pledges.admin.emailOutcome.${emailOutcome}`)}</p>}
+
+  <div class="mt-6 grid gap-6 lg:grid-cols-2">
+    <section class={card}>
+      <p class="font-display text-heading-md font-bold">{money(pledge.total_cents)}</p>
+      <p class="text-sm text-ink-muted">{planLine(lang, pledge, campaign.currency)}</p>
+      <dl class="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+        {detail.map(([k, val]) => (<><dt class="text-ink-muted">{k}</dt><dd>{val}</dd></>))}
+      </dl>
+    </section>
+    <section class={card}>
+      {household && (
+        <div class="mb-4 rounded-md bg-surface-sunken p-3 text-sm" data-household-giving={household.status}>
+          <p class="font-semibold">{t(lang, 'pledges.admin.householdGiving')} · {t(lang, `pledges.admin.givingStatus.${household.status}`)}</p>
+          {household.status === 'unmatched' ? (
+            <p class="mt-1 text-ink-muted">{t(lang, 'pledges.admin.unmatchedHelp')}</p>
+          ) : (
+            <p class="mt-1">{t(lang, 'pledges.admin.householdGivingLine', { given: money(household.receivedCents), due: money(household.dueCents), pledged: money(household.pledgedCents), count: household.giftCount })}</p>
+          )}
+        </div>
+      )}
+      <h2 class="font-semibold">{t(lang, 'pledges.thanks.schedule', { count: gifts.length })}</h2>
+      <p class="text-sm text-ink-muted">{t(lang, 'pledges.intentions')}</p>
+      <div class="mt-2 max-h-72 overflow-y-auto">
+        <table class="w-full">
+          <tbody>{gifts.map((g) => <tr class="border-t border-border"><td class={td}>{g.seq}</td><td class={td}>{formatDate(g.gift_date, lang)}</td><td class={`${td} text-right`}>{money(g.amount_cents)}</td></tr>)}</tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  {!pledge.archived_at && (
+    <details class={`${card} mt-6`} open={Object.keys(errors).length > 0}>
+      <summary class="cursor-pointer font-semibold">{t(lang, 'pledges.admin.editPledge')}</summary>
+      {Object.keys(errors).length > 0 && <p class={`mt-3 ${errorText}`}>{t(lang, 'admin.form.fixErrors')}</p>}
+      <form method="post" class="mt-4 space-y-5">
+        <input type="hidden" name="_action" value="edit" />
+        <PledgeStaffFields lang={lang} values={editValues} errors={errors} maxMonths={campaign.max_months} givingStart={campaign.giving_start} givingEnd={campaign.giving_end} allowAdditional={false} />
+        <button type="submit" class={btn}>{t(lang, 'pledges.admin.saveChanges')}</button>
+      </form>
+    </details>
+  )}
+
+  <section class={`${card} mt-6`}>
+    <h2 class="font-semibold">{t(lang, 'pledges.admin.history')}</h2>
+    <table class="mt-2 w-full">
+      <thead><tr><th class={th}>{t(lang, 'pledges.admin.col.when')}</th><th class={th}>{t(lang, 'pledges.admin.col.action')}</th><th class={th}>{t(lang, 'pledges.admin.col.by')}</th></tr></thead>
+      <tbody>
+        {events.map((e) => {
+          let changes: string[] = [];
+          try { changes = JSON.parse(e.changes); } catch { changes = []; }
+          return (
+            <tr class="border-t border-border">
+              <td class={td}>{e.occurred_at.slice(0, 16)} UTC</td>
+              <td class={td}>{t(lang, `pledges.admin.event.${e.action}`)}{changes.length > 0 && <span class="block text-xs text-ink-muted">{changes.map(fieldLabel).join(', ')}</span>}</td>
+              <td class={td}>{e.actor || t(lang, 'pledges.admin.byGiver')}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </section>
+</Admin>

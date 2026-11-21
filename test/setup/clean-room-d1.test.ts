@@ -20,7 +20,7 @@ describe('clean-room D1 setup', () => {
     const first = JSON.parse((await workspace.execNode(cleanFlags, env, 300_000)).stdout);
     expect(first.apply.actions).not.toContain('seed');
     expect(first.apply.actions).not.toContain('seed-media');
-    expect(first).toMatchObject({ backend: 'd1', moduleRows: 23 });
+    expect(first).toMatchObject({ backend: 'd1', moduleRows: 25 });
     expect(first.doctor.status).toBe('ready-with-limitations');
     const manifest = JSON.parse(await readFile(join(workspace.root, 'church.config.json'), 'utf8'));
     expect(manifest.demoData).toBe(false);
@@ -44,7 +44,7 @@ describe('clean-room D1 setup', () => {
     expect(results[tables.length + 1].results).toEqual([
       { key: 'site.demo_content', value: 'false' }, { key: 'site.name.en', value: 'Clean Church' },
     ]);
-    expect(results[tables.length + 2].results[0].count).toBe(23);
+    expect(results[tables.length + 2].results[0].count).toBe(25);
     expect(results[tables.length + 3].results[0].count).toBeGreaterThan(0);
     expect(results[tables.length + 4].results[0].count).toBeGreaterThan(0);
 
@@ -76,7 +76,7 @@ describe('clean-room D1 setup', () => {
     const first = JSON.parse(firstRun.stdout);
     expect(first).toMatchObject({ schemaVersion: 1, kind: 'setup-result', backend: 'd1' });
     expect(first.enabledModules).toHaveLength(8);
-    expect(first.moduleRows).toBe(23);
+    expect(first.moduleRows).toBe(25);
     expect(first.admin.status).toMatch(/created|already-admin/);
     expect(first.doctor.status).toBe('ready-with-limitations');
     expect(first.apply.actions).toEqual(expect.arrayContaining(['seed', 'seed-media']));
@@ -89,7 +89,7 @@ describe('clean-room D1 setup', () => {
       "SELECT COUNT(*) AS module_rows, SUM(CASE WHEN value='1' THEN 1 ELSE 0 END) AS enabled FROM settings WHERE key LIKE 'module.%'; SELECT lower(email) AS email, role, active, deleted_at FROM people WHERE lower(email)='owner@clean.invalid'; SELECT value AS site_name FROM settings WHERE key='site.name.en'; SELECT r2_key FROM media ORDER BY id LIMIT 1;",
     ]);
     const resultSets = JSON.parse(query.stdout);
-    expect(resultSets[0].results[0]).toMatchObject({ module_rows: 23, enabled: 8 });
+    expect(resultSets[0].results[0]).toMatchObject({ module_rows: 25, enabled: 8 });
     expect(resultSets[1].results[0]).toMatchObject({ email: 'owner@clean.invalid', role: 'admin', active: 1, deleted_at: null });
     expect(resultSets[2].results[0]).toEqual({ site_name: 'Clean Church' });
     const mediaKey = resultSets[3].results[0].r2_key;
