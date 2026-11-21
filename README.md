@@ -484,7 +484,7 @@ walkthrough.
 
 Start with `npm run setup`, choose **Deploy**, and answer the feature and church questions.
 It creates or imports the required resources, writes the generated configuration, applies
-migrations, records all 23 module settings, and bootstraps the first admin. It then hands
+migrations, records all 25 module settings, and bootstraps the first admin. It then hands
 off to `npm run deploy`. Run `npm run doctor` for the schema-v2 readiness report, and use
 the always-on `/admin/onboarding` checklist for the same stable check identities.
 Giving, Registration, Groups, Teams, Newcomer, imports, and the optional read-only Planning
