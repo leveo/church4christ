@@ -12,6 +12,7 @@ import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
 const NODE_ONLY = [
   'test/tokens.test.ts',
   'test/node/designAssets.test.ts',
+  'test/node/memberAppServiceWorker.test.ts',
   'test/node/editions.test.ts',
   'test/node/i18nKeysUsed.test.ts',
   'test/node/localeLookupMigration.test.ts',

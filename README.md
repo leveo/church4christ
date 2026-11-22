@@ -342,6 +342,11 @@ remember.
 
 ![A member's current participation and open opportunities on one page](docs/images/portal/member-opportunities.png)
 
+Members can also use the **member app** at `/app`: a phone-first version of the site with
+Main, Events, Groups and Giving tabs that they open in the browser and add to the home
+screen, with no app store. Admins choose its tabs in **Settings → Member app**. See
+[**`docs/features/member-app.md`**](docs/features/member-app.md).
+
 Ministry, group, Sunday School, and serving-team leaders get a resource-scoped panel at
 `/<locale>/manage`. The church app sign-in protects it, and every operation checks the
 leader's authority over that specific resource. Cloudflare Zero Trust can therefore stay

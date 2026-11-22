@@ -1,0 +1,29 @@
+---
+// Member app offline page: precached by the service worker and shown when a page
+// that was never opened on this device cannot be loaded. Rendered without any
+// personal data (no account link), because the device cache keeps one copy for
+// whoever uses the phone.
+import MemberApp from '../../../layouts/MemberApp.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { resolveAppTabs } from '../../../lib/memberApp';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+const tabs = await resolveAppTabs(Astro.locals.db, Astro.locals.modules, null);
+if (!tabs) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+---
+
+<MemberApp title={t(locale, 'app.offline.title')} locale={locale} tabs={tabs} minimal>
+  <section class="app-card mt-6 text-center" data-app-offline>
+    <h1 class="app-h1">{t(locale, 'app.offline.title')}</h1>
+    <p class="app-lead">{t(locale, 'app.offline.body')}</p>
+    <a href={localePath(locale, '/app')} class="app-button mt-6">{t(locale, 'app.offline.retry')}</a>
+  </section>
+</MemberApp>

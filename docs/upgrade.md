@@ -656,6 +656,10 @@ binding, cron trigger, or dependency.
   with kind `pledgeConfirmation`. Local fixtures do not prove live delivery.
 - **Menu.** When Missions is on, a **Missions** link appears in the default menu under Connect.
   A site with a saved custom menu keeps it unchanged; add the link under **Navigation**.
+- **Member app.** A new phone app for members is available at `/app` with no migration or new
+  setting to supply. It is on by default with the tabs Main, Events, Groups and (Supabase with
+  Giving on) Giving. To turn it or a tab off, use **Settings → Member app**. See
+  [features/member-app.md](features/member-app.md).
 - **Giving link (Supabase only).** With Giving on, a campaign and a trip can be linked to a fund
   (`fund_id` columns, no foreign key). Pledge progress reads gifts in that fund; only staff with the
   Giving area or the finance role see the amounts. Use a fund kept for one campaign. No change to
