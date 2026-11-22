@@ -1,0 +1,222 @@
+---
+// Member app shell (PWA): a phone-first frame around the app tabs under
+// /<locale>/app. Same theme, fonts, tokens, dictionaries and session as the
+// website (Base.astro); adds the web app manifest, home-screen icons, a compact
+// top bar, a bottom tab bar over the visible tabs, an install hint, and the
+// service worker registration. App pages are noindex: the website stays the
+// canonical public copy for search engines.
+import '@fontsource-variable/fraunces';
+import '@fontsource-variable/inter';
+import '@fontsource-variable/bricolage-grotesque';
+import '@fontsource-variable/nunito';
+import '@fontsource-variable/space-grotesk';
+import '../styles/base.css';
+import Icon from '../components/ui/Icon.astro';
+import { localeMeta, localePath, pathWithoutLocale, type Locale } from '../lib/locales';
+import { getActiveTheme, THEME_DEFAULT, THEME_DEFAULT_MODE, type Theme } from '../lib/theme';
+import { THEME_META } from '../lib/themeMeta.generated';
+import { getLogoImageKey, getSiteIdentity } from '../lib/settings';
+import { mediaPath } from '../lib/mediaRef';
+import { t } from '../lib/i18n';
+import { APPLE_TOUCH_ICON, APP_TAB_PATH, appScope, type AppTab } from '../lib/memberApp';
+
+interface Props {
+  title: string;
+  locale: Locale;
+  tabs: AppTab[];
+  active?: AppTab;
+  /** Offline page: no account link (it is cached on the device for everyone). */
+  minimal?: boolean;
+}
+
+const { title, locale, tabs, active, minimal = false } = Astro.props;
+const meta = localeMeta(locale);
+const db = Astro.locals.db;
+const user = minimal ? null : Astro.locals.user;
+const modules = Astro.locals.modules;
+
+const theme = (Astro.locals.theme ?? THEME_DEFAULT) as Theme;
+let defaultMode: 'light' | 'dark' = THEME_DEFAULT_MODE[theme] ?? 'light';
+try {
+  defaultMode = (await getActiveTheme(db)).defaultMode;
+} catch {
+  /* keep the theme's intrinsic default mode */
+}
+const themeColor = (THEME_META.find((m) => m.name === theme) ?? THEME_META[0]).swatches.primary;
+
+let siteName = t(locale, 'site.name');
+let logoSrc = '';
+try {
+  const identity = await getSiteIdentity(db, locale);
+  if (identity.name) siteName = identity.name;
+  const logoKey = await getLogoImageKey(db);
+  logoSrc = logoKey ? (mediaPath(logoKey) ?? '') : '';
+} catch {
+  /* keep the built-in name and the default mark */
+}
+
+const tabIcon: Record<AppTab, string> = { home: 'home', events: 'calendar', groups: 'people', giving: 'serve' };
+const tabLabel: Record<AppTab, string> = {
+  home: t(locale, 'app.tab.home'),
+  events: t(locale, 'nav.events'),
+  groups: t(locale, 'nav.groups'),
+  giving: t(locale, 'nav.give'),
+};
+const home = localePath(locale, '/app');
+const accountPath = modules.has('serve') ? '/my' : modules.has('portal') ? '/my/opportunities' : '/profile';
+const signinHref = localePath(locale, `/signin?next=${encodeURIComponent(Astro.url.pathname)}`);
+const scope = appScope(locale);
+
+// Hamburger menu: the installation's enabled languages (Settings -> Languages;
+// the default is the site default, English unless an admin changed it), the
+// account, and the website. Language links keep the current app page and carry
+// ?setlang=<code>, which the middleware remembers in the language cookie.
+const { rest } = pathWithoutLocale(Astro.url.pathname);
+const languageLabel = (code: string): string => {
+  const key = `locale.${code}`;
+  const label = t(locale, key);
+  return label === key ? localeMeta(code).nativeName : label;
+};
+const languages = Astro.locals.locales.enabled.map((code) => ({
+  code,
+  label: languageLabel(code),
+  hreflang: localeMeta(code).hreflang,
+  href: `${localePath(code as Locale, rest)}?setlang=${encodeURIComponent(code)}`,
+}));
+---
+
+<!doctype html>
+<html lang={meta.bcp47} data-theme={theme} data-mode={defaultMode} data-mode-default={defaultMode}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>{`${title} · ${siteName}`}</title>
+    <meta name="robots" content="noindex" />
+    <meta name="theme-color" content={themeColor} />
+    <link rel="manifest" href={`${scope}manifest.webmanifest`} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href={APPLE_TOUCH_ICON} />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content={siteName} />
+    <script is:inline>
+      (function () {
+        var el = document.documentElement;
+        var saved = null;
+        try {
+          saved = localStorage.getItem('c4c-mode');
+        } catch (e) {
+          /* storage disabled: use the theme default */
+        }
+        el.dataset.mode = saved === 'light' || saved === 'dark' ? saved : el.dataset.modeDefault || 'light';
+      })();
+    </script>
+  </head>
+  <body class="app-body" data-app-sw={`${scope}sw.js`} data-app-scope={scope}>
+    <a href="#main" class="skip-link">{t(locale, 'common.skipToContent')}</a>
+    <header class="app-top">
+      <a href={home} class="app-brand">
+        {logoSrc ? <img src={logoSrc} alt="" class="app-logo" /> : <img src="/favicon.svg" alt="" class="app-logo" />}
+        <span>{siteName}</span>
+      </a>
+      <details class="app-menu" data-app-menu>
+        <summary aria-label={t(locale, 'common.menu')}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+        </summary>
+        <div class="app-menu-panel">
+          {!minimal && (
+            <ul>
+              {user ? (
+                <>
+                  <li><a href={localePath(locale, accountPath)}>{t(locale, 'app.myAccount')}</a></li>
+                  <li><form method="post" action="/signout"><button type="submit">{t(locale, 'common.signOut')}</button></form></li>
+                </>
+              ) : (
+                <li><a href={signinHref} data-app-signin>{t(locale, 'app.signIn')}</a></li>
+              )}
+            </ul>
+          )}
+          {languages.length > 1 && (
+            <div data-app-languages>
+              <p class="app-menu-heading">{t(locale, 'common.language')}</p>
+              <ul>
+                {languages.map((l) => (
+                  <li><a href={l.href} hreflang={l.hreflang} aria-current={l.code === locale ? 'true' : undefined}>{l.label}</a></li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <ul>
+            <li><a href={localePath(locale, '/visit')}>{t(locale, 'nav.visit')}</a></li>
+            <li><a href={localePath(locale, '/')}>{t(locale, 'app.fullSite')}</a></li>
+          </ul>
+        </div>
+      </details>
+    </header>
+
+    <div class="app-install" data-app-install hidden>
+      <p data-app-install-ios hidden>{t(locale, 'app.installIos')}</p>
+      <button type="button" class="app-install-btn" data-app-install-btn hidden>{t(locale, 'app.install')}</button>
+      <button type="button" class="app-install-close" data-app-install-close aria-label={t(locale, 'app.installDismiss')}>×</button>
+    </div>
+
+    <main id="main" class="app-main">
+      <slot />
+    </main>
+
+    {tabs.length > 1 && (
+      <nav class="app-tabs" aria-label={t(locale, 'common.menu')}>
+        {tabs.map((tab) => (
+          <a href={localePath(locale, APP_TAB_PATH[tab])} aria-current={tab === active ? 'page' : undefined} data-app-tab={tab}>
+            <Icon name={tabIcon[tab]} size={22} />
+            <span>{tabLabel[tab]}</span>
+          </a>
+        ))}
+      </nav>
+    )}
+
+    <script>
+      import { initMemberApp } from '../lib/memberApp-client';
+      initMemberApp();
+    </script>
+  </body>
+</html>
+
+<style>
+  .app-body { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; background: var(--color-surface); color: var(--color-ink); }
+  .app-top { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: calc(.6rem + env(safe-area-inset-top)) 1rem .6rem; background: var(--color-header-bg); color: var(--color-header-ink); border-bottom: 1px solid var(--color-border); }
+  .app-brand { display: flex; min-width: 0; align-items: center; gap: .5rem; font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; }
+  .app-brand span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .app-logo { height: 2rem; width: auto; flex-shrink: 0; }
+  .app-menu { position: relative; flex-shrink: 0; }
+  .app-menu summary { display: flex; min-width: 2.75rem; min-height: 2.75rem; align-items: center; justify-content: center; border-radius: var(--radius-md); cursor: pointer; list-style: none; }
+  .app-menu summary::-webkit-details-marker { display: none; }
+  .app-menu[open] summary { background: var(--color-primary-soft); color: var(--color-on-primary-soft); }
+  .app-menu-panel { position: absolute; inset-inline-end: 0; top: calc(100% + .35rem); z-index: 40; width: min(16rem, calc(100vw - 2rem)); padding: .35rem; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-raised); color: var(--color-ink); box-shadow: var(--shadow-md); }
+  .app-menu-panel ul + ul, .app-menu-panel ul + div, .app-menu-panel div + ul { margin-top: .35rem; padding-top: .35rem; border-top: 1px solid var(--color-border); }
+  .app-menu-panel a, .app-menu-panel button { display: flex; width: 100%; min-height: 2.75rem; align-items: center; padding: 0 .75rem; border-radius: var(--radius-md); font-size: .9375rem; text-align: start; }
+  .app-menu-panel a:hover, .app-menu-panel button:hover { background: var(--color-surface-sunken); }
+  .app-menu-panel a[aria-current] { font-weight: 650; color: var(--color-primary); }
+  .app-menu-heading { padding: .35rem .75rem 0; font-size: .75rem; font-weight: 650; color: var(--color-ink-subtle); }
+  .app-install { display: flex; align-items: center; gap: .75rem; margin: .75rem 1rem 0; padding: .75rem 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-primary-soft); color: var(--color-on-primary-soft); font-size: .875rem; }
+  .app-install[hidden], .app-install [hidden] { display: none; }
+  .app-install p { flex: 1; }
+  .app-install-btn { flex: 1; min-height: 2.75rem; border-radius: var(--radius-md); background: var(--color-primary); color: var(--color-on-primary); font-weight: 650; }
+  .app-install-close { min-width: 2.75rem; min-height: 2.75rem; font-size: 1.4rem; line-height: 1; }
+  .app-main { flex: 1; width: 100%; max-width: 40rem; margin: 0 auto; padding: 1rem 1rem calc(5.5rem + env(safe-area-inset-bottom)); }
+  .app-tabs { position: fixed; inset-inline: 0; bottom: 0; z-index: 30; display: flex; justify-content: space-around; padding: .35rem .5rem calc(.35rem + env(safe-area-inset-bottom)); background: var(--color-surface-raised); border-top: 1px solid var(--color-border); }
+  .app-tabs a { display: flex; flex: 1; max-width: 7rem; min-height: 3.25rem; flex-direction: column; align-items: center; justify-content: center; gap: .15rem; border-radius: var(--radius-md); font-size: .75rem; font-weight: 600; color: var(--color-ink-muted); }
+  .app-tabs a[aria-current='page'] { color: var(--color-primary); background: var(--color-primary-soft); }
+  /* Shared building blocks for the tab pages. */
+  :global(.app-h1) { font-family: var(--font-display); font-size: 1.6rem; font-weight: 700; line-height: 1.25; }
+  :global(.app-h2) { margin-top: 1.75rem; margin-bottom: .75rem; font-family: var(--font-display); font-size: 1.15rem; font-weight: 650; }
+  :global(.app-lead) { margin-top: .35rem; color: var(--color-ink-muted); }
+  :global(.app-card) { display: block; padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-raised); }
+  :global(.app-list) { display: flex; flex-direction: column; gap: .75rem; }
+  :global(.app-muted) { font-size: .875rem; color: var(--color-ink-muted); }
+  :global(.app-empty) { padding: 1.5rem 1rem; border: 1px dashed var(--color-border); border-radius: var(--radius-lg); text-align: center; color: var(--color-ink-muted); }
+  :global(.app-button) { display: flex; min-height: 3rem; width: 100%; align-items: center; justify-content: center; gap: .5rem; border-radius: var(--radius-md); background: var(--color-primary); color: var(--color-on-primary); font-weight: 650; }
+  :global(.app-button-secondary) { display: flex; min-height: 3rem; width: 100%; align-items: center; justify-content: center; border: 1px solid var(--color-border); border-radius: var(--radius-md); font-weight: 600; color: var(--color-primary); }
+  :global(.app-link) { display: inline-flex; min-height: 2.75rem; align-items: center; gap: .35rem; font-weight: 600; color: var(--color-primary); }
+</style>

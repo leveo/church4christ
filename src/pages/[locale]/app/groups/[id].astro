@@ -1,0 +1,143 @@
+---
+// Member app: one group. Follows the website's group page rules exactly: a
+// missing group and a private group the viewer cannot see render the same 404
+// (anti-enumeration); the roster is shown only to members and site admins; a
+// signed-in non-member can ask to join (groupDb.createJoinRequest, idempotent).
+// Managing the group, files and special events stay on the website page, which
+// members reach with "More on the website".
+import MemberApp from '../../../../layouts/MemberApp.astro';
+import { localePath, parseLocale } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import { formatDate, utcToDatetimeLocal } from '../../../../lib/dates';
+import {
+  createJoinRequest,
+  getGroup,
+  listGroupsForPerson,
+  listMembers,
+  listPendingJoinGroupIdsForPerson,
+  type GroupMemberRow,
+  type PersonGroupRow,
+} from '../../../../lib/groupDb';
+import { listUpcomingOccurrencesForGroup, type UpcomingOccurrence } from '../../../../lib/groupEventDb';
+import { hasAreaAccess } from '../../../../lib/adminAreas';
+import { resolveAppTabs } from '../../../../lib/memberApp';
+import { badge, badgeRole } from '../../../../lib/adminUi';
+
+// Same display zone as the website group page.
+const GROUP_TZ = 'America/Chicago';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const db = Astro.locals.db;
+const user = Astro.locals.user;
+const tabs = await resolveAppTabs(db, Astro.locals.modules, 'groups');
+const idParam = Astro.params.id ?? '';
+const groupId = /^\d+$/.test(idParam) ? Number(idParam) : null;
+const group = tabs && groupId !== null ? await getGroup(db, groupId) : null;
+if (!tabs || !group) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const isSiteAdmin = hasAreaAccess(user, 'groups');
+let membership: PersonGroupRow | null = null;
+if (user) membership = (await listGroupsForPerson(db, user.id)).find((g) => g.id === group.id) ?? null;
+const isMember = membership !== null;
+if (group.is_public !== 1 && !isMember && !isSiteAdmin) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const here = localePath(locale, `/app/groups/${group.id}`);
+if (Astro.request.method === 'POST' && user && !isMember) {
+  const form = await Astro.request.formData();
+  if (String(form.get('action') ?? '') === 'join') {
+    await createJoinRequest(db, group.id, user.id);
+    return Astro.redirect(here, 303);
+  }
+}
+
+let pending = false;
+if (user && !isMember) pending = (await listPendingJoinGroupIdsForPerson(db, user.id)).includes(group.id);
+
+let members: GroupMemberRow[] = [];
+let occurrences: UpcomingOccurrence[] = [];
+try {
+  [members, occurrences] = await Promise.all([listMembers(db, group.id), listUpcomingOccurrencesForGroup(db, group.id)]);
+} catch (err) {
+  console.error('member app group: load failed', err);
+}
+const adminNames = members.filter((m) => m.is_admin === 1).map((m) => m.display_name);
+const canSeeRoster = isMember || isSiteAdmin;
+const occurrenceWhen = (o: UpcomingOccurrence) => {
+  const time = utcToDatetimeLocal(o.starts_at, GROUP_TZ).slice(11, 16);
+  return `${formatDate(o.occurs_on, locale)} · ${time}`;
+};
+const signinHref = localePath(locale, `/signin?next=${encodeURIComponent(here)}`);
+---
+
+<MemberApp title={group.name} locale={locale} tabs={tabs} active="groups">
+  <a href={localePath(locale, '/app/groups')} class="app-link text-sm">{t(locale, 'groups.back')}</a>
+  <h1 class="app-h1 mt-1">{group.name}</h1>
+  {group.term_label && <p class="app-muted">{group.term_label}</p>}
+  {group.description && <p class="app-lead whitespace-pre-line">{group.description}</p>}
+  <p class="app-muted mt-3">
+    {t(locale, 'groups.memberCount', { n: members.length })}
+    {adminNames.length > 0 && <> · {t(locale, 'groups.detail.adminsLabel')}: {adminNames.join(', ')}</>}
+  </p>
+
+  <section class="app-card mt-5" data-app-group-join>
+    {!user ? (
+      <p>{t(locale, 'groups.join.signInPrompt')} <a href={signinHref} class="app-link">{t(locale, 'app.signIn')}</a></p>
+    ) : isMember ? (
+      <p class="font-semibold text-success">{t(locale, 'groups.detail.youAreMember')}</p>
+    ) : pending ? (
+      <p class="font-semibold text-ink-muted">{t(locale, 'groups.join.pending')}</p>
+    ) : (
+      <form method="post">
+        <input type="hidden" name="action" value="join" />
+        <p class="app-muted">{t(locale, 'groups.join.intro')}</p>
+        <button type="submit" class="app-button mt-3">{t(locale, 'groups.join.submit')}</button>
+      </form>
+    )}
+  </section>
+
+  <section>
+    <h2 class="app-h2">{t(locale, 'groups.detail.upcomingTitle')}</h2>
+    {occurrences.length === 0 ? (
+      <p class="app-empty">{t(locale, 'groups.detail.noUpcoming')}</p>
+    ) : (
+      <ul class="app-list">
+        {occurrences.map((o) => (
+          <li class="app-card">
+            <p class="font-semibold">{o.title}</p>
+            <p class="app-muted">{occurrenceWhen(o)}</p>
+            {o.location && <p class="app-muted">{o.location}</p>}
+          </li>
+        ))}
+      </ul>
+    )}
+  </section>
+
+  {canSeeRoster && members.length > 0 && (
+    <section data-app-group-roster>
+      <h2 class="app-h2">{t(locale, 'groups.detail.rosterTitle')}</h2>
+      <ul class="app-card divide-y divide-border">
+        {members.map((m) => (
+          <li class="flex items-center justify-between gap-3 py-2">
+            <span>{m.display_name}</span>
+            {m.is_admin === 1 && <span class={`${badge} ${badgeRole.admin}`}>{t(locale, 'groups.admin')}</span>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+
+  {canSeeRoster && (
+    <a href={localePath(locale, `/groups/${group.id}`)} class="app-button-secondary mt-6">{t(locale, 'app.groups.moreOnSite')}</a>
+  )}
+</MemberApp>

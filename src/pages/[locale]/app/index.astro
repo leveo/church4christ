@@ -1,0 +1,125 @@
+---
+// Member app: Home tab ("Website"). The church at a glance on a phone: name and
+// tagline, service times, where to find us (map, phone, email), current news, and
+// the latest sermon. Same reads as the website home page (settings + publicDb),
+// each section gated on its website module, all failing soft to empty. When the
+// admin turned the Home tab off, /app opens the first visible tab instead.
+import MemberApp from '../../../layouts/MemberApp.astro';
+import Icon from '../../../components/ui/Icon.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { formatDate, todayInTz } from '../../../lib/dates';
+import { getSiteIdentity } from '../../../lib/settings';
+import {
+  latestPublishedSermon,
+  listActiveAnnouncements,
+  type AnnouncementRow,
+  type LatestSermonRow,
+} from '../../../lib/publicDb';
+import { APP_TAB_PATH, resolveAppTabs } from '../../../lib/memberApp';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const db = Astro.locals.db;
+const modules = Astro.locals.modules;
+const tabs = await resolveAppTabs(db, modules, null);
+if (!tabs) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+if (!tabs.includes('home')) return Astro.redirect(localePath(locale, APP_TAB_PATH[tabs[0]]), 302);
+
+let identity = { name: '', tagline: '', address: '', email: '', phone: '', serviceTimes: '', givingUrl: '', youtubeUrl: '', mapUrl: '' };
+let news: AnnouncementRow[] = [];
+let sermon: LatestSermonRow | null = null;
+try {
+  const today = todayInTz();
+  const [id, a, s] = await Promise.all([
+    getSiteIdentity(db, locale),
+    modules.has('events') ? listActiveAnnouncements(db, locale, today) : Promise.resolve([]),
+    modules.has('sermons') ? latestPublishedSermon(db, locale) : Promise.resolve(null),
+  ]);
+  identity = id;
+  news = a;
+  sermon = s;
+} catch (err) {
+  console.error('member app home: data load failed', err);
+}
+const name = identity.name || t(locale, 'site.name');
+const tagline = identity.tagline || t(locale, 'site.tagline');
+const hasContact = Boolean(identity.address || identity.phone || identity.email);
+const youtubeHref = sermon?.youtube_id ? `https://www.youtube.com/watch?v=${encodeURIComponent(sermon.youtube_id)}` : '';
+---
+
+<MemberApp title={t(locale, 'app.tab.home')} locale={locale} tabs={tabs} active="home">
+  <section data-app-home>
+    <h1 class="app-h1">{name}</h1>
+    <p class="app-lead">{tagline}</p>
+  </section>
+
+  {identity.serviceTimes && (
+    <section>
+      <h2 class="app-h2">{t(locale, 'home.serviceTimesLabel')}</h2>
+      <div class="app-card whitespace-pre-line">{identity.serviceTimes}</div>
+    </section>
+  )}
+
+  {hasContact && (
+    <section>
+      <h2 class="app-h2">{t(locale, 'app.home.contact')}</h2>
+      <div class="app-card app-contact">
+        {identity.address && (
+          <p><Icon name="pin" size={18} /> <span>{identity.address}</span></p>
+        )}
+        {identity.address && identity.mapUrl && (
+          <a href={identity.mapUrl} class="app-link" rel="noopener">{t(locale, 'app.home.map')} →</a>
+        )}
+        {identity.phone && (
+          <a href={`tel:${identity.phone.replace(/[^\d+]/g, '')}`} class="app-link">{t(locale, 'home.phoneLabel')}: {identity.phone}</a>
+        )}
+        {identity.email && <a href={`mailto:${identity.email}`} class="app-link">{identity.email}</a>}
+      </div>
+    </section>
+  )}
+
+  {news.length > 0 && (
+    <section>
+      <h2 class="app-h2">{t(locale, 'home.announcements')}</h2>
+      <ul class="app-list">
+        {news.map((item) => (
+          <li class="app-card">
+            {item.url ? <a href={item.url} rel="noopener" class="font-semibold">{item.title} →</a> : <span class="font-semibold">{item.title}</span>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+
+  {sermon && (
+    <section>
+      <h2 class="app-h2">{t(locale, 'home.latestSermon')}</h2>
+      <div class="app-card">
+        <p class="font-semibold">{sermon.title}</p>
+        <p class="app-muted">{[formatDate(sermon.sermon_date, locale), sermon.speaker, sermon.scripture].filter(Boolean).join(' · ')}</p>
+        <div class="mt-2 flex flex-wrap gap-x-4">
+          {youtubeHref && <a href={youtubeHref} class="app-link" rel="noopener"><Icon name="play" size={18} /> {t(locale, 'app.home.watch')}</a>}
+          <a href={localePath(locale, '/sermons')} class="app-link">{t(locale, 'nav.sermons')} →</a>
+        </div>
+      </div>
+    </section>
+  )}
+
+  <section class="mt-8 space-y-3">
+    <a href={localePath(locale, '/visit')} class="app-button-secondary">{t(locale, 'nav.visit')}</a>
+    <a href={localePath(locale, '/')} class="app-button-secondary">{t(locale, 'app.fullSite')}</a>
+  </section>
+</MemberApp>
+
+<style>
+  .app-contact { display: flex; flex-direction: column; gap: .25rem; }
+  .app-contact p { display: flex; align-items: flex-start; gap: .5rem; }
+</style>

@@ -1,0 +1,62 @@
+---
+// Member app: Giving tab (only when the website's Giving module is on, which is
+// Supabase-only). Lists the active funds and hands the gift itself to the
+// website's /give checkout, preselecting a fund with ?fund=<id>: the payment
+// flow (Stripe Checkout, sign-in for recurring gifts, receipts) stays in one
+// place. Signed-in members also get "My giving".
+import MemberApp from '../../../layouts/MemberApp.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { listFunds } from '../../../lib/fundDb';
+import { resolveAppTabs } from '../../../lib/memberApp';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const db = Astro.locals.db;
+const tabs = await resolveAppTabs(db, Astro.locals.modules, 'giving');
+if (!tabs) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+let funds: Awaited<ReturnType<typeof listFunds>> = [];
+try {
+  funds = await listFunds(db, locale, { activeOnly: true });
+} catch (err) {
+  console.error('member app giving: load failed', err);
+}
+const user = Astro.locals.user;
+---
+
+<MemberApp title={t(locale, 'give.title')} locale={locale} tabs={tabs} active="giving">
+  <h1 class="app-h1">{t(locale, 'give.title')}</h1>
+  <p class="app-lead">{t(locale, 'give.intro')}</p>
+
+  <a href={localePath(locale, '/give')} class="app-button mt-6" data-app-give>{t(locale, 'app.give.now')}</a>
+  <p class="app-muted mt-2">{t(locale, 'app.give.secure')}</p>
+
+  {funds.length > 0 && (
+    <section>
+      <h2 class="app-h2">{t(locale, 'app.give.funds')}</h2>
+      <ul class="app-list">
+        {funds.map((f) => (
+          <li>
+            <a href={localePath(locale, `/give?fund=${f.id}`)} class="app-card">
+              <span class="font-semibold block">{f.name}</span>
+              {f.description && <span class="app-muted block mt-1">{f.description}</span>}
+              <span class="mt-1 block text-sm font-semibold text-primary">{t(locale, 'app.give.toFund')} →</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+
+  {user && (
+    <a href={localePath(locale, '/my/giving')} class="app-button-secondary mt-6">{t(locale, 'app.give.mine')}</a>
+  )}
+</MemberApp>

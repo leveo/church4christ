@@ -36,6 +36,16 @@ Upgrading: see [Upgrading 1.7.0 to the next release](docs/upgrade.md#upgrading-1
   then show real giving matched per household by email (given, due by today, pledged; fulfilled, on
   track, behind, or no email to match), with the same columns in the CSV. Gift amounts are shown only
   to people who can open Giving. Without Giving, both modules work on their own.
+- **Member app (PWA).** A phone-first app for members at `/app` (and `/<locale>/app`), opened
+  from a phone browser and installable on the home screen, served by the same Worker, database,
+  sign-in and languages as the website. Bottom tabs **Main** (church info, service times,
+  contact, news, latest sermon), **Events**, **Groups** (my groups, directory, join requests) and
+  **Giving** (funds; the gift itself uses the website's `/give` checkout). A hamburger menu holds
+  the account, the enabled languages and a link to the full website. Super admins choose the tabs
+  under **Settings → Member app**; all four are on by default and a tab hides while its module is
+  off (so Giving never shows on D1). Offline, recently opened public app pages still load;
+  personal pages are never cached on the device. See
+  [docs/features/member-app.md](docs/features/member-app.md).
 - **Public dates for modules.** Pledges and Missions have optional **Public from** and **Public
   until** dates in **Settings → Modules**. Outside them the public pages and menu link are hidden
   while the admin pages stay available. Any capability can opt in with `"schedulable": true` in
@@ -48,6 +58,9 @@ Upgrading: see [Upgrading 1.7.0 to the next release](docs/upgrade.md#upgrading-1
   until a super admin turns them on, and no preset includes them. Setup doctor expects the new
   tables. Two new admin areas (`pledges`, `missions`) can be granted per person. No new secret,
   binding, cron trigger or dependency. Confirmation emails use the existing email binding.
+- Member app: no migration, secret, binding or dependency. It is on by default after the
+  upgrade at `/app`; turn it or single tabs off in **Settings → Member app** (stored as
+  `app.enabled` and `app.tab.<tab>` settings). New public files `public/app-icons/*.png`.
 
 ## [1.7.0] - 2026-11-20
 

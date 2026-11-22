@@ -1,0 +1,92 @@
+---
+// Member app: Events tab. The same in-window events as the website's /events
+// (publicDb.listActiveEvents), as a single phone column, plus, when the
+// Registration module is on, the events that are open for sign-up (regDb), each
+// linking to its website registration page. Reads fail soft to empty.
+import MemberApp from '../../../layouts/MemberApp.astro';
+import { localePath, parseLocale } from '../../../lib/locales';
+import { t } from '../../../lib/i18n';
+import { formatDate, todayInTz, utcToDatetimeLocal } from '../../../lib/dates';
+import { listActiveEvents, type EventCardRow } from '../../../lib/publicDb';
+import { listPublicEvents, type RegPublicEvent } from '../../../lib/regDb';
+import { resolveAppTabs } from '../../../lib/memberApp';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const db = Astro.locals.db;
+const modules = Astro.locals.modules;
+const tabs = await resolveAppTabs(db, modules, 'events');
+if (!tabs) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+let events: EventCardRow[] = [];
+try {
+  events = await listActiveEvents(db, locale, todayInTz());
+} catch (err) {
+  console.error('member app events: load failed', err);
+}
+
+let signups: RegPublicEvent[] = [];
+if (modules.has('registration')) {
+  try {
+    signups = (await listPublicEvents(db, locale)).filter((e) => e.phase === 'open');
+  } catch (err) {
+    console.error('member app events: registration load failed', err);
+  }
+}
+// Registration times are stored in UTC; people read them in the church's time zone.
+const when = (utc: string) => {
+  const [date, time] = utcToDatetimeLocal(utc).split('T');
+  return `${formatDate(date, locale)} ${time}`;
+};
+---
+
+<MemberApp title={t(locale, 'events.title')} locale={locale} tabs={tabs} active="events">
+  <h1 class="app-h1">{t(locale, 'events.title')}</h1>
+  <p class="app-lead">{t(locale, 'events.intro')}</p>
+
+  {signups.length > 0 && (
+    <section data-app-signups>
+      <h2 class="app-h2">{t(locale, 'app.events.signups')}</h2>
+      <ul class="app-list">
+        {signups.map((e) => (
+          <li>
+            <a href={localePath(locale, `/register/${e.id}`)} class="app-card">
+              <p class="font-semibold">{e.title}</p>
+              <p class="app-muted">{[when(e.starts_at), e.location].filter(Boolean).join(' · ')}</p>
+              <p class="mt-1 text-sm font-semibold text-primary">{t(locale, 'app.events.signUp')} →</p>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+
+  <section data-app-events>
+    {signups.length > 0 && <h2 class="app-h2">{t(locale, 'app.events.happening')}</h2>}
+    {events.length === 0 ? (
+      <p class="app-empty mt-6">{t(locale, 'events.empty')}</p>
+    ) : (
+      <ul class="app-list mt-6">
+        {events.map((e) => (
+          <li class="app-card app-event">
+            {e.imageKey && <img src={`/media/${e.imageKey}`} alt="" loading="lazy" width="800" height="500" />}
+            <p class="font-semibold">{e.title}</p>
+            {e.blurb && <p class="app-muted mt-1">{e.blurb}</p>}
+            {e.url && <a href={e.url} class="app-link" rel="noopener">{t(locale, 'home.eventLink')} →</a>}
+          </li>
+        ))}
+      </ul>
+    )}
+  </section>
+</MemberApp>
+
+<style>
+  .app-event img { width: calc(100% + 2rem); max-width: none; margin: -1rem -1rem .75rem; aspect-ratio: 1.6; object-fit: cover; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+</style>

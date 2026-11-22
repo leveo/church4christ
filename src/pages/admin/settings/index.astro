@@ -34,11 +34,21 @@ import {
   type ModuleWindow,
 } from '../../../lib/modules';
 import { todayInTz } from '../../../lib/dates';
+import {
+  APP_ENABLED_KEY,
+  APP_TABS,
+  APP_TAB_MODULE,
+  appTabKey,
+  getAppSettings,
+  parseAppSettingsForm,
+  tabModuleAvailable,
+  type AppSettings,
+} from '../../../lib/memberApp';
 import { THEME_META } from '../../../lib/themeMeta.generated';
 import { saveImageUpload, uploadErrorKey, type MediaBucket } from '../../../lib/mediaUpload';
 import { mediaPath } from '../../../lib/mediaRef';
 import { tin, lab, card, errorText, btn, noticeOk, noticeErr } from '../../../lib/adminUi';
-import { SUPPORTED_LOCALES, isSupportedLocale, localeMeta, type Locale } from '../../../lib/locales';
+import { SUPPORTED_LOCALES, isSupportedLocale, localeMeta, localePath, type Locale } from '../../../lib/locales';
 import { LOCALE_DEFAULT_KEY, LOCALE_ENABLED_KEY, getLocaleSettings, saveLocaleSettings } from '../../../lib/localeSettings';
 
 export const prerender = false;
@@ -64,6 +74,14 @@ if (Astro.request.method === 'POST') {
     fd = await Astro.request.formData();
   } catch {
     return Astro.redirect('/admin/settings?err=1', 303);
+  }
+  // Member app panel: its own form and its own keys (app.enabled, app.tab.<tab>),
+  // written in full like the Modules panel so an unchecked box really turns off.
+  if (fd.get('action') === 'app') {
+    const app = parseAppSettingsForm(fd);
+    if (!app.ok) return Astro.redirect('/admin/settings?appErr=noTabs#settings-app', 303);
+    await setSettings(db, app.data);
+    return Astro.redirect('/admin/settings?saved=1#settings-app', 303);
   }
   const isModules = fd.get('action') === 'modules';
   const parsed = parseSettingsForm(fd);
@@ -211,6 +229,16 @@ const schedulable = new Set<string>(SCHEDULABLE_MODULE_KEYS);
 const windowErr = Astro.url.searchParams.get('windowErr') ?? '';
 const windowErrKey = windowErr.replace(/-(date|order)$/, '');
 const windowErrCode = windowErr.endsWith('-order') ? 'admin.settings.moduleWindowOrder' : 'admin.settings.moduleWindowDate';
+
+// Member app panel: stored choices (absent = on) next to the website modules each tab needs.
+let appSettings: AppSettings = { enabled: true, tabs: { home: true, events: true, groups: true, giving: true } };
+try {
+  appSettings = await getAppSettings(db);
+} catch {
+  /* keep the defaults */
+}
+const appErr = Astro.url.searchParams.get('appErr') === 'noTabs';
+const appTabLabel = (tab: string): string => (tab === 'home' ? t(lang, 'app.tab.home') : t(lang, `modules.${APP_TAB_MODULE[tab as keyof typeof APP_TAB_MODULE]}.label`));
 ---
 
 <Admin title={t(lang, 'admin.settings.title')}>
@@ -220,7 +248,7 @@ const windowErrCode = windowErr.endsWith('-order') ? 'admin.settings.moduleWindo
   {hasErrors && <p class={`mt-4 max-w-2xl ${errorText}`}>{t(lang, 'admin.form.fixErrors')}</p>}
 
   <div class="settings-workspace">
-  <nav class="settings-sections" aria-label={t(lang, 'admin.settings.title')}>{['identity','contact','links','appearance','languages','modules'].map(key => <a href={`#settings-${key}`}>{t(lang, `admin.settings.${key}Title`)}</a>)}</nav>
+  <nav class="settings-sections" aria-label={t(lang, 'admin.settings.title')}>{['identity','contact','links','appearance','languages','modules','app'].map(key => <a href={`#settings-${key}`}>{t(lang, `admin.settings.${key}Title`)}</a>)}</nav>
   <div><form method="post" enctype="multipart/form-data" class="space-y-6">
 
     <section id="settings-identity" class={`${card} space-y-4`}>
@@ -443,6 +471,41 @@ const windowErrCode = windowErr.endsWith('-order') ? 'admin.settings.moduleWindo
       }
       <div class="flex items-center gap-4">
         <button type="submit" class={btn}>{t(lang, 'admin.settings.saveModules')}</button>
+      </div>
+    </section>
+  </form>
+
+  <form method="post" class="mt-8">
+    <input type="hidden" name="action" value="app" />
+    <section id="settings-app" class={`${card} space-y-4`}>
+      <div>
+        <h2 class={h2}>{t(lang, 'admin.settings.appTitle')}</h2>
+        <p class="mt-1 text-sm text-ink-muted">{t(lang, 'admin.settings.appIntro')}</p>
+        <a href={localePath(lang, '/app')} class="mt-2 inline-block text-sm font-semibold text-primary hover:underline">{t(lang, 'admin.settings.appOpen')} →</a>
+      </div>
+      <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
+        <input type="checkbox" name={APP_ENABLED_KEY} value="1" checked={appSettings.enabled} class="mt-1 h-4 w-4 shrink-0" />
+        <span class="text-sm font-semibold text-ink">{t(lang, 'admin.settings.appEnabled')}</span>
+      </label>
+      <fieldset class="space-y-3">
+        <legend class={lab}>{t(lang, 'admin.settings.appTabs')}</legend>
+        {APP_TABS.map((tab) => {
+          const available = tabModuleAvailable(tab, enabledModules);
+          return (
+            <label class={`flex items-start gap-3 rounded-lg border border-border p-3 ${available ? 'cursor-pointer' : 'opacity-60'}`}>
+              <input type="checkbox" name={appTabKey(tab)} value="1" checked={appSettings.tabs[tab]} class="mt-1 h-4 w-4 shrink-0" data-app-tab-toggle={tab} />
+              <span>
+                <span class="block text-sm font-semibold text-ink">{appTabLabel(tab)}</span>
+                <span class="block text-sm text-ink-muted">{t(lang, `admin.settings.appTabDesc.${tab}`)}</span>
+                {!available && <span class="block text-sm text-ink-muted">{t(lang, 'admin.settings.appTabNeedsModule')}</span>}
+              </span>
+            </label>
+          );
+        })}
+        {appErr && <p class={errorText}>{t(lang, 'admin.settings.appNoTabs')}</p>}
+      </fieldset>
+      <div class="flex items-center gap-4">
+        <button type="submit" class={btn}>{t(lang, 'admin.settings.saveApp')}</button>
       </div>
     </section>
   </form>

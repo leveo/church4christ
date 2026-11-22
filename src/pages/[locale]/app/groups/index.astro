@@ -1,0 +1,92 @@
+---
+// Member app: Groups tab. Signed in: "My groups" first (private memberships
+// included, as on the website), then the public directory. Signed out: the public
+// directory and a sign-in prompt. Same reads as the website's /groups (groupDb);
+// a group opens its app detail page.
+import MemberApp from '../../../../layouts/MemberApp.astro';
+import { localePath, parseLocale } from '../../../../lib/locales';
+import { t } from '../../../../lib/i18n';
+import { listGroupsForPerson, listPublicGroups, type GroupSummary, type PersonGroupRow } from '../../../../lib/groupDb';
+import { resolveAppTabs } from '../../../../lib/memberApp';
+import { badge, badgeRole } from '../../../../lib/adminUi';
+
+const locale = parseLocale(Astro.params.locale ?? '');
+if (!locale) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+const db = Astro.locals.db;
+const user = Astro.locals.user;
+const tabs = await resolveAppTabs(db, Astro.locals.modules, 'groups');
+if (!tabs) {
+  Astro.response.status = 404;
+  return Astro.rewrite('/404');
+}
+
+let publicGroups: GroupSummary[] = [];
+let myGroups: PersonGroupRow[] = [];
+try {
+  publicGroups = await listPublicGroups(db);
+  if (user) myGroups = await listGroupsForPerson(db, user.id);
+} catch (err) {
+  console.error('member app groups: load failed', err);
+}
+const directory = publicGroups;
+const excerpt = (text: string, max = 110): string => {
+  const trimmed = text.trim();
+  return trimmed.length > max ? `${trimmed.slice(0, max).trimEnd()}…` : trimmed;
+};
+const signinHref = localePath(locale, `/signin?next=${encodeURIComponent(localePath(locale, '/app/groups'))}`);
+---
+
+<MemberApp title={t(locale, 'groups.title')} locale={locale} tabs={tabs} active="groups">
+  <h1 class="app-h1">{t(locale, 'groups.title')}</h1>
+  <p class="app-lead">{t(locale, 'groups.intro')}</p>
+
+  {user ? (
+    <section data-app-my-groups>
+      <h2 class="app-h2">{t(locale, 'groups.myGroups')}</h2>
+      {myGroups.length === 0 ? (
+        <p class="app-empty">{t(locale, 'groups.myGroupsEmpty')}</p>
+      ) : (
+        <ul class="app-list">
+          {myGroups.map((g) => (
+            <li>
+              <a href={localePath(locale, `/app/groups/${g.id}`)} class="app-card">
+                <span class="flex items-start justify-between gap-3">
+                  <span class="font-semibold">{g.name}</span>
+                  {g.is_admin === 1 && <span class={`${badge} ${badgeRole.admin}`}>{t(locale, 'groups.admin')}</span>}
+                </span>
+                <span class="app-muted block">{t(locale, 'groups.memberCount', { n: g.member_count })}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  ) : (
+    <p class="app-card mt-6">
+      {t(locale, 'app.groups.signInPrompt')} <a href={signinHref} class="app-link">{t(locale, 'app.signIn')}</a>
+    </p>
+  )}
+
+  <section data-app-group-directory>
+    <h2 class="app-h2">{t(locale, 'groups.directory')}</h2>
+    {directory.length === 0 ? (
+      <p class="app-empty">{t(locale, 'groups.empty')}</p>
+    ) : (
+      <ul class="app-list">
+        {directory.map((g) => (
+          <li>
+            <a href={localePath(locale, `/app/groups/${g.id}`)} class="app-card">
+              <span class="font-semibold block">{g.name}</span>
+              {g.description && <span class="app-muted block mt-1">{excerpt(g.description)}</span>}
+              <span class="app-muted block mt-1">{t(locale, 'groups.memberCount', { n: g.member_count })}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    )}
+  </section>
+</MemberApp>
