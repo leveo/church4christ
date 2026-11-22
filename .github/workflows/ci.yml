@@ -18,9 +18,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # A full run takes 21-29 minutes on a hosted runner (D1 + Supabase setup
+  # proofs, the node/workers suites, D1 e2e, then the Postgres layer), so a
+  # 30-minute budget cancelled slow runs on main mid-way through the Postgres
+  # tests. Individual steps keep their own tighter limits.
   build-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
     # Postgres for the Supabase-backend test layer (the pg vitest project + the

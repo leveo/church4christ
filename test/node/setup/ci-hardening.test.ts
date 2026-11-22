@@ -19,7 +19,7 @@ function rejectionEvent(reason: unknown): Event & { reason: unknown } {
 }
 
 const EXPECTED_CI_WORKFLOW_SHA256 =
-  '391ee0f59abc648878f79f4767e5fc9375863e1eb2bea19583ce69b3a790ef1e';
+  'a91170e575ce8ef0c2d90980c3840c1c8fc079c3f4cbf89b579729d8f32b3815';
 
 function normalizeWorkflowSource(source: string): string {
   return source.replaceAll('\r\n', '\n');
@@ -259,9 +259,9 @@ describe('test runner hardening', () => {
     expect(cancelEvent).toBe('pull_request');
   });
 
-  it('limits the build-test job to thirty minutes', () => {
+  it('limits the build-test job to forty-five minutes', () => {
     expect(workflow).toContain(
-      'build-test:\n    runs-on: ubuntu-latest\n    timeout-minutes: 30',
+      'build-test:\n    runs-on: ubuntu-latest\n    timeout-minutes: 45',
     );
   });
 
@@ -297,7 +297,7 @@ describe('test runner hardening', () => {
       'job timeout multiline contract',
       (fixture: string) =>
         expect(fixture).toContain(
-          'build-test:\n    runs-on: ubuntu-latest\n    timeout-minutes: 30',
+          'build-test:\n    runs-on: ubuntu-latest\n    timeout-minutes: 45',
         ),
     ],
     [
@@ -440,7 +440,7 @@ describe('test runner hardening', () => {
     ],
     [
       'job timeout change',
-      (workflow: string) => workflow.replace('    timeout-minutes: 30', '    timeout-minutes: 31'),
+      (workflow: string) => workflow.replace('    timeout-minutes: 45', '    timeout-minutes: 46'),
     ],
     [
       'checkout major change',
