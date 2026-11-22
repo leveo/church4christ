@@ -64,6 +64,50 @@ Apple touch icon), made from the Church4Christ logo. To use your church's mark, 
 those four PNG files with the same names and sizes; the maskable one needs its artwork in
 the middle 80%. The top bar shows the logo uploaded in **Settings → Appearance**.
 
+## Try it on a phone: a demo installation
+
+To check the app on a real phone without touching a church's live site, make a separate
+installation with demo content on its own subdomain (here `app.church4christ.org`). It
+gets its own Worker, D1 database and R2 bucket, all named after `--site-slug`, so it never
+shares data with the main installation. Use a **separate clone**: the installer writes
+`wrangler.jsonc`, `church.config.json` and `.church/` in the checkout it runs in.
+
+```sh
+git clone https://github.com/leveo/church4christ.git church4christ-app-demo
+cd church4christ-app-demo
+npm ci
+npx wrangler login     # the Cloudflare account that has church4christ.org
+npx wrangler whoami
+
+ADMIN_EMAIL="you@example.org"   # an inbox you can read; it becomes the demo's admin
+SETUP=(--mode deploy --preset website-community --demo-data --backend d1
+  --site-slug church4christ-app-demo --church-name "Church4Christ Demo"
+  --locales en,zh --default-locale en
+  --admin-email "$ADMIN_EMAIL" --admin-name "Demo Admin"
+  --app-origin https://app.church4christ.org --email-from demo@church4christ.org --yes)
+node scripts/setup/index.mjs "${SETUP[@]}" --dry-run   # read the plan first
+node scripts/setup/index.mjs "${SETUP[@]}"             # creates D1 + R2, migrates, seeds, makes the admin
+npm run deploy -- --domain app.church4christ.org        # deploys and attaches the custom domain
+node scripts/setup/index.mjs --doctor
+
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' https://app.church4christ.org/app   # 302 .../en/app
+curl -s https://app.church4christ.org/en/app | grep -o 'data-app-tab="[a-z]*"'
+curl -s https://app.church4christ.org/en/app/manifest.webmanifest | head -c 200
+```
+
+Then open `https://app.church4christ.org/app` on the phone and add it to the home screen.
+Everything public (Main, Events, the group directory, offline, install) works signed out.
+
+- **Signing in:** there is no shared demo password. Sign-in is the usual emailed link, so
+  onboard `church4christ.org` for Cloudflare Email Sending and verify `ADMIN_EMAIL` as a
+  destination address (see [deploy: set up email](../deploy.md#5-set-up-email)), then
+  sign in at `/en/signin` with that address. The demo content's people use `example.com`
+  addresses that cannot receive mail; do not add a sign-in bypass to a deployed Worker.
+- **Giving:** the demo above runs on D1, so the app shows three tabs. The Giving tab needs
+  the Supabase backend ([Supabase setup](../supabase-setup.md)) with Stripe test keys.
+- **Removing it:** delete the `church4christ-app-demo` Worker, its D1 database and its R2
+  bucket in the dashboard.
+
 ## Known limits
 
 - Sign-in uses the same emailed link as the website. On iPhone, an app added to the home
